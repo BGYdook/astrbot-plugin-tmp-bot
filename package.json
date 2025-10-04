@@ -1,0 +1,41 @@
+{
+  "name": "astrbot-plugin-tmp-bot",
+  "description": "欧洲卡车模拟2 TMP查询插件",
+  "version": "1.0.0",
+  "main": "lib/index.js",
+  "typings": "lib/index.d.ts",
+  "homepage": "https://github.com/79887143/koishi-plugin-tmp-bot",
+  "files": [
+    "lib",
+    "dist"
+  ],
+  "license": "MIT",
+  "scripts": {
+    "build": "tsc",
+    "start": "node lib/index.js"
+  },
+  "keywords": [
+    "chatbot",
+    "plugin",
+    "truckersmp",
+    "gametool",
+    "ets2",
+    "tmp",
+    "astrbot",
+    "astrbot-plugin"
+  ],
+  "dependencies": {
+    "dayjs": "^1.11.13",
+    "js-md5": "^0.8.3"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "@types/node": "^18.0.0"
+  },
+  "astrbot": {
+    "service": {
+      "required": [],
+      "optional": []
+    }
+  }
+}
