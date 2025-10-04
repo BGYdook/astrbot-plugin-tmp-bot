@@ -1,10 +1,15 @@
 {
   "name": "astrbot-plugin-tmp-bot",
-  "description": "欧洲卡车模拟2 TMP查询插件",
+  "description": "欧卡2TMP查询插件",
   "version": "1.0.0",
   "main": "lib/index.js",
   "typings": "lib/index.d.ts",
-  "homepage": "https://github.com/79887143/koishi-plugin-tmp-bot",
+  "author": "BGYdook",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/BGYdook/AstrBot-plugin-tmp-bot"
+  },
+  "homepage": "https://github.com/BGYdook/AstrBot-plugin-tmp-bot",
   "files": [
     "lib",
     "dist"
