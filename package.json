@@ -1,5 +1,5 @@
 {
-  "name": "astrbot-plugin-tmp-bot",
+  "name": "AstrBot-plugin-tmp-bot",
   "description": "欧卡2TMP查询插件",
   "version": "1.0.0",
   "main": "lib/index.js",
