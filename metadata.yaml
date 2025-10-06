@@ -23,12 +23,15 @@ commands:
   - name: tmpbind
     description: 绑定 TMPID，绑定后使用其他指令时可省略输入
     usage: tmpbind 123
+  - name: tmpunbind
+    description: 解除 TMPID 绑定
+    usage: tmpunbind
   - name: tmpquery
-    description: 查询TMP玩家信息
-    usage: tmpquery 123
+    description: 查询TMP玩家信息，可指定ID或使用绑定的ID
+    usage: tmpquery 123 或 tmpquery（使用绑定ID）
   - name: tmpposition
-    description: 查询玩家位置信息
-    usage: tmpposition 123
+    description: 查询玩家位置信息，可指定ID或使用绑定的ID
+    usage: tmpposition 123 或 tmpposition（使用绑定ID）
   - name: tmptraffic
     description: 查询服务器热门地点路况信息，支持s1/s2/p/a服务器
     usage: tmptraffic s1

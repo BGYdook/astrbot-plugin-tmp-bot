@@ -9,6 +9,8 @@ AstrBot-plugin-tmp-bot
 import re
 import asyncio
 import aiohttp
+import json
+import os
 from typing import Optional
 from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
 from astrbot.api.star import Context, Star, register
@@ -19,6 +21,11 @@ class TmpBotPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
         self.session = None
+        # 初始化数据存储路径
+        self.data_dir = self.tools.get_data_dir()
+        self.bind_file = os.path.join(self.data_dir, "tmp_bindings.json")
+        # 确保数据目录存在
+        os.makedirs(self.data_dir, exist_ok=True)
         logger.info("TMP Bot 插件已加载")
 
     async def _get_session(self):
@@ -26,6 +33,46 @@ class TmpBotPlugin(Star):
         if self.session is None:
             self.session = aiohttp.ClientSession()
         return self.session
+
+    def _load_bindings(self) -> dict:
+        """加载绑定数据"""
+        try:
+            if os.path.exists(self.bind_file):
+                with open(self.bind_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            return {}
+        except Exception as e:
+            logger.error(f"加载绑定数据失败: {e}")
+            return {}
+
+    def _save_bindings(self, bindings: dict) -> bool:
+        """保存绑定数据"""
+        try:
+            with open(self.bind_file, 'w', encoding='utf-8') as f:
+                json.dump(bindings, f, ensure_ascii=False, indent=2)
+            return True
+        except Exception as e:
+            logger.error(f"保存绑定数据失败: {e}")
+            return False
+
+    def _get_bound_tmp_id(self, user_id: str) -> Optional[str]:
+        """获取用户绑定的TMP ID"""
+        bindings = self._load_bindings()
+        return bindings.get(user_id)
+
+    def _bind_tmp_id(self, user_id: str, tmp_id: str) -> bool:
+        """绑定用户和TMP ID"""
+        bindings = self._load_bindings()
+        bindings[user_id] = tmp_id
+        return self._save_bindings(bindings)
+
+    def _unbind_tmp_id(self, user_id: str) -> bool:
+        """解除用户绑定"""
+        bindings = self._load_bindings()
+        if user_id in bindings:
+            del bindings[user_id]
+            return self._save_bindings(bindings)
+        return False
 
     async def _query_player_info(self, tmp_id: str) -> dict:
         """查询玩家信息"""
@@ -73,9 +120,13 @@ class TmpBotPlugin(Star):
         message_text = event.message_str.strip()
         tmp_id = self._extract_tmp_id(message_text, "tmpquery")
         
+        # 如果没有提供TMP ID，尝试使用绑定的ID
         if not tmp_id:
-            yield event.plain_result("请输入正确的玩家编号，格式：tmpquery 123456 或 tmpquery123456")
-            return
+            user_id = event.get_sender_id()
+            tmp_id = self._get_bound_tmp_id(user_id)
+            if not tmp_id:
+                yield event.plain_result("请输入正确的玩家编号，格式：tmpquery 123456 或 tmpquery123456\n💡 提示：您也可以先使用 tmpbind 绑定您的TMP账号，之后直接使用 tmpquery 查询")
+                return
 
         logger.info(f"查询TMP玩家: {tmp_id}")
         
@@ -137,9 +188,30 @@ class TmpBotPlugin(Star):
             yield event.plain_result("玩家不存在，请检查TMP ID是否正确")
             return
 
-        # 这里应该保存绑定信息到数据库，暂时只返回成功消息
-        player_name = player_info['data'].get('name', '未知')
-        yield event.plain_result(f"✅ 绑定成功！\n已将您的账号与TMP玩家 {player_name} (ID: {tmp_id}) 绑定")
+        # 获取用户ID并保存绑定信息
+        user_id = event.get_sender_id()
+        if self._bind_tmp_id(user_id, tmp_id):
+            player_name = player_info['data'].get('name', '未知')
+            yield event.plain_result(f"✅ 绑定成功！\n已将您的账号与TMP玩家 {player_name} (ID: {tmp_id}) 绑定")
+            logger.info(f"用户 {user_id} 绑定TMP ID: {tmp_id}")
+        else:
+            yield event.plain_result("❌ 绑定失败，请稍后重试")
+
+    @filter.command("tmpunbind")
+    async def tmpunbind(self, event: AstrMessageEvent):
+        """解除TMP账号绑定指令"""
+        user_id = event.get_sender_id()
+        bound_tmp_id = self._get_bound_tmp_id(user_id)
+        
+        if not bound_tmp_id:
+            yield event.plain_result("❌ 您还没有绑定任何TMP账号")
+            return
+        
+        if self._unbind_tmp_id(user_id):
+            yield event.plain_result(f"✅ 解绑成功！\n已解除与TMP ID {bound_tmp_id} 的绑定")
+            logger.info(f"用户 {user_id} 解除TMP ID绑定: {bound_tmp_id}")
+        else:
+            yield event.plain_result("❌ 解绑失败，请稍后重试")
 
     @filter.command("tmpposition")
     async def tmpposition(self, event: AstrMessageEvent):
@@ -147,9 +219,13 @@ class TmpBotPlugin(Star):
         message_text = event.message_str.strip()
         tmp_id = self._extract_tmp_id(message_text, "tmpposition")
         
+        # 如果没有提供TMP ID，尝试使用绑定的ID
         if not tmp_id:
-            yield event.plain_result("请输入正确的玩家编号，格式：tmpposition 123456 或 tmpposition123456")
-            return
+            user_id = event.get_sender_id()
+            tmp_id = self._get_bound_tmp_id(user_id)
+            if not tmp_id:
+                yield event.plain_result("请输入正确的玩家编号，格式：tmpposition 123456 或 tmpposition123456\n💡 提示：您也可以先使用 tmpbind 绑定您的TMP账号，之后直接使用 tmpposition 查询")
+                return
 
         logger.info(f"查询TMP玩家位置: {tmp_id}")
         
