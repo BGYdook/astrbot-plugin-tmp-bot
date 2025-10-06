@@ -1,7 +1,7 @@
 name: AstrBot-plugin-tmp-bot
 description: 欧卡2TMP查询插件
 version: 1.0.0
-main: lib/index.js
+main: main.py
 author: BGYdook
 homepage: https://github.com/BGYdook/AstrBot-plugin-tmp-bot
 repo: https://github.com/BGYdook/AstrBot-plugin-tmp-bot
@@ -15,6 +15,9 @@ keywords:
   - tmp
   - astrbot
   - astrbot-plugin
+python_requires: ">=3.10"
 dependencies:
-  - dayjs
-  - js-md5
+  - aiohttp>=3.8.0
+  - httpx>=0.24.0
+  - pydantic>=1.10.0
+  - python-dateutil>=2.8.0

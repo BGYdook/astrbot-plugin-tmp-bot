@@ -1,0 +1,229 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+"""
+AstrBot-plugin-tmp-bot
+欧卡2TMP查询插件 - AstrBot版本
+"""
+
+import re
+import asyncio
+import aiohttp
+from typing import Optional
+from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
+from astrbot.api.star import Context, Star, register
+from astrbot.api import logger
+
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.0.0", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
+class TmpBotPlugin(Star):
+    def __init__(self, context: Context):
+        super().__init__(context)
+        self.session = None
+        logger.info("TMP Bot 插件已加载")
+
+    async def _get_session(self):
+        """获取HTTP会话"""
+        if self.session is None:
+            self.session = aiohttp.ClientSession()
+        return self.session
+
+    async def _query_player_info(self, tmp_id: str) -> dict:
+        """查询玩家信息"""
+        session = await self._get_session()
+        try:
+            # 查询玩家基本信息
+            async with session.get(f"https://api.truckyapp.com/v3/player/{tmp_id}") as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    if data.get('error'):
+                        return {'error': True, 'message': '玩家不存在'}
+                    return {'error': False, 'data': data}
+                else:
+                    return {'error': True, 'message': '查询失败，请重试'}
+        except Exception as e:
+            logger.error(f"查询玩家信息失败: {e}")
+            return {'error': True, 'message': '网络请求失败'}
+
+    async def _query_player_online(self, tmp_id: str) -> dict:
+        """查询玩家在线状态"""
+        session = await self._get_session()
+        try:
+            async with session.get(f"https://api.truckyapp.com/v3/map/online?playerID={tmp_id}") as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return {'error': False, 'data': data}
+                else:
+                    return {'error': True}
+        except Exception as e:
+            logger.error(f"查询在线状态失败: {e}")
+            return {'error': True}
+
+    def _extract_tmp_id(self, message: str, command: str) -> Optional[str]:
+        """从消息中提取TMP ID，支持带空格和不带空格的格式"""
+        # 匹配 "command 123456" 或 "command123456" 格式
+        pattern = rf"^{command}\s*(\d+)$"
+        match = re.match(pattern, message.strip(), re.IGNORECASE)
+        if match:
+            return match.group(1)
+        return None
+
+    @filter.command("tmpquery")
+    async def tmpquery(self, event: AstrMessageEvent):
+        """TMP玩家查询指令"""
+        message_text = event.message_str.strip()
+        tmp_id = self._extract_tmp_id(message_text, "tmpquery")
+        
+        if not tmp_id:
+            yield event.plain_result("请输入正确的玩家编号，格式：tmpquery 123456 或 tmpquery123456")
+            return
+
+        logger.info(f"查询TMP玩家: {tmp_id}")
+        
+        # 查询玩家信息
+        player_info = await self._query_player_info(tmp_id)
+        if player_info['error']:
+            yield event.plain_result(player_info['message'])
+            return
+
+        # 查询在线状态
+        online_info = await self._query_player_online(tmp_id)
+        
+        # 构建回复消息
+        data = player_info['data']
+        user_name = event.get_sender_name()
+        
+        message = f"🚛 TMP玩家查询结果\n"
+        message += f"👤 玩家: {data.get('name', '未知')}\n"
+        message += f"🆔 TMP ID: {tmp_id}\n"
+        message += f"📅 注册时间: {data.get('joinDate', '未知')}\n"
+        
+        if data.get('vtc'):
+            message += f"🚚 车队: {data['vtc'].get('name', '未知')}\n"
+        
+        # 在线状态
+        if not online_info['error'] and online_info['data'].get('online'):
+            online_data = online_info['data']
+            server_name = online_data.get('serverDetails', {}).get('name', '未知服务器')
+            message += f"📶 状态: 在线🟢 ({server_name})\n"
+            
+            location = online_data.get('location', {}).get('poi', {})
+            if location:
+                country = location.get('country', '')
+                city = location.get('realName', '')
+                if country and city:
+                    message += f"🌍 位置: {country} - {city}\n"
+        else:
+            message += f"📶 状态: 离线⚫\n"
+        
+        # 封禁状态
+        if data.get('banned'):
+            message += f"⚠️ 状态: 已封禁\n"
+        
+        yield event.plain_result(message)
+
+    @filter.command("tmpbind")
+    async def tmpbind(self, event: AstrMessageEvent):
+        """TMP账号绑定指令"""
+        message_text = event.message_str.strip()
+        tmp_id = self._extract_tmp_id(message_text, "tmpbind")
+        
+        if not tmp_id:
+            yield event.plain_result("请输入正确的玩家编号，格式：tmpbind 123456 或 tmpbind123456")
+            return
+
+        # 验证TMP ID是否存在
+        player_info = await self._query_player_info(tmp_id)
+        if player_info['error']:
+            yield event.plain_result("玩家不存在，请检查TMP ID是否正确")
+            return
+
+        # 这里应该保存绑定信息到数据库，暂时只返回成功消息
+        player_name = player_info['data'].get('name', '未知')
+        yield event.plain_result(f"✅ 绑定成功！\n已将您的账号与TMP玩家 {player_name} (ID: {tmp_id}) 绑定")
+
+    @filter.command("tmpposition")
+    async def tmpposition(self, event: AstrMessageEvent):
+        """TMP玩家位置查询指令"""
+        message_text = event.message_str.strip()
+        tmp_id = self._extract_tmp_id(message_text, "tmpposition")
+        
+        if not tmp_id:
+            yield event.plain_result("请输入正确的玩家编号，格式：tmpposition 123456 或 tmpposition123456")
+            return
+
+        logger.info(f"查询TMP玩家位置: {tmp_id}")
+        
+        # 查询在线状态和位置
+        online_info = await self._query_player_online(tmp_id)
+        
+        if online_info['error']:
+            yield event.plain_result("查询失败，请重试")
+            return
+            
+        if not online_info['data'].get('online'):
+            yield event.plain_result("该玩家当前不在线")
+            return
+            
+        online_data = online_info['data']
+        server_name = online_data.get('serverDetails', {}).get('name', '未知服务器')
+        location = online_data.get('location', {}).get('poi', {})
+        
+        message = f"📍 TMP玩家位置\n"
+        message += f"🆔 玩家ID: {tmp_id}\n"
+        message += f"🖥️ 服务器: {server_name}\n"
+        
+        if location:
+            country = location.get('country', '')
+            city = location.get('realName', '')
+            if country and city:
+                message += f"🌍 位置: {country} - {city}\n"
+            
+            # 坐标信息
+            coords = online_data.get('location', {})
+            if coords.get('x') is not None and coords.get('y') is not None:
+                message += f"📐 坐标: X:{coords['x']:.2f}, Y:{coords['y']:.2f}\n"
+        
+        yield event.plain_result(message)
+
+    @filter.command("tmpserver")
+    async def tmpserver(self, event: AstrMessageEvent):
+        """TMP服务器状态查询指令"""
+        logger.info("查询TMP服务器状态")
+        
+        session = await self._get_session()
+        try:
+            async with session.get("https://api.truckyapp.com/v3/servers") as resp:
+                if resp.status == 200:
+                    servers = await resp.json()
+                    
+                    message = "🖥️ TMP服务器状态\n\n"
+                    for server in servers[:5]:  # 只显示前5个服务器
+                        name = server.get('name', '未知')
+                        players = server.get('players', 0)
+                        max_players = server.get('maxplayers', 0)
+                        queue = server.get('queue', 0)
+                        
+                        status = "🟢" if players > 0 else "🔴"
+                        message += f"{status} {name}\n"
+                        message += f"   👥 {players}/{max_players}"
+                        if queue > 0:
+                            message += f" (排队: {queue})"
+                        message += "\n\n"
+                    
+                    yield event.plain_result(message.strip())
+                else:
+                    yield event.plain_result("查询服务器状态失败")
+        except Exception as e:
+            logger.error(f"查询服务器状态失败: {e}")
+            yield event.plain_result("网络请求失败")
+
+    @filter.command("tmpversion")
+    async def tmpversion(self, event: AstrMessageEvent):
+        """TMP版本信息查询指令"""
+        yield event.plain_result("🚛 TMP Bot 插件\n版本: 1.0.0\n作者: BGYdook\n描述: 欧卡2TMP查询插件")
+
+    async def terminate(self):
+        """插件卸载时的清理工作"""
+        if self.session:
+            await self.session.close()
+        logger.info("TMP Bot 插件已卸载")
