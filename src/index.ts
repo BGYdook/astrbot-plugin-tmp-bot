@@ -93,8 +93,16 @@ export default class TmpBotPlugin {
    * 注册命令
    */
   private registerCommands() {
-    // 注册各种命令
-    this.ctx.command('tmpquery <tmpId>', async (session: any, tmpId: string) => {
+    // 注册各种命令 - 支持带空格和不带空格的查询
+    this.ctx.command('tmpquery [tmpId]', async (session: any, tmpId: string) => {
+      // 如果没有传入tmpId参数，尝试从消息文本中提取
+      if (!tmpId) {
+        const messageText = session.content || '';
+        const match = messageText.match(/^tmpquery\s*(\d+)$/i);
+        if (match) {
+          tmpId = match[1];
+        }
+      }
       return await tmpQuery(this.ctx, this.config, session, tmpId);
     });
     
@@ -102,15 +110,39 @@ export default class TmpBotPlugin {
       return await tmpServer(this.ctx);
     });
     
-    this.ctx.command('tmpbind <tmpId>', async (session: any, tmpId: string) => {
+    this.ctx.command('tmpbind [tmpId]', async (session: any, tmpId: string) => {
+      // 如果没有传入tmpId参数，尝试从消息文本中提取
+      if (!tmpId) {
+        const messageText = session.content || '';
+        const match = messageText.match(/^tmpbind\s*(\d+)$/i);
+        if (match) {
+          tmpId = match[1];
+        }
+      }
       return await tmpBind(this.ctx, this.config, session, tmpId);
     });
     
-    this.ctx.command('tmptraffic <serverName>', async (session: any, serverName: string) => {
+    this.ctx.command('tmptraffic [serverName]', async (session: any, serverName: string) => {
+      // 如果没有传入serverName参数，尝试从消息文本中提取
+      if (!serverName) {
+        const messageText = session.content || '';
+        const match = messageText.match(/^tmptraffic\s*(.+)$/i);
+        if (match) {
+          serverName = match[1].trim();
+        }
+      }
       return await tmpTraffic(this.ctx, this.config, serverName);
     });
     
-    this.ctx.command('tmpposition <tmpId>', async (session: any, tmpId: string) => {
+    this.ctx.command('tmpposition [tmpId]', async (session: any, tmpId: string) => {
+      // 如果没有传入tmpId参数，尝试从消息文本中提取
+      if (!tmpId) {
+        const messageText = session.content || '';
+        const match = messageText.match(/^tmpposition\s*(\d+)$/i);
+        if (match) {
+          tmpId = match[1];
+        }
+      }
       return await tmpPosition(this.ctx, this.config, session, tmpId);
     });
     
