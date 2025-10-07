@@ -215,15 +215,19 @@ class TmpBotPlugin(Star):
             return
 
         # 验证TMP ID是否存在
-        player_info = await self._query_player_info(tmp_id)
-        if player_info['error']:
+        try:
+            player_info = await self._query_player_info(tmp_id)
+        except PlayerNotFoundException:
             yield event.plain_result("玩家不存在，请检查TMP ID是否正确")
+            return
+        except (NetworkException, ApiResponseException, TmpApiException) as e:
+            yield event.plain_result(f"查询失败: {str(e)}")
             return
 
         # 获取用户ID并保存绑定信息
         user_id = event.get_sender_id()
         if self._bind_tmp_id(user_id, tmp_id):
-            player_name = player_info['data'].get('name', '未知')
+            player_name = player_info.get('name', '未知')
             yield event.plain_result(f"✅ 绑定成功！\n已将您的账号与TMP玩家 {player_name} (ID: {tmp_id}) 绑定")
             logger.info(f"用户 {user_id} 绑定TMP ID: {tmp_id}")
         else:

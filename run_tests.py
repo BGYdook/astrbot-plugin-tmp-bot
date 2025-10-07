@@ -86,17 +86,12 @@ class SimpleTmpBotPlugin:
         return False
     
     def _extract_tmp_id(self, message: str, command: str) -> Optional[str]:
-        """从消息中提取TMP ID"""
-        # 移除命令前缀
-        if message.startswith(command):
-            id_part = message[len(command):].strip()
-        else:
-            return None
-        
-        # 使用正则表达式匹配数字
-        match = re.search(r'\d+', id_part)
+        """从消息中提取TMP ID，支持带空格和不带空格的格式"""
+        # 匹配 "command 123456" 或 "command123456" 格式
+        pattern = rf"^{command}\s*(\d+)$"
+        match = re.match(pattern, message.strip(), re.IGNORECASE)
         if match:
-            return match.group()
+            return match.group(1)
         return None
 
 
@@ -191,8 +186,13 @@ def test_extract_tmp_id():
         invalid_cases = [
             ("tmpquery", "tmpquery"),
             ("tmpquery abc", "tmpquery"),
+            ("tmpquery abc123", "tmpquery"),  # 字母+数字
+            ("tmpquery 123abc", "tmpquery"),  # 数字+字母
+            ("tmpquery abc123def", "tmpquery"),  # 字母+数字+字母
             ("tmpposition", "tmpposition"),
             ("invalid command", "tmpquery"),
+            ("tmpquery  ", "tmpquery"),  # 只有空格
+            ("tmpquery 123 456", "tmpquery"),  # 多个数字段
         ]
         
         for message, command in invalid_cases:
