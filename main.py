@@ -43,7 +43,7 @@ class TmpBotPlugin(Star):
         super().__init__(context)
         self.session = None
         # 初始化数据存储路径
-        self.data_dir = self.tools.get_data_dir()
+        self.data_dir = context.get_data_dir()
         self.bind_file = os.path.join(self.data_dir, "tmp_bindings.json")
         # 确保数据目录存在
         os.makedirs(self.data_dir, exist_ok=True)
