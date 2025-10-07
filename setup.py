@@ -18,10 +18,13 @@ setup(
     packages=find_packages(),
     install_requires=[
         "aiohttp>=3.8.0",
-        "httpx>=0.24.0",
-        "pydantic>=1.10.0",
-        "python-dateutil>=2.8.0",
     ],
+    extras_require={
+        "dev": [
+            "pytest>=7.0.0",
+            "pytest-asyncio>=0.21.0",
+        ],
+    },
     classifiers=[
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.10",

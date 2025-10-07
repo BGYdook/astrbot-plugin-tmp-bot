@@ -16,6 +16,27 @@ from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
 
+
+# 自定义异常类
+class TmpApiException(Exception):
+    """TMP API相关异常的基类"""
+    pass
+
+
+class PlayerNotFoundException(TmpApiException):
+    """玩家不存在异常"""
+    pass
+
+
+class NetworkException(TmpApiException):
+    """网络请求异常"""
+    pass
+
+
+class ApiResponseException(TmpApiException):
+    """API响应异常"""
+    pass
+
 @register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.0.0", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context: Context):
@@ -83,13 +104,16 @@ class TmpBotPlugin(Star):
                 if resp.status == 200:
                     data = await resp.json()
                     if data.get('error'):
-                        return {'error': True, 'message': '玩家不存在'}
-                    return {'error': False, 'data': data}
+                        raise PlayerNotFoundException(f"玩家 {tmp_id} 不存在")
+                    return data
                 else:
-                    return {'error': True, 'message': '查询失败，请重试'}
+                    raise ApiResponseException(f"API返回错误状态码: {resp.status}")
+        except aiohttp.ClientError as e:
+            logger.error(f"查询玩家信息网络错误: {e}")
+            raise NetworkException("网络请求失败")
         except Exception as e:
             logger.error(f"查询玩家信息失败: {e}")
-            return {'error': True, 'message': '网络请求失败'}
+            raise TmpApiException(f"查询失败: {str(e)}")
 
     async def _query_player_online(self, tmp_id: str) -> dict:
         """查询玩家在线状态"""
@@ -98,12 +122,15 @@ class TmpBotPlugin(Star):
             async with session.get(f"https://api.truckyapp.com/v3/map/online?playerID={tmp_id}") as resp:
                 if resp.status == 200:
                     data = await resp.json()
-                    return {'error': False, 'data': data}
+                    return data
                 else:
-                    return {'error': True}
+                    raise ApiResponseException(f"在线状态查询失败，状态码: {resp.status}")
+        except aiohttp.ClientError as e:
+            logger.error(f"查询在线状态网络错误: {e}")
+            raise NetworkException("网络请求失败")
         except Exception as e:
             logger.error(f"查询在线状态失败: {e}")
-            return {'error': True}
+            raise TmpApiException(f"查询失败: {str(e)}")
 
     def _extract_tmp_id(self, message: str, command: str) -> Optional[str]:
         """从消息中提取TMP ID，支持带空格和不带空格的格式"""
@@ -130,17 +157,23 @@ class TmpBotPlugin(Star):
 
         logger.info(f"查询TMP玩家: {tmp_id}")
         
-        # 查询玩家信息
-        player_info = await self._query_player_info(tmp_id)
-        if player_info['error']:
-            yield event.plain_result(player_info['message'])
+        try:
+            # 并发查询玩家信息和在线状态
+            tasks = [
+                self._query_player_info(tmp_id),
+                self._query_player_online(tmp_id)
+            ]
+            results = await asyncio.gather(*tasks)
+            player_info, online_info = results
+        except PlayerNotFoundException as e:
+            yield event.plain_result(str(e))
             return
-
-        # 查询在线状态
-        online_info = await self._query_player_online(tmp_id)
+        except (NetworkException, ApiResponseException, TmpApiException) as e:
+            yield event.plain_result(f"查询失败: {str(e)}")
+            return
         
         # 构建回复消息
-        data = player_info['data']
+        data = player_info
         user_name = event.get_sender_name()
         
         message = f"🚛 TMP玩家查询结果\n"
@@ -152,12 +185,11 @@ class TmpBotPlugin(Star):
             message += f"🚚 车队: {data['vtc'].get('name', '未知')}\n"
         
         # 在线状态
-        if not online_info['error'] and online_info['data'].get('online'):
-            online_data = online_info['data']
-            server_name = online_data.get('serverDetails', {}).get('name', '未知服务器')
+        if online_info.get('online'):
+            server_name = online_info.get('serverDetails', {}).get('name', '未知服务器')
             message += f"📶 状态: 在线🟢 ({server_name})\n"
             
-            location = online_data.get('location', {}).get('poi', {})
+            location = online_info.get('location', {}).get('poi', {})
             if location:
                 country = location.get('country', '')
                 city = location.get('realName', '')
@@ -229,20 +261,19 @@ class TmpBotPlugin(Star):
 
         logger.info(f"查询TMP玩家位置: {tmp_id}")
         
-        # 查询在线状态和位置
-        online_info = await self._query_player_online(tmp_id)
-        
-        if online_info['error']:
-            yield event.plain_result("查询失败，请重试")
+        try:
+            # 查询在线状态和位置
+            online_info = await self._query_player_online(tmp_id)
+        except (NetworkException, ApiResponseException, TmpApiException) as e:
+            yield event.plain_result(f"查询失败: {str(e)}")
             return
             
-        if not online_info['data'].get('online'):
+        if not online_info.get('online'):
             yield event.plain_result("该玩家当前不在线")
             return
             
-        online_data = online_info['data']
-        server_name = online_data.get('serverDetails', {}).get('name', '未知服务器')
-        location = online_data.get('location', {}).get('poi', {})
+        server_name = online_info.get('serverDetails', {}).get('name', '未知服务器')
+        location = online_info.get('location', {}).get('poi', {})
         
         message = f"📍 TMP玩家位置\n"
         message += f"🆔 玩家ID: {tmp_id}\n"
@@ -255,7 +286,7 @@ class TmpBotPlugin(Star):
                 message += f"🌍 位置: {country} - {city}\n"
             
             # 坐标信息
-            coords = online_data.get('location', {})
+            coords = online_info.get('location', {})
             if coords.get('x') is not None and coords.get('y') is not None:
                 message += f"📐 坐标: X:{coords['x']:.2f}, Y:{coords['y']:.2f}\n"
         
