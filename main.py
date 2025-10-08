@@ -106,48 +106,62 @@ class TmpBotPlugin(Star):
             return self._save_bindings(bindings)
         return False
 
-    async def _query_player_info(self, tmp_id: str) -> dict:
-        """查询玩家信息"""
-        session = await self._get_session()
+    async def _get_player_info(self, tmp_id: str) -> dict:
+        """获取玩家信息"""
         try:
-            # 使用TruckersMP API查询玩家基本信息
-            async with session.get(f"https://api.truckersmp.com/v2/version/{tmp_id}") as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    if data.get('error'):
-                        raise PlayerNotFoundException(f"玩家 {tmp_id} 不存在: {data.get('error')}")
-                    # TruckersMP API返回格式: {"response": {...}, "error": false}
-                    return data.get('response', {})
-                elif resp.status == 404:
-                    raise PlayerNotFoundException(f"玩家 {tmp_id} 不存在")
-                elif resp.status == 403:
-                    # Cloudflare保护，提供友好的错误信息
-                    raise TmpApiException("⚠️ TruckersMP API暂时无法访问，请稍后再试。您可以使用 tmpstatus 命令查看在线状态。")
-                else:
-                    raise ApiResponseException(f"API返回错误状态码: {resp.status}")
+            url = f"https://api.truckersmp.com/v2/player/{tmp_id}"
+            headers = {
+                'User-Agent': 'AstrBot-TMP-Plugin/1.0.0',
+                'Accept': 'application/json',
+            }
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers, timeout=10) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        if data and isinstance(data, dict):
+                            if data.get('error'):
+                                raise PlayerNotFoundException(f"玩家 {tmp_id} 不存在")
+                            return data
+                        else:
+                            raise PlayerNotFoundException(f"玩家 {tmp_id} 不存在")
+                    elif response.status == 404:
+                        raise PlayerNotFoundException(f"玩家 {tmp_id} 不存在")
+                    elif response.status == 403:
+                        raise ApiResponseException("TruckersMP API访问被拒绝")
+                    else:
+                        raise ApiResponseException(f"API返回错误状态码: {response.status}")
+                        
         except aiohttp.ClientError as e:
             logger.error(f"查询玩家信息网络错误: {e}")
             raise NetworkException("网络请求失败")
         except Exception as e:
-            logger.error(f"查询玩家信息失败: {e}")
-            raise TmpApiException(f"查询失败: {str(e)}")
+            logger.error(f"查询玩家信息未知错误: {e}")
+            raise NetworkException("查询失败")
 
     async def _query_player_online(self, tmp_id: str) -> dict:
         """查询玩家在线状态"""
-        session = await self._get_session()
         try:
-            async with session.get(f"https://api.truckyapp.com/v3/map/online?playerID={tmp_id}") as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    return data
-                else:
-                    raise ApiResponseException(f"在线状态查询失败，状态码: {resp.status}")
+            url = f"https://api.truckersmp.com/v2/player/{tmp_id}/online"
+            headers = {
+                'User-Agent': 'AstrBot-TMP-Plugin/1.0.0',
+                'Accept': 'application/json',
+            }
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers, timeout=10) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        return data
+                    else:
+                        raise ApiResponseException(f"在线状态查询失败，状态码: {response.status}")
+                        
         except aiohttp.ClientError as e:
             logger.error(f"查询在线状态网络错误: {e}")
             raise NetworkException("网络请求失败")
         except Exception as e:
             logger.error(f"查询在线状态失败: {e}")
-            raise TmpApiException(f"查询失败: {str(e)}")
+            raise NetworkException("查询失败")
 
     def _extract_tmp_id(self, message: str, command: str) -> Optional[str]:
         """从消息中提取TMP ID，支持带空格和不带空格的格式"""
@@ -177,7 +191,7 @@ class TmpBotPlugin(Star):
         try:
             # 并发查询玩家信息和在线状态
             tasks = [
-                self._query_player_info(tmp_id),
+                self._get_player_info(tmp_id),
                 self._query_player_online(tmp_id)
             ]
             results = await asyncio.gather(*tasks)
@@ -233,7 +247,7 @@ class TmpBotPlugin(Star):
 
         # 验证TMP ID是否存在
         try:
-            player_info = await self._query_player_info(tmp_id)
+            player_info = await self._get_player_info(tmp_id)
         except PlayerNotFoundException:
             yield event.plain_result("玩家不存在，请检查TMP ID是否正确")
             return
