@@ -52,7 +52,18 @@ class TmpBotPlugin(Star):
     async def _get_session(self):
         """获取HTTP会话"""
         if self.session is None:
-            self.session = aiohttp.ClientSession()
+            # 添加浏览器请求头来尝试绕过Cloudflare保护
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Accept': 'application/json, text/plain, */*',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Connection': 'keep-alive',
+                'Sec-Fetch-Dest': 'empty',
+                'Sec-Fetch-Mode': 'cors',
+                'Sec-Fetch-Site': 'cross-site'
+            }
+            self.session = aiohttp.ClientSession(headers=headers)
         return self.session
 
     def _load_bindings(self) -> dict:
@@ -99,13 +110,19 @@ class TmpBotPlugin(Star):
         """查询玩家信息"""
         session = await self._get_session()
         try:
-            # 查询玩家基本信息
-            async with session.get(f"https://api.truckyapp.com/v3/player/{tmp_id}") as resp:
+            # 使用TruckersMP API查询玩家基本信息
+            async with session.get(f"https://api.truckersmp.com/v2/player/{tmp_id}") as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     if data.get('error'):
-                        raise PlayerNotFoundException(f"玩家 {tmp_id} 不存在")
-                    return data
+                        raise PlayerNotFoundException(f"玩家 {tmp_id} 不存在: {data.get('error')}")
+                    # TruckersMP API返回格式: {"response": {...}, "error": false}
+                    return data.get('response', {})
+                elif resp.status == 404:
+                    raise PlayerNotFoundException(f"玩家 {tmp_id} 不存在")
+                elif resp.status == 403:
+                    # Cloudflare保护，提供友好的错误信息
+                    raise TmpApiException("⚠️ TruckersMP API暂时无法访问，请稍后再试。您可以使用 tmpstatus 命令查看在线状态。")
                 else:
                     raise ApiResponseException(f"API返回错误状态码: {resp.status}")
         except aiohttp.ClientError as e:
@@ -141,18 +158,18 @@ class TmpBotPlugin(Star):
             return match.group(1)
         return None
 
-    @filter.command("tmpquery")
+    @filter.command("查询")
     async def tmpquery(self, event: AstrMessageEvent):
         """TMP玩家查询指令"""
         message_text = event.message_str.strip()
-        tmp_id = self._extract_tmp_id(message_text, "tmpquery")
+        tmp_id = self._extract_tmp_id(message_text, "查询")
         
         # 如果没有提供TMP ID，尝试使用绑定的ID
         if not tmp_id:
             user_id = event.get_sender_id()
             tmp_id = self._get_bound_tmp_id(user_id)
             if not tmp_id:
-                yield event.plain_result("请输入正确的玩家编号，格式：tmpquery 123456\n💡 提示：您也可以先使用 tmpbind 绑定您的TMP账号，之后直接使用 tmpquery 查询")
+                yield event.plain_result("请输入正确的玩家编号")
                 return
 
         logger.info(f"查询TMP玩家: {tmp_id}")
@@ -208,10 +225,10 @@ class TmpBotPlugin(Star):
     async def tmpbind(self, event: AstrMessageEvent):
         """TMP账号绑定指令"""
         message_text = event.message_str.strip()
-        tmp_id = self._extract_tmp_id(message_text, "tmpbind")
+        tmp_id = self._extract_tmp_id(message_text, "绑定")
         
         if not tmp_id:
-            yield event.plain_result("请输入正确的玩家编号，格式：tmpbind 123456")
+            yield event.plain_result("请输入正确的玩家编号，格式：绑定 123456")
             return
 
         # 验证TMP ID是否存在
@@ -233,7 +250,7 @@ class TmpBotPlugin(Star):
         else:
             yield event.plain_result("❌ 绑定失败，请稍后重试")
 
-    @filter.command("tmpunbind")
+    @filter.command("解绑")
     async def tmpunbind(self, event: AstrMessageEvent):
         """解除TMP账号绑定指令"""
         user_id = event.get_sender_id()
@@ -249,21 +266,21 @@ class TmpBotPlugin(Star):
         else:
             yield event.plain_result("❌ 解绑失败，请稍后重试")
 
-    @filter.command("tmpposition")
+    @filter.command("定位")
     async def tmpposition(self, event: AstrMessageEvent):
         """TMP玩家位置查询指令"""
         message_text = event.message_str.strip()
-        tmp_id = self._extract_tmp_id(message_text, "tmpposition")
+        tmp_id = self._extract_tmp_id(message_text, "定位")
         
         # 如果没有提供TMP ID，尝试使用绑定的ID
         if not tmp_id:
             user_id = event.get_sender_id()
             tmp_id = self._get_bound_tmp_id(user_id)
             if not tmp_id:
-                yield event.plain_result("请输入正确的玩家编号，格式：tmpposition 123456\n💡 提示：您也可以先使用 tmpbind 绑定您的TMP账号，之后直接使用 tmpposition 查询")
+                yield event.plain_result("请输入正确的玩家编号")
                 return
 
-        logger.info(f"查询TMP玩家位置: {tmp_id}")
+        logger.info(f"定位: {tmp_id}")
         
         try:
             # 查询在线状态和位置
@@ -303,18 +320,25 @@ class TmpBotPlugin(Star):
         
         session = await self._get_session()
         try:
-            async with session.get("https://api.truckyapp.com/v3/servers") as resp:
+            # 使用TruckersMP API查询服务器状态
+            async with session.get("https://api.truckersmp.com/v2/servers") as resp:
                 if resp.status == 200:
-                    servers = await resp.json()
+                    data = await resp.json()
+                    if data.get('error'):
+                        yield event.plain_result(f"查询服务器状态失败: {data.get('error')}")
+                        return
                     
+                    servers = data.get('response', [])
                     message = "🖥️ TMP服务器状态\n\n"
+                    
                     for server in servers[:5]:  # 只显示前5个服务器
                         name = server.get('name', '未知')
                         players = server.get('players', 0)
                         max_players = server.get('maxplayers', 0)
                         queue = server.get('queue', 0)
+                        online = server.get('online', False)
                         
-                        status = "🟢" if players > 0 else "🔴"
+                        status = "🟢" if online and players > 0 else "🟡" if online else "🔴"
                         message += f"{status} {name}\n"
                         message += f"   👥 {players}/{max_players}"
                         if queue > 0:
@@ -322,6 +346,8 @@ class TmpBotPlugin(Star):
                         message += "\n\n"
                     
                     yield event.plain_result(message.strip())
+                elif resp.status == 403:
+                    yield event.plain_result("⚠️ TruckersMP API暂时无法访问，请稍后再试")
                 else:
                     yield event.plain_result("查询服务器状态失败")
         except Exception as e:
