@@ -13,7 +13,7 @@ import json
 import os
 from typing import Optional
 from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
-from astrbot.api.star import Context, Star, register
+from astrbot.api.star import Context, Star, register, StarTools
 from astrbot.api import logger
 
 
@@ -43,7 +43,7 @@ class TmpBotPlugin(Star):
         super().__init__(context)
         self.session = None
         # 初始化数据存储路径
-        self.data_dir = context.data_dir
+        self.data_dir = StarTools.get_data_dir("tmp-bot")
         self.bind_file = os.path.join(self.data_dir, "tmp_bindings.json")
         # 确保数据目录存在
         os.makedirs(self.data_dir, exist_ok=True)
