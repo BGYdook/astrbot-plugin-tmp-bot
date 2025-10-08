@@ -10,6 +10,7 @@ import os
 import json
 import tempfile
 import shutil
+from pathlib import Path
 from unittest.mock import Mock, AsyncMock, patch
 from main import TmpBotPlugin, PlayerNotFoundException, NetworkException, ApiResponseException
 
@@ -28,7 +29,7 @@ class TestTmpBotPlugin:
     def mock_context(self, temp_dir):
         """创建模拟的Context对象"""
         context = Mock()
-        context.get_data_dir.return_value = temp_dir
+        context.get_data_dir.return_value = Path(temp_dir)
         return context
     
     @pytest.fixture

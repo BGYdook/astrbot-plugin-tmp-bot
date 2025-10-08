@@ -152,7 +152,7 @@ class TmpBotPlugin(Star):
             user_id = event.get_sender_id()
             tmp_id = self._get_bound_tmp_id(user_id)
             if not tmp_id:
-                yield event.plain_result("请输入正确的玩家编号，格式：tmpquery 123456 或 tmpquery123456\n💡 提示：您也可以先使用 tmpbind 绑定您的TMP账号，之后直接使用 tmpquery 查询")
+                yield event.plain_result("请输入正确的玩家编号，格式：tmpquery 123456\n💡 提示：您也可以先使用 tmpbind 绑定您的TMP账号，之后直接使用 tmpquery 查询")
                 return
 
         logger.info(f"查询TMP玩家: {tmp_id}")
@@ -211,7 +211,7 @@ class TmpBotPlugin(Star):
         tmp_id = self._extract_tmp_id(message_text, "tmpbind")
         
         if not tmp_id:
-            yield event.plain_result("请输入正确的玩家编号，格式：tmpbind 123456 或 tmpbind123456")
+            yield event.plain_result("请输入正确的玩家编号，格式：tmpbind 123456")
             return
 
         # 验证TMP ID是否存在
@@ -260,7 +260,7 @@ class TmpBotPlugin(Star):
             user_id = event.get_sender_id()
             tmp_id = self._get_bound_tmp_id(user_id)
             if not tmp_id:
-                yield event.plain_result("请输入正确的玩家编号，格式：tmpposition 123456 或 tmpposition123456\n💡 提示：您也可以先使用 tmpbind 绑定您的TMP账号，之后直接使用 tmpposition 查询")
+                yield event.plain_result("请输入正确的玩家编号，格式：tmpposition 123456\n💡 提示：您也可以先使用 tmpbind 绑定您的TMP账号，之后直接使用 tmpposition 查询")
                 return
 
         logger.info(f"查询TMP玩家位置: {tmp_id}")
