@@ -111,7 +111,7 @@ class TmpBotPlugin(Star):
         session = await self._get_session()
         try:
             # 使用TruckersMP API查询玩家基本信息
-            async with session.get(f"https://api.truckersmp.com/v2/player/{tmp_id}") as resp:
+            async with session.get(f"https://api.truckersmp.com/v2/version/{tmp_id}") as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     if data.get('error'):
@@ -221,7 +221,7 @@ class TmpBotPlugin(Star):
         
         yield event.plain_result(message)
 
-    @filter.command("tmpbind")
+    @filter.command("绑定")
     async def tmpbind(self, event: AstrMessageEvent):
         """TMP账号绑定指令"""
         message_text = event.message_str.strip()
@@ -313,7 +313,7 @@ class TmpBotPlugin(Star):
         
         yield event.plain_result(message)
 
-    @filter.command("tmpserver")
+    @filter.command("服务器")
     async def tmpserver(self, event: AstrMessageEvent):
         """TMP服务器状态查询指令"""
         logger.info("查询TMP服务器状态")
