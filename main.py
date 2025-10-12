@@ -192,6 +192,37 @@ class TmpBotPlugin(Star):
             return match.group(1)
         return None
 
+    def _format_ban_info(self, bans_info: list) -> tuple:
+        """格式化封禁信息，返回(是否封禁, 封禁次数, 活跃封禁列表, 封禁原因)"""
+        if not bans_info or not isinstance(bans_info, list):
+            return False, 0, [], ""
+        
+        # 获取活跃封禁（未过期的封禁）
+        active_bans = []
+        for ban in bans_info:
+            # 根据API文档，检查封禁是否有效
+            expired = ban.get('expired', False)
+            expiration = ban.get('expiration')
+            
+            # 如果封禁未过期，则认为是活跃封禁
+            if not expired:
+                active_bans.append(ban)
+        
+        ban_count = len(bans_info)
+        is_banned = len(active_bans) > 0
+        
+        # 构建封禁原因
+        ban_reason = ""
+        if active_bans:
+            # 取最近的活跃封禁
+            latest_ban = active_bans[0]
+            reason = latest_ban.get('reason', '')
+            # 如果有封禁原因，直接使用
+            if reason:
+                ban_reason = reason
+        
+        return is_banned, ban_count, active_bans, ban_reason
+
     @filter.command("查询")
     async def tmpquery(self, event: AstrMessageEvent):
         """TMP玩家完整信息查询"""
@@ -229,6 +260,9 @@ class TmpBotPlugin(Star):
         except (NetworkException, ApiResponseException, TmpApiException) as e:
             yield event.plain_result(f"查询失败: {str(e)}")
             return
+        
+        # 格式化封禁信息
+        is_banned, ban_count, active_bans, ban_reason = self._format_ban_info(bans_info)
         
         # 根据官方API文档构建完整的回复消息
         message = "🚛 TMP玩家详细信息\n"
@@ -270,13 +304,13 @@ class TmpBotPlugin(Star):
                 if groups:
                     message += f"💼所属分组: {', '.join(groups)}\n"
                 else:
-                    message += f"💼所属分组: 普通玩家\n"
+                    message += f"💼所属分组: 玩家\n"
             elif isinstance(perms, list) and perms:
                 message += f"💼所属分组: {', '.join(perms)}\n"
             elif perms:
                 message += f"💼所属分组: {perms}\n"
         else:
-            message += f"💼所属分组: 普通玩家\n"
+            message += f"💼所属分组: 玩家\n"
         
         # 🚚所属车队 (删除车队ID显示)
         if player_info.get('vtc'):
@@ -288,23 +322,30 @@ class TmpBotPlugin(Star):
         else:
             message += f"🚚所属车队: 无\n"
         
-        # 🚫封禁信息
-        active_bans = [ban for ban in bans_info if ban.get('expiration') and not ban.get('expired')]
-        ban_count = len(bans_info)
+        # 🚫封禁信息 - 使用格式化后的封禁信息
+        message += f"🚫是否封禁: {'是' if is_banned else '否'}\n"
         
-        if active_bans:
-            message += f"🚫是否封禁: 是\n"
+        if is_banned:
             message += f"🚫封禁次数: {ban_count}次\n"
-            # 显示最近的封禁
-            latest_ban = active_bans[0]
-            if latest_ban.get('reason'):
-                message += f"🚫封禁原因: {latest_ban.get('reason')}\n"
-            if latest_ban.get('expiration'):
-                message += f"🚫封禁截止: {latest_ban.get('expiration')}\n"
-            if latest_ban.get('admin'):
-                message += f"🚫封禁管理: {latest_ban.get('admin')}\n"
+            
+            # 显示封禁原因
+            if ban_reason:
+                message += f"🚫封禁原因: {ban_reason}\n"
+            else:
+                message += f"🚫封禁原因: 未知原因\n"
+            
+            # 显示封禁截止时间（如果有）
+            if active_bans:
+                latest_ban = active_bans[0]
+                expiration = latest_ban.get('expiration')
+                if expiration:
+                    message += f"🚫封禁截止: {expiration}\n"
+                
+                # 显示封禁管理员（如果有）
+                admin = latest_ban.get('admin')
+                if admin:
+                    message += f"🚫封禁管理: {admin}\n"
         else:
-            message += f"🚫是否封禁: 否\n"
             if ban_count > 0:
                 message += f"🚫历史封禁: {ban_count}次\n"
         
