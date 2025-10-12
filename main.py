@@ -49,7 +49,7 @@ class TmpBotPlugin(Star):
         os.makedirs(self.data_dir, exist_ok=True)
         logger.info("TMP Bot 插件已加载")
 
-    # --- 内部工具方法 (为简洁省略实现) ---
+    # --- 内部工具方法 ---
     def _load_bindings(self) -> Dict[str, any]:
         try:
             if os.path.exists(self.bind_file):
@@ -136,7 +136,7 @@ class TmpBotPlugin(Star):
             return {'online': False}
 
     def _extract_tmp_id(self, message: str) -> Optional[str]:
-        """从消息中提取数字ID（用于 @filter.command 的后置文本）。"""
+        """从消息中提取数字ID。"""
         parts = message.strip().split()
         if parts and parts[0].isdigit():
              return parts[0]
@@ -159,8 +159,17 @@ class TmpBotPlugin(Star):
     @filter.command("查询")
     async def tmpquery(self, event: AstrMessageEvent):
         """[命令: /查询] TMP玩家完整信息查询。"""
-        # 使用 event.get_content() 获取命令后的内容
-        message_content = event.get_content().strip()
+        # *** 修复兼容性问题：使用 event.message_str 手动解析参数 ***
+        message_str = event.message_str.strip()
+        
+        # 移除 "/查询" 部分，获取参数内容
+        command_prefix = "/查询"
+        if message_str.startswith(command_prefix):
+            message_content = message_str[len(command_prefix):].strip()
+        else:
+            # 处理没有'/查询'但被识别为命令的情况（例如通过其他过滤器）
+            message_content = "" 
+
         tmp_id = self._extract_tmp_id(message_content)
         
         if not tmp_id:
@@ -232,7 +241,15 @@ class TmpBotPlugin(Star):
     @filter.command("绑定")
     async def tmpbind(self, event: AstrMessageEvent):
         """[命令: /绑定] 绑定QQ/群用户ID与TruckersMP ID。"""
-        message_content = event.get_content().strip()
+        # *** 修复兼容性问题：使用 event.message_str 手动解析参数 ***
+        message_str = event.message_str.strip()
+        
+        command_prefix = "/绑定"
+        if message_str.startswith(command_prefix):
+            message_content = message_str[len(command_prefix):].strip()
+        else:
+            message_content = ""
+            
         tmp_id = self._extract_tmp_id(message_content)
         
         if not tmp_id:
@@ -278,7 +295,14 @@ class TmpBotPlugin(Star):
     @filter.command("状态")
     async def tmpstatus(self, event: AstrMessageEvent):
         """[命令: /状态] 查询玩家的实时在线状态。"""
-        message_content = event.get_content().strip()
+        # 使用 event.message_str 获取命令后的内容
+        message_str = event.message_str.strip()
+        command_prefix = "/状态"
+        if message_str.startswith(command_prefix):
+            message_content = message_str[len(command_prefix):].strip()
+        else:
+            message_content = ""
+            
         tmp_id = self._extract_tmp_id(message_content)
         
         if not tmp_id:
