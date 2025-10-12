@@ -12,7 +12,6 @@ import aiohttp
 import json
 import os
 from typing import Optional, List, Dict, Tuple
-# 使用标准的 filter.command 装饰器，需要前缀 /
 from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
 from astrbot.api.star import Context, Star, register, StarTools
 from astrbot.api import logger
@@ -135,13 +134,6 @@ class TmpBotPlugin(Star):
         except Exception:
             return {'online': False}
 
-    def _extract_tmp_id(self, message: str) -> Optional[str]:
-        """从消息中提取数字ID。"""
-        parts = message.strip().split()
-        if parts and parts[0].isdigit():
-             return parts[0]
-        return None
-    
     def _format_ban_info(self, bans_info: List[Dict]) -> Tuple[bool, int, List[Dict], str]:
         if not bans_info or not isinstance(bans_info, list):
             return False, 0, [], ""
@@ -154,32 +146,30 @@ class TmpBotPlugin(Star):
         return is_banned, ban_count, active_bans, ban_reason
 
     # ******************************************************
-    # 使用 filter.command 装饰器，需要前缀 / (例如：/查询 123456)
+    # 使用 filter.message 适配无前缀命令，匹配 "查询" 或 "查询 123456"
     # ******************************************************
-    @filter.command("查询")
+    @filter.message(r"^查询\s*(\d+)?$", regex=True)
     async def tmpquery(self, event: AstrMessageEvent):
-        """[命令: /查询] TMP玩家完整信息查询。"""
-        # 使用 event.message_str 手动解析参数
+        """[命令: 查询] TMP玩家完整信息查询。"""
+        # 完整的消息内容，例如 "查询 123456"
         message_str = event.message_str.strip()
         
-        # 移除 "/查询" 部分，获取参数内容
-        command_prefix = "/查询"
-        if message_str.startswith(command_prefix):
-            message_content = message_str[len(command_prefix):].strip()
-        else:
-            message_content = "" 
+        # 1. 尝试从消息中提取 ID。
+        # 使用正则表达式从 "查询 123456" 中提取 123456
+        match = re.search(r'查询\s*(\d+)', message_str)
+        tmp_id = match.group(1) if match else None # 如果找到了数字，使用它
 
-        tmp_id = self._extract_tmp_id(message_content)
-        
-        # *** 关键修复逻辑 ***
+        # 2. 只有当用户没有输入 ID 时，才尝试使用绑定的 ID（例如只输入“查询”）
         if not tmp_id:
-            # 如果没有输入 ID，则尝试使用绑定的 ID
-            user_id = event.get_sender_id()
-            tmp_id = self._get_bound_tmp_id(user_id)
+            # 检查用户是否只输入了命令本身（例如 "查询"）
+            if message_str.strip().lower() == '查询':
+                user_id = event.get_sender_id()
+                tmp_id = self._get_bound_tmp_id(user_id)
+            
             if not tmp_id:
-                yield event.plain_result("请输入正确的玩家编号，格式：/查询 123456，或先使用 /绑定 123456 绑定您的账号。")
+                yield event.plain_result("请输入正确的玩家编号，格式：查询 123456，或先使用 绑定 123456 绑定您的账号。")
                 return
-        # *** 修复结束 ***
+        # *** 修复结束：现在 tmp_id 必定是用户输入的 ID 或绑定的 ID ***
         
         try:
             tasks = [self._get_player_info(tmp_id), self._get_player_bans(tmp_id), self._get_online_status(tmp_id)]
@@ -240,22 +230,17 @@ class TmpBotPlugin(Star):
         
         yield event.plain_result(message)
 
-    @filter.command("绑定")
+    @filter.message(r"^绑定\s*(\d+)?$", regex=True)
     async def tmpbind(self, event: AstrMessageEvent):
-        """[命令: /绑定] 绑定QQ/群用户ID与TruckersMP ID。"""
+        """[命令: 绑定] 绑定QQ/群用户ID与TruckersMP ID。"""
         # 修复兼容性问题：使用 event.message_str 手动解析参数
         message_str = event.message_str.strip()
         
-        command_prefix = "/绑定"
-        if message_str.startswith(command_prefix):
-            message_content = message_str[len(command_prefix):].strip()
-        else:
-            message_content = ""
-            
-        tmp_id = self._extract_tmp_id(message_content)
+        match = re.search(r'绑定\s*(\d+)', message_str)
+        tmp_id = match.group(1) if match else None
         
         if not tmp_id:
-            yield event.plain_result("请输入正确的玩家编号，格式：/绑定 123456")
+            yield event.plain_result("请输入正确的玩家编号，格式：绑定 123456")
             return
 
         try:
@@ -274,9 +259,9 @@ class TmpBotPlugin(Star):
         else:
             yield event.plain_result("❌ 绑定失败，请稍后重试")
 
-    @filter.command("解绑")
+    @filter.message(r"^解绑$", regex=True)
     async def tmpunbind(self, event: AstrMessageEvent):
-        """[命令: /解绑] 解除当前用户的TruckersMP ID绑定。"""
+        """[命令: 解绑] 解除当前用户的TruckersMP ID绑定。"""
         user_id = event.get_sender_id()
         bound_info = self._get_bound_tmp_id(user_id)
         
@@ -294,27 +279,23 @@ class TmpBotPlugin(Star):
         else:
             yield event.plain_result("❌ 解绑失败，请稍后重试")
 
-    @filter.command("状态")
+    @filter.message(r"^状态\s*(\d+)?$", regex=True)
     async def tmpstatus(self, event: AstrMessageEvent):
-        """[命令: /状态] 查询玩家的实时在线状态。"""
-        # 使用 event.message_str 获取命令后的内容
+        """[命令: 状态] 查询玩家的实时在线状态。"""
+        # 提取参数逻辑
         message_str = event.message_str.strip()
-        command_prefix = "/状态"
-        if message_str.startswith(command_prefix):
-            message_content = message_str[len(command_prefix):].strip()
-        else:
-            message_content = ""
-            
-        tmp_id = self._extract_tmp_id(message_content)
+        match = re.search(r'状态\s*(\d+)', message_str)
+        tmp_id = match.group(1) if match else None
         
-        # *** 关键修复逻辑 ***
+        # 优先级逻辑
         if not tmp_id:
-            user_id = event.get_sender_id()
-            tmp_id = self._get_bound_tmp_id(user_id)
+            if message_str.strip().lower() == '状态':
+                user_id = event.get_sender_id()
+                tmp_id = self._get_bound_tmp_id(user_id)
+            
             if not tmp_id:
-                yield event.plain_result("请输入正确的玩家编号，格式：/状态 123456，或先使用 /绑定 123456 绑定您的账号。")
+                yield event.plain_result("请输入正确的玩家编号，格式：状态 123456，或先使用 绑定 123456 绑定您的账号。")
                 return
-        # *** 修复结束 ***
 
         try:
             tasks = [self._get_online_status(tmp_id), self._get_player_info(tmp_id)]
@@ -343,9 +324,9 @@ class TmpBotPlugin(Star):
         
         yield event.plain_result(message)
 
-    @filter.command("服务器")
+    @filter.message(r"^服务器$", regex=True)
     async def tmpserver(self, event: AstrMessageEvent):
-        """[命令: /服务器] 查询TruckersMP官方服务器的实时状态。"""
+        """[命令: 服务器] 查询TruckersMP官方服务器的实时状态。"""
         try:
             url = "https://api.truckersmp.com/v2/servers"
             async with aiohttp.ClientSession(headers={'User-Agent': 'AstrBot-TMP-Plugin/1.0.0'}) as session:
@@ -373,20 +354,20 @@ class TmpBotPlugin(Star):
         except Exception as e:
             yield event.plain_result("网络请求失败")
 
-    @filter.command("帮助")
+    @filter.message(r"^帮助$", regex=True)
     async def tmphelp(self, event: AstrMessageEvent):
-        """[命令: /帮助] 显示本插件的命令使用说明。"""
-        help_text = """🚛 TMP查询插件使用说明 (需要斜杠前缀)
+        """[命令: 帮助] 显示本插件的命令使用说明。"""
+        help_text = """🚛 TMP查询插件使用说明 (无前缀命令)
 
 📋 可用命令:
-/查询 123456    - 查询玩家完整信息
-/状态 123456    - 查询玩家在线状态  
-/绑定 123456    - 绑定TMP账号
-/解绑          - 解除账号绑定
-/服务器        - 查看服务器状态
-/帮助          - 显示此帮助信息
+查询 123456    - 查询玩家完整信息
+状态 123456    - 查询玩家在线状态  
+绑定 123456    - 绑定TMP账号
+解绑          - 解除账号绑定
+服务器        - 查看服务器状态
+帮助          - 显示此帮助信息
 
-💡 使用提示: 绑定后可直接使用 /查询 和 /状态 (无需参数)
+💡 使用提示: 绑定后可直接使用 查询 和 状态 (无需参数)
 """
         yield event.plain_result(help_text)
 
