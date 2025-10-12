@@ -159,7 +159,7 @@ class TmpBotPlugin(Star):
     @filter.command("查询")
     async def tmpquery(self, event: AstrMessageEvent):
         """[命令: /查询] TMP玩家完整信息查询。"""
-        # *** 修复兼容性问题：使用 event.message_str 手动解析参数 ***
+        # 使用 event.message_str 手动解析参数
         message_str = event.message_str.strip()
         
         # 移除 "/查询" 部分，获取参数内容
@@ -167,17 +167,19 @@ class TmpBotPlugin(Star):
         if message_str.startswith(command_prefix):
             message_content = message_str[len(command_prefix):].strip()
         else:
-            # 处理没有'/查询'但被识别为命令的情况（例如通过其他过滤器）
             message_content = "" 
 
         tmp_id = self._extract_tmp_id(message_content)
         
+        # *** 关键修复逻辑 ***
         if not tmp_id:
+            # 如果没有输入 ID，则尝试使用绑定的 ID
             user_id = event.get_sender_id()
             tmp_id = self._get_bound_tmp_id(user_id)
             if not tmp_id:
                 yield event.plain_result("请输入正确的玩家编号，格式：/查询 123456，或先使用 /绑定 123456 绑定您的账号。")
                 return
+        # *** 修复结束 ***
         
         try:
             tasks = [self._get_player_info(tmp_id), self._get_player_bans(tmp_id), self._get_online_status(tmp_id)]
@@ -241,7 +243,7 @@ class TmpBotPlugin(Star):
     @filter.command("绑定")
     async def tmpbind(self, event: AstrMessageEvent):
         """[命令: /绑定] 绑定QQ/群用户ID与TruckersMP ID。"""
-        # *** 修复兼容性问题：使用 event.message_str 手动解析参数 ***
+        # 修复兼容性问题：使用 event.message_str 手动解析参数
         message_str = event.message_str.strip()
         
         command_prefix = "/绑定"
@@ -305,12 +307,14 @@ class TmpBotPlugin(Star):
             
         tmp_id = self._extract_tmp_id(message_content)
         
+        # *** 关键修复逻辑 ***
         if not tmp_id:
             user_id = event.get_sender_id()
             tmp_id = self._get_bound_tmp_id(user_id)
             if not tmp_id:
                 yield event.plain_result("请输入正确的玩家编号，格式：/状态 123456，或先使用 /绑定 123456 绑定您的账号。")
                 return
+        # *** 修复结束 ***
 
         try:
             tasks = [self._get_online_status(tmp_id), self._get_player_info(tmp_id)]
@@ -382,7 +386,7 @@ class TmpBotPlugin(Star):
 /服务器        - 查看服务器状态
 /帮助          - 显示此帮助信息
 
-💡 使用提示: 绑定后可直接使用 /查询 和 /状态
+💡 使用提示: 绑定后可直接使用 /查询 和 /状态 (无需参数)
 """
         yield event.plain_result(help_text)
 
