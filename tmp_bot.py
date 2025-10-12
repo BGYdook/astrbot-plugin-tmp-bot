@@ -19,7 +19,7 @@ from astrbot.api import logger
 
 # 自定义异常类
 class TmpApiException(Exception):
-    """TMP API相关异常的基类"""
+    """TMP 相关异常的基类"""
     pass
 
 
