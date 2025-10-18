@@ -38,7 +38,7 @@ class ApiResponseException(TmpApiException):
     pass
 
 
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.0.3", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.0.4", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context: Context):
         """初始化插件，设置数据路径和HTTP会话。"""
@@ -52,9 +52,11 @@ class TmpBotPlugin(Star):
     async def initialize(self):
         """初始化网络会话"""
         self.session = aiohttp.ClientSession(
-            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.0.3'},
+            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.0.4'},
             timeout=aiohttp.ClientTimeout(total=10)
         )
+        # 注册消息处理器
+        self.context.register_message_handler(self.handle_message)
 
     # --- 内部工具方法 ---
     def _load_bindings(self) -> Dict[str, Any]:
@@ -188,25 +190,39 @@ class TmpBotPlugin(Star):
                 perms_str = ', '.join(perms)
         return perms_str
 
-    async def on_message(self, event: AstrMessageEvent) -> MessageEventResult | None:
-        """处理所有消息事件"""
+    async def handle_message(self, event: AstrMessageEvent) -> Optional[MessageEventResult]:
+        """处理消息事件"""
         message_str = event.message_str.strip()
+        logger.info(f"TMP插件收到消息: {message_str}")
         
-        logger.info(f"收到消息: {message_str}")
-        
-        # 使用更精确的匹配
-        if message_str.startswith("查询"):
-            return await self._handle_query(event, message_str)
+        # 检查是否是TMP相关命令
+        if message_str in ["服务器", "帮助", "解绑"]:
+            return await self._process_command(event, message_str)
+        elif message_str.startswith("查询"):
+            return await self._process_command(event, "查询", message_str)
         elif message_str.startswith("绑定"):
-            return await self._handle_bind(event, message_str)
-        elif message_str == "解绑":
-            return await self._handle_unbind(event)
+            return await self._process_command(event, "绑定", message_str)
         elif message_str.startswith("状态"):
-            return await self._handle_status(event, message_str)
-        elif message_str == "服务器":
+            return await self._process_command(event, "状态", message_str)
+        
+        return None
+
+    async def _process_command(self, event: AstrMessageEvent, command: str, full_message: str = None):
+        """处理具体命令"""
+        logger.info(f"处理TMP命令: {command}, 完整消息: {full_message or command}")
+        
+        if command == "服务器":
             return await self._handle_server(event)
-        elif message_str == "帮助":
+        elif command == "帮助":
             return await self._handle_help(event)
+        elif command == "解绑":
+            return await self._handle_unbind(event)
+        elif command == "查询":
+            return await self._handle_query(event, full_message)
+        elif command == "绑定":
+            return await self._handle_bind(event, full_message)
+        elif command == "状态":
+            return await self._handle_status(event, full_message)
         
         return None
 
