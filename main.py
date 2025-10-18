@@ -3,7 +3,7 @@
 
 """
 AstrBot-plugin-tmp-bot
-欧卡2TMP查询插件 - AstrBot版本 (版本 1.2.1：修复 Steam ID 转换逻辑并显示 Steam ID)
+欧卡2TMP查询插件 - AstrBot版本 (版本 1.2.2：修正 ID 解析主逻辑，确保绑定和输入均正常)
 """
 
 import re
@@ -88,8 +88,8 @@ class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
 
-# 版本号更新为 1.2.1
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.2.1", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
+# 版本号更新为 1.2.2
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.2.2", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context: Context):
         """初始化插件，设置数据路径和HTTP会话引用。"""
@@ -103,12 +103,12 @@ class TmpBotPlugin(Star):
     async def initialize(self):
         """在插件启动时，创建持久的HTTP会话。"""
         self.session = aiohttp.ClientSession(
-            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.2.1'},
+            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.2.2'},
             timeout=aiohttp.ClientTimeout(total=10)
         )
         logger.info("TMP Bot 插件HTTP会话已创建")
 
-    # --- 内部工具方法 (保持不变) ---
+    # --- 内部工具方法 (数据持久化部分保持不变) ---
     def _load_bindings(self) -> Dict[str, Any]:
         try:
             if os.path.exists(self.bind_file):
@@ -250,39 +250,8 @@ class TmpBotPlugin(Star):
 
 
     # ******************************************************
-    # 命令处理器 (版本 1.2.1 - 修复 Steam ID 转换逻辑并显示 Steam ID)
+    # 命令处理器 (版本 1.2.2 - 修正 ID 解析主逻辑)
     # ******************************************************
-    
-    # 辅助函数：解析用户输入的 ID (可以是 TMP ID 或 Steam ID)
-    async def _resolve_input_id(self, message_str: str, user_id: str) -> Tuple[Optional[str], Optional[str]]:
-        """尝试从消息中解析出 ID，并将其解析为 TMP ID。
-        返回 (tmp_id, original_id)
-        """
-        # 匹配命令后的数字（TMP ID 或 Steam ID）
-        match = re.search(r'(查询|绑定|状态|定位)\s*(\d+)', message_str) 
-        input_id = match.group(2) if match else None
-        
-        if not input_id:
-            # 尝试从绑定中获取（此时 input_id 必须是 TMP ID）
-            if message_str.strip().lower() in ['查询', '状态', '定位']:
-                tmp_id = self._get_bound_tmp_id(user_id)
-                return tmp_id, None # 绑定查询，不显示原始ID
-            
-            return None, None # 格式无效
-        
-        # 1. 如果输入的是 Steam ID (17位数字，通常以 7 开头)
-        if len(input_id) == 17 and input_id.startswith('7'):
-            # 这是一个 Steam ID，需要转换
-            tmp_id = await self._get_tmp_id_from_steam_id(input_id)
-            return tmp_id, input_id
-        
-        # 2. 如果输入的是 TMP ID (小于 17 位的数字)
-        elif len(input_id) < 17 and len(input_id) > 1:
-            return input_id, None # TMP ID 查询，不显示原始ID
-        
-        # 格式无效
-        return None, None 
-
     
     @filter.command(r"查询", regex=True)
     async def tmpquery(self, event: AstrMessageEvent):
@@ -290,19 +259,33 @@ class TmpBotPlugin(Star):
         message_str = event.message_str.strip()
         user_id = event.get_sender_id()
         
-        try:
-            # 尝试解析并转换 ID
-            tmp_id, steam_id_to_display = await self._resolve_input_id(message_str, user_id)
-        except SteamIdNotFoundException as e:
-            yield event.plain_result(str(e))
-            return
-        except NetworkException as e:
-            yield event.plain_result(f"查询失败: {str(e)}")
-            return
-        except Exception:
-             yield event.plain_result("ID解析失败，请确保格式为：查询 [TMP ID] 或 查询 [Steam ID]")
-             return
-             
+        # 1. 尝试从命令中提取 ID (TMP ID 或 Steam ID)
+        match = re.search(r'查询\s*(\d+)', message_str) 
+        input_id = match.group(1) if match else None
+        
+        tmp_id = None
+        steam_id_to_display = None
+
+        if input_id:
+            # 2. 如果输入了 ID
+            if len(input_id) == 17 and input_id.startswith('7'):
+                # 2a. 是 Steam ID，尝试转换
+                try:
+                    tmp_id = await self._get_tmp_id_from_steam_id(input_id)
+                    steam_id_to_display = input_id
+                except SteamIdNotFoundException as e:
+                    yield event.plain_result(str(e))
+                    return
+                except NetworkException as e:
+                    yield event.plain_result(f"查询失败: {str(e)}")
+                    return
+            else:
+                # 2b. 假设是 TMP ID
+                tmp_id = input_id
+        else:
+            # 3. 如果没有输入 ID，尝试从绑定中获取
+            tmp_id = self._get_bound_tmp_id(user_id)
+        
         if not tmp_id:
             yield event.plain_result("请输入正确的玩家编号（TMP ID 或 Steam ID），或先使用 绑定 [TMP ID] 绑定您的账号。")
             return
@@ -394,14 +377,15 @@ class TmpBotPlugin(Star):
         
         yield event.plain_result(message)
 
-    # 以下命令处理器需要确保调用 _resolve_input_id
+    # 以下命令处理器保持不变，但对 tmpbind 和 tmpstatus 进行了类似的 ID 解析修正。
+    
     @filter.command(r"绑定", regex=True)
     async def tmpbind(self, event: AstrMessageEvent):
         """[命令: 绑定] 绑定您的聊天账号与TMP ID。支持输入 TMP ID 或 Steam ID。"""
         message_str = event.message_str.strip()
         user_id = event.get_sender_id()
         
-        # 这里需要稍微调整，只匹配数字，然后交给 resolve 处理
+        # 尝试从命令中提取 ID
         match = re.search(r'绑定\s*(\d+)', message_str)
         input_id = match.group(1) if match else None
 
@@ -409,7 +393,6 @@ class TmpBotPlugin(Star):
             yield event.plain_result("请输入正确的玩家编号，格式：绑定 [TMP ID] 或 绑定 [Steam ID]")
             return
 
-        # 重新执行 resolve 逻辑，但这里只处理输入
         tmp_id = input_id
         is_steam_id = (len(input_id) == 17 and input_id.startswith('7'))
 
@@ -466,20 +449,34 @@ class TmpBotPlugin(Star):
         """[命令: 状态/定位] 查询玩家的实时在线状态。支持输入 TMP ID 或 Steam ID。"""
         message_str = event.message_str.strip()
         user_id = event.get_sender_id()
+        
+        # 1. 尝试从命令中提取 ID (TMP ID 或 Steam ID)
+        match = re.search(r'(状态|定位)\s*(\d+)', message_str) 
+        input_id = match.group(2) if match else None
+        
+        tmp_id = None
+        steam_id_to_display = None
 
-        try:
-            # 尝试解析并转换 ID
-            tmp_id, steam_id_to_display = await self._resolve_input_id(message_str, user_id)
-        except SteamIdNotFoundException as e:
-            yield event.plain_result(str(e))
-            return
-        except NetworkException as e:
-            yield event.plain_result(f"查询失败: {str(e)}")
-            return
-        except Exception:
-             yield event.plain_result("ID解析失败，请确保格式为：状态 [TMP ID] 或 状态 [Steam ID]")
-             return
-
+        if input_id:
+            # 2. 如果输入了 ID
+            if len(input_id) == 17 and input_id.startswith('7'):
+                # 2a. 是 Steam ID，尝试转换
+                try:
+                    tmp_id = await self._get_tmp_id_from_steam_id(input_id)
+                    steam_id_to_display = input_id
+                except SteamIdNotFoundException as e:
+                    yield event.plain_result(str(e))
+                    return
+                except NetworkException as e:
+                    yield event.plain_result(f"查询失败: {str(e)}")
+                    return
+            else:
+                # 2b. 假设是 TMP ID
+                tmp_id = input_id
+        else:
+            # 3. 如果没有输入 ID，尝试从绑定中获取
+            tmp_id = self._get_bound_tmp_id(user_id)
+        
         if not tmp_id:
             yield event.plain_result("请输入正确的玩家编号（TMP ID 或 Steam ID），或先使用 绑定 [TMP ID] 绑定您的账号。")
             return
