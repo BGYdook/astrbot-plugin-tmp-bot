@@ -61,43 +61,22 @@ class TmpBotPlugin(Star):
             timeout=aiohttp.ClientTimeout(total=10)
         )
         
-        # 🚨 最终修复：将所有命令封装成一个 List[Dict] 传递给 register_commands
-        commands = [
-            {
-                "name": "查询",
-                "description": "查询TMP玩家完整信息 (查询 ID)",
-                "handler": self._handle_query
-            },
-            {
-                "name": "状态",
-                "description": "查询玩家在线状态和位置 (状态 ID)",
-                "handler": self._handle_status
-            },
-            {
-                "name": "绑定", 
-                "description": "绑定TMP账号 (绑定 ID)",
-                "handler": self._handle_bind
-            },
-            {
-                "name": "解绑",
-                "description": "解绑TMP账号", 
-                "handler": self._handle_unbind
-            },
-            {
-                "name": "服务器",
-                "description": "查看TMP服务器状态",
-                "handler": self._handle_server
-            },
-            {
-                "name": "帮助",
-                "description": "显示插件帮助信息",
-                "handler": self._handle_help
-            }
+        # 🚨 最终修复：定义命令列表，包含 command_name, desc, handler
+        commands_to_register = [
+            # 顺序: command_name, desc, handler
+            ("查询", "查询TMP玩家完整信息 (查询 ID)", self._handle_query),
+            ("状态", "查询玩家在线状态和位置 (状态 ID)", self._handle_status),
+            ("绑定", "绑定TMP账号 (绑定 ID)", self._handle_bind),
+            ("解绑", "解绑TMP账号", self._handle_unbind),
+            ("服务器", "查看TMP服务器状态", self._handle_server),
+            ("帮助", "显示插件帮助信息", self._handle_help),
         ]
         
-        # 将命令列表传递给 register_commands
-        self.context.register_commands(commands)
-        # 修复完毕
+        # 循环注册每个命令，传入所有4个必要的位置参数 (command_name, desc, priority=0, awaitable=handler)
+        # priority 设为 0 作为默认值
+        for name, desc, handler in commands_to_register:
+            self.context.register_commands(name, desc, 0, handler)
+        
     
     # --- 数据持久化方法 (保持不变) ---
     def _load_bindings(self) -> Dict[str, Any]:
