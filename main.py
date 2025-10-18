@@ -3,7 +3,7 @@
 
 """
 AstrBot-plugin-tmp-bot
-欧卡2TMP查询插件 - AstrBot版本 (版本 1.2.5：优化群聊命令匹配，尝试解决群内无法直接响应问题)
+欧卡2TMP查询插件 - AstrBot版本 (版本 1.2.7：恢复标准命令匹配模式，依赖框架处理群聊前缀)
 """
 
 import re
@@ -21,7 +21,8 @@ try:
 except ImportError:
     # 最小化兼容回退
     class _DummyFilter:
-        def command(self, pattern, **kwargs):
+        # 移除 regex=True 确保匹配的是固定命令，而不是正则
+        def command(self, pattern, **kwargs): 
             def decorator(func):
                 return func
             return decorator
@@ -88,8 +89,8 @@ class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
 
-# 版本号更新为 1.2.5
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.2.5", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
+# 版本号更新为 1.2.7
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.2.7", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context: Context):
         """初始化插件，设置数据路径和HTTP会话引用。"""
@@ -103,7 +104,7 @@ class TmpBotPlugin(Star):
     async def initialize(self):
         """在插件启动时，创建持久的HTTP会话。"""
         self.session = aiohttp.ClientSession(
-            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.2.5'},
+            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.2.7'},
             timeout=aiohttp.ClientTimeout(total=10)
         )
         logger.info("TMP Bot 插件HTTP会话已创建")
@@ -159,7 +160,6 @@ class TmpBotPlugin(Star):
             raise NetworkException("插件未初始化，HTTP会话不可用")
         
         try:
-            # 使用 Trucky API 进行 Steam ID 到 TMP ID 的转换
             url = f"https://api.truckyapp.com/v2/truckersmp/player/get_by_steamid/{steam_id}"
             
             async with self.session.get(url, timeout=10) as response:
@@ -255,27 +255,24 @@ class TmpBotPlugin(Star):
 
 
     # ******************************************************
-    # 命令处理器 (版本 1.2.5 - 优化群聊匹配)
+    # 命令处理器 (版本 1.2.7 - 恢复标准命令匹配)
     # ******************************************************
     
-    # 核心修改：使用 ^\s* 匹配开头的空格或 @ 符号后的内容
-    @filter.command(r"^\s*查询", regex=True)
+    # 恢复为标准命令匹配，不再使用正则表达式前缀匹配
+    @filter.command("查询") 
     async def tmpquery(self, event: AstrMessageEvent):
         """[命令: 查询] TMP玩家完整信息查询。支持输入 TMP ID 或 Steam ID。"""
         message_str = event.message_str.strip()
         user_id = event.get_sender_id()
         
-        # 1. 尝试从命令中提取 ID (TMP ID 或 Steam ID)
-        # 修正：匹配 '查询' 后面紧跟着的空格和数字
+        # 匹配 '查询' 后面的空格和数字
         match = re.search(r'查询\s*(\d+)', message_str) 
         input_id = match.group(1) if match else None
         
         tmp_id = None
         
         if input_id:
-            # 2. 如果输入了 ID
             if len(input_id) == 17 and input_id.startswith('7'):
-                # 2a. 是 Steam ID，尝试转换
                 try:
                     tmp_id = await self._get_tmp_id_from_steam_id(input_id)
                 except SteamIdNotFoundException as e:
@@ -285,10 +282,8 @@ class TmpBotPlugin(Star):
                     yield event.plain_result(f"查询失败: {str(e)}")
                     return
             else:
-                # 2b. 假设是 TMP ID
                 tmp_id = input_id
         else:
-            # 3. 如果没有输入 ID，尝试从绑定中获取
             tmp_id = self._get_bound_tmp_id(user_id)
         
         if not tmp_id:
@@ -316,13 +311,13 @@ class TmpBotPlugin(Star):
         ban_count, sorted_bans = self._format_ban_info(bans_info)
         
         # 完整的回复消息构建 (纯文本输出)
-        message = "🚛 TMP玩家详细信息\n"
+        message = "TMP玩家详细信息\n"
         message += "=" * 20 + "\n"
         message += f"ID TMP编号: {tmp_id}\n"
         if steam_id_to_display:
             message += f"ID Steam编号: {steam_id_to_display}\n" 
             
-        message += f"😀 玩家名称: {player_info.get('name', '未知')}\n"
+        message += f"玩家名称: {player_info.get('name', '未知')}\n"
         
         # 权限/分组信息
         perms_str = "玩家"
@@ -334,21 +329,19 @@ class TmpBotPlugin(Star):
                     perms_str = ', '.join(groups)
             elif isinstance(perms, list) and perms:
                 perms_str = ', '.join(perms)
-        message += f"💼 所属分组: {perms_str}\n"
+        message += f"所属分组: {perms_str}\n"
 
         vtc_name = player_info.get('vtc', {}).get('name')
         vtc_role = player_info.get('vtc', {}).get('role')
-        message += f"🚚 所属车队: {vtc_name if vtc_name else '无'}\n"
+        message += f"所属车队: {vtc_name if vtc_name else '无'}\n"
         if vtc_role:
-             message += f"🚚 车队角色: {vtc_role}\n"
+             message += f"车队角色: {vtc_role}\n"
         
-        message += f"🚫 是否封禁: {'是 🚨' if is_banned else '否 ✅'}\n"
+        message += f"是否封禁: {'是' if is_banned else '否'}\n"
         
-        # 1. 如果有历史记录，显示次数
         if ban_count > 0:
-            message += f"🚫 历史封禁: {ban_count}次\n"
+            message += f"历史封禁: {ban_count}次\n"
 
-        # 2. 如果当前被封禁 (is_banned = True)
         if is_banned:
             
             current_ban = None
@@ -361,41 +354,39 @@ class TmpBotPlugin(Star):
                 ban_reason = current_ban.get('reason', '未知封禁原因 (API V2)')
                 ban_expiration = current_ban.get('expiration', banned_until_main) 
                 
-                message += f"🚫 当前封禁原因: {ban_reason}\n"
+                message += f"当前封禁原因: {ban_reason}\n"
                 
                 if ban_expiration and ban_expiration.lower().startswith('never'):
-                    message += f"🚫 封禁截止: 永久封禁\n"
+                    message += f"封禁截止: 永久封禁\n"
                 else:
-                    message += f"🚫 封禁截止: {ban_expiration}\n"
+                    message += f"封禁截止: {ban_expiration}\n"
                     
             else:
-                # Fallback: is_banned=True, 但详细记录缺失或无法匹配
-                message += f"🚫 当前封禁原因: API详细记录缺失。可能原因：封禁信息被隐藏或数据同步延迟。\n"
+                message += f"当前封禁原因: API详细记录缺失。可能原因：封禁信息被隐藏或数据同步延迟。\n"
                 if banned_until_main and banned_until_main.lower().startswith('never'):
-                    message += f"🚫 封禁截止: 永久封禁\n"
+                    message += f"封禁截止: 永久封禁\n"
                 else:
-                    message += f"🚫 封禁截止: {banned_until_main}\n"
+                    message += f"封禁截止: {banned_until_main}\n"
         
         
         if online_status and online_status.get('online'):
             server_name = online_status.get('serverName', '未知服务器')
             game_mode = "欧卡2" if online_status.get('game', 0) == 1 else "美卡2" if online_status.get('game', 0) == 2 else "未知游戏"
             city = online_status.get('city', {}).get('name', '未知城市')
-            message += f"📶 在线状态: 在线 🟢\n"
-            message += f"🖥️ 所在服务器: {server_name}\n"
-            message += f"🗺️ 所在位置: {city} ({game_mode})\n"
+            message += f"在线状态: 在线\n"
+            message += f"所在服务器: {server_name}\n"
+            message += f"所在位置: {city} ({game_mode})\n"
         else:
-            message += f"📶 在线状态: 离线 🔴\n"
+            message += f"在线状态: 离线\n"
         
         yield event.plain_result(message)
 
-    @filter.command(r"^\s*绑定", regex=True)
+    @filter.command("绑定")
     async def tmpbind(self, event: AstrMessageEvent):
         """[命令: 绑定] 绑定您的聊天账号与TMP ID。支持输入 TMP ID 或 Steam ID。"""
         message_str = event.message_str.strip()
         user_id = event.get_sender_id()
         
-        # 尝试从命令中提取 ID
         match = re.search(r'绑定\s*(\d+)', message_str)
         input_id = match.group(1) if match else None
 
@@ -408,7 +399,6 @@ class TmpBotPlugin(Star):
 
         if is_steam_id:
             try:
-                # 尝试转换 Steam ID
                 tmp_id = await self._get_tmp_id_from_steam_id(input_id)
             except SteamIdNotFoundException:
                 yield event.plain_result(f"Steam ID {input_id} 未在 TruckersMP 中注册，无法绑定。")
@@ -417,7 +407,6 @@ class TmpBotPlugin(Star):
                 yield event.plain_result("Steam ID 转换服务请求失败，请稍后再试。")
                 return
 
-        # 无论是 TMP ID 还是转换后的 ID，都用 tmp_id 进行查询和绑定
         try:
             player_info = await self._get_player_info(tmp_id)
         except PlayerNotFoundException:
@@ -429,22 +418,20 @@ class TmpBotPlugin(Star):
 
         player_name = player_info.get('name', '未知')
         
-        # 获取 Steam ID 用于显示
         steam_id_display = self._get_steam_id_from_player_info(player_info)
         
         if self._bind_tmp_id(user_id, tmp_id, player_name):
             
-            # 构建绑定成功消息
-            message = f"✅ 绑定成功！\n"
+            message = f"绑定成功！\n"
             message += f"已将您的账号与TMP玩家 {player_name} (ID: {tmp_id}) 绑定\n"
             if steam_id_display:
                 message += f"该玩家的 Steam ID: {steam_id_display}"
             
             yield event.plain_result(message)
         else:
-            yield event.plain_result("❌ 绑定失败，请稍后重试")
+            yield event.plain_result("绑定失败，请稍后重试")
 
-    @filter.command(r"^\s*解绑", regex=True)
+    @filter.command("解绑")
     async def tmpunbind(self, event: AstrMessageEvent):
         """[命令: 解绑] 解除当前用户的TruckersMP ID绑定。"""
         user_id = event.get_sender_id()
@@ -452,32 +439,30 @@ class TmpBotPlugin(Star):
         tmp_id = user_binding.get('tmp_id')
         
         if not tmp_id:
-            yield event.plain_result("❌ 您还没有绑定任何TMP账号")
+            yield event.plain_result("您还没有绑定任何TMP账号")
             return
         
         player_name = user_binding.get('player_name', '未知玩家')
         
         if self._unbind_tmp_id(user_id):
-            yield event.plain_result(f"✅ 解绑成功！\n已解除与TMP玩家 {player_name} (ID: {tmp_id}) 的绑定")
+            yield event.plain_result(f"解绑成功！\n已解除与TMP玩家 {player_name} (ID: {tmp_id}) 的绑定")
         else:
-            yield event.plain_result("❌ 解绑失败，请稍后重试")
+            yield event.plain_result("解绑失败，请稍后重试")
 
-    @filter.command(r"^\s*(状态|定位)", regex=True)
+    @filter.command("状态", "定位")
     async def tmpstatus(self, event: AstrMessageEvent):
         """[命令: 状态/定位] 查询玩家的实时在线状态。支持输入 TMP ID 或 Steam ID。"""
         message_str = event.message_str.strip()
         user_id = event.get_sender_id()
         
-        # 1. 尝试从命令中提取 ID (TMP ID 或 Steam ID)
+        # 匹配 '状态' 或 '定位' 后面的空格和数字
         match = re.search(r'(状态|定位)\s*(\d+)', message_str) 
         input_id = match.group(2) if match else None
         
         tmp_id = None
         
         if input_id:
-            # 2. 如果输入了 ID
             if len(input_id) == 17 and input_id.startswith('7'):
-                # 2a. 是 Steam ID，尝试转换
                 try:
                     tmp_id = await self._get_tmp_id_from_steam_id(input_id)
                 except SteamIdNotFoundException as e:
@@ -487,10 +472,8 @@ class TmpBotPlugin(Star):
                     yield event.plain_result(f"查询失败: {str(e)}")
                     return
             else:
-                # 2b. 假设是 TMP ID
                 tmp_id = input_id
         else:
-            # 3. 如果没有输入 ID，尝试从绑定中获取
             tmp_id = self._get_bound_tmp_id(user_id)
         
         if not tmp_id:
@@ -513,27 +496,26 @@ class TmpBotPlugin(Star):
         player_name = player_info.get('name', '未知')
         steam_id_to_display = self._get_steam_id_from_player_info(player_info)
         
-        # 完整的回复消息构建 (纯文本输出)
-        message = f"🎮 玩家状态查询\n"
+        message = f"玩家状态查询\n"
         message += "=" * 15 + "\n"
-        message += f"😀 玩家名称: {player_name}\n"
-        message += f"🆔 TMP编号: {tmp_id}\n"
+        message += f"玩家名称: {player_name}\n"
+        message += f"TMP编号: {tmp_id}\n"
         if steam_id_to_display:
-            message += f"🆔 Steam编号: {steam_id_to_display}\n"
+            message += f"Steam编号: {steam_id_to_display}\n"
         
         if online_status and online_status.get('online'):
             server_name = online_status.get('serverName', '未知服务器')
             game_mode = "欧卡2" if online_status.get('game', 0) == 1 else "美卡2" if online_status.get('game', 0) == 2 else "未知游戏"
             city = online_status.get('city', {}).get('name', '未知城市')
-            message += f"📶 在线状态: 在线 🟢\n"
-            message += f"🖥️️ 所在服务器: {server_name}\n"
-            message += f"🗺️ 所在位置: {city} ({game_mode})\n"
+            message += f"在线状态: 在线\n"
+            message += f"所在服务器: {server_name}\n"
+            message += f"所在位置: {city} ({game_mode})\n"
         else:
-            message += f"📶 在线状态: 离线 🔴\n"
+            message += f"在线状态: 离线\n"
         
         yield event.plain_result(message)
 
-    @filter.command(r"^\s*服务器", regex=True)
+    @filter.command("服务器")
     async def tmpserver(self, event: AstrMessageEvent):
         """[命令: 服务器] 查询TruckersMP官方服务器的实时状态。"""
         if not self.session: 
@@ -548,7 +530,7 @@ class TmpBotPlugin(Star):
                     servers = data.get('response', [])
                     
                     if servers and isinstance(servers, list):
-                        message = "🖥️ TMP服务器状态 (显示前6个在线服务器)\n"
+                        message = "TMP服务器状态 (显示前6个在线服务器)\n"
                         message += "=" * 25 + "\n"
                         
                         online_servers = sorted(
@@ -559,10 +541,10 @@ class TmpBotPlugin(Star):
                         
                         for server in online_servers:
                             name, players, max_players, queue = server.get('name', '未知'), server.get('players', 0), server.get('maxplayers', 0), server.get('queue', 0)
-                            status_icon = '🟢' if players > 0 else '🟡'
+                            status_str = '[在线]' if players > 0 else '[空闲]'
                             
-                            message += f"{status_icon} {name}\n"
-                            message += f"   👥 在线: {players}/{max_players}"
+                            message += f"{status_str} {name}\n"
+                            message += f"  在线人数: {players}/{max_players}"
                             if queue > 0: message += f" (排队: {queue})"
                             message += "\n"
                         
@@ -575,20 +557,20 @@ class TmpBotPlugin(Star):
         except Exception:
             yield event.plain_result("网络请求失败，请检查网络或稍后重试。")
 
-    @filter.command(r"^\s*帮助", regex=True)
+    @filter.command("帮助")
     async def tmphelp(self, event: AstrMessageEvent):
         """[命令: 帮助] 显示本插件的命令使用说明。"""
-        help_text = """🚛 TMP查询插件使用说明 (无前缀命令)
+        help_text = """TMP查询插件使用说明 (无前缀命令)
 
-📋 可用命令:
-1. 查询 [ID] - 查询玩家的完整信息（支持 **TMP ID** 或 **Steam ID**）。
-2. 状态 [ID] 或 定位 [ID] - 查询玩家的实时在线状态（支持 **TMP ID** 或 **Steam ID**）。 
-3. 绑定 [ID] - 绑定您的聊天账号与 **TMP ID**（支持输入 **Steam ID** 转换）。
+可用命令:
+1. 查询 [ID] - 查询玩家的完整信息（支持 TMP ID 或 Steam ID）。
+2. 状态 [ID] 或 定位 [ID] - 查询玩家的实时在线状态（支持 TMP ID 或 Steam ID）。 
+3. 绑定 [ID] - 绑定您的聊天账号与 TMP ID（支持输入 Steam ID 转换）。
 4. 解绑 - 解除账号绑定。
 5. 服务器 - 查看主要TMP服务器的实时状态和在线人数。
 6. 帮助 - 显示此帮助信息。
 
-💡 使用提示: 绑定后可直接发送 查询 或 状态 (无需ID参数)
+使用提示: 绑定后可直接发送 查询 或 状态 (无需ID参数)
 """
         yield event.plain_result(help_text)
 
