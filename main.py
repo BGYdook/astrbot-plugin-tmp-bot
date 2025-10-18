@@ -4,7 +4,7 @@
 """
 AstrBot-plugin-tmp-bot
 欧卡2TMP查询插件 - AstrBot版本
-主文件
+主文件 (main.py)
 """
 
 import re
@@ -47,7 +47,7 @@ class TmpBotPlugin(Star):
         super().__init__(context)
         # HTTP会话，将在 initialize 中创建
         self.session: Optional[aiohttp.ClientSession] = None 
-        # 插件数据目录
+        # 插件数据目录 (使用插件注册名称 "tmp-bot")
         self.data_dir = StarTools.get_data_dir("tmp-bot")
         # 绑定文件路径
         self.bind_file = os.path.join(self.data_dir, "tmp_bindings.json")
@@ -502,5 +502,5 @@ class TmpBotPlugin(Star):
         """插件卸载时的清理工作。"""
         if self.session:
             await self.session.close()
-            self.session = None # 显式置空
+            self.session = None
         logger.info("TMP Bot 插件已卸载")
