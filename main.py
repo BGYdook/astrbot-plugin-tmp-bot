@@ -13,9 +13,53 @@ import json
 import os
 from typing import Optional, List, Dict, Tuple, Any
 # 🚨 修复：导入 filter.command (通常用于匹配命令和文本)
-from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
-from astrbot.api.star import Context, Star, register, StarTools
-from astrbot.api import logger
+try:
+    from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
+    from astrbot.api.star import Context, Star, register, StarTools
+    from astrbot.api import logger
+except Exception:
+    # Minimal fallbacks so the module can be inspected/run outside AstrBot environment
+    class _DummyFilter:
+        def command(self, pattern, **kwargs):
+            def decorator(func):
+                return func
+            return decorator
+    filter = _DummyFilter()
+
+    class AstrMessageEvent:
+        def __init__(self, message_str: str = "", sender_id: str = "0"):
+            self.message_str = message_str
+            self._sender_id = sender_id
+        def get_sender_id(self) -> str:
+            return self._sender_id
+        async def plain_result(self, msg):
+            return msg
+
+    MessageEventResult = Any  # type: ignore
+
+    class Context: pass
+    class Star:
+        def __init__(self, context: Context = None): pass
+
+    def register(*args, **kwargs):
+        def deco(cls):
+            return cls
+        return deco
+
+    class StarTools:
+        @staticmethod
+        def get_data_dir(name: str):
+            return os.path.join(os.getcwd(), name)
+
+    class _Logger:
+        @staticmethod
+        def info(msg):
+            print("[INFO]", msg)
+        @staticmethod
+        def error(msg):
+            print("[ERROR]", msg)
+
+    logger = _Logger()
 
 
 # 自定义异常类
@@ -173,11 +217,11 @@ class TmpBotPlugin(Star):
     # 使用 filter.command 修复命令注册错误
     # ******************************************************
     # 🚨 修复: filter.message -> filter.command
-    @filter.command(r"^查询\s*(\d+)?$", regex=True)
+    @filter.command(r"查询", regex=True)
     async def tmpquery(self, event: AstrMessageEvent):
         """[命令: 查询] TMP玩家完整信息查询。"""
         message_str = event.message_str.strip()
-        
+
         match = re.search(r'查询\s*(\d+)', message_str)
         tmp_id = match.group(1) if match else None
 
@@ -185,33 +229,35 @@ class TmpBotPlugin(Star):
             if message_str.strip().lower() == '查询':
                 user_id = event.get_sender_id()
                 tmp_id = self._get_bound_tmp_id(user_id)
-            
-            if not tmp_id:
-                yield event.plain_result("请输入正确的玩家编号，格式：查询 123456，或先使用 绑定 123456 绑定您的账号。")
-                return
-        
+
+        if not tmp_id:
+            yield event.plain_result("请输入正确的玩家编号，格式：查询 123456，或先使用 绑定 123456 绑定您的账号。")
+            return
+
         try:
-            player_info_raw, bans_info, online_status = await asyncio.gather(
-                self._get_player_info(tmp_id), 
-                self._get_player_bans(tmp_id), 
-                self._get_online_status(tmp_id)
+            player_info, bans_info, online_status = await asyncio.gather(
+                self._get_player_info(tmp_id),
+                self._get_player_bans(tmp_id),
+                self._get_online_status(tmp_id),
             )
-            player_info = player_info_raw 
         except PlayerNotFoundException as e:
+            yield event.plain_result(str(e))
+            return
+        except NetworkException as e:
             yield event.plain_result(str(e))
             return
         except Exception as e:
             yield event.plain_result(f"查询失败: {str(e)}")
             return
-        
+
         is_banned, ban_count, active_bans, ban_reason = self._format_ban_info(bans_info)
-        
+
         # 完整的回复消息构建
         message = "🚛 **TMP玩家详细信息**\n"
         message += "=" * 20 + "\n"
         message += f"🆔TMP编号: **{tmp_id}**\n"
         message += f"😀玩家名称: **{player_info.get('name', '未知')}**\n"
-        
+
         # 权限/分组信息
         perms_str = "玩家"
         if player_info.get('permissions'):
@@ -228,18 +274,18 @@ class TmpBotPlugin(Star):
         vtc_role = player_info.get('vtc', {}).get('role')
         message += f"🚚所属车队: {vtc_name if vtc_name else '无'}\n"
         if vtc_role:
-             message += f"🚚车队角色: {vtc_role}\n"
-        
+            message += f"🚚车队角色: {vtc_role}\n"
+
         message += f"🚫是否封禁: **{'是 🚨' if is_banned else '否 ✅'}**\n"
         if is_banned:
             latest_ban = active_bans[0] if active_bans else {}
             message += f"🚫封禁次数: {ban_count}次\n"
-            message += f"🚫封禁原因: {latest_ban.get('reason', '未知')}\n"
+            message += f"🚫封禁原因: {latest_ban.get('reason', ban_reason or '未知')}\n"
             if latest_ban.get('expiration'):
-                 message += f"🚫封禁截止: {latest_ban['expiration']}\n"
+                message += f"🚫封禁截止: {latest_ban['expiration']}\n"
         elif ban_count > 0:
             message += f"🚫历史封禁: {ban_count}次\n"
-        
+
         if online_status and online_status.get('online'):
             server_name = online_status.get('serverName', '未知服务器')
             game_mode = "欧卡2" if online_status.get('game', 0) == 1 else "美卡2" if online_status.get('game', 0) == 2 else "未知游戏"
@@ -249,17 +295,16 @@ class TmpBotPlugin(Star):
             message += f"🗺️所在位置: {city} ({game_mode})\n"
         else:
             message += f"📶**在线状态: 离线 🔴**\n"
-        
-        yield event.plain_result(message)
 
+        yield event.plain_result(message)
     # 🚨 修复: filter.message -> filter.command
-    @filter.command(r"^绑定\s*(\d+)?$", regex=True)
+    @filter.command(r"绑定", regex=True)
     async def tmpbind(self, event: AstrMessageEvent):
-        """[命令: 绑定] 绑定QQ/群用户ID与TruckersMP ID。"""
+        """[命令: 绑定] 绑定您的聊天账号与TMP ID。"""
         message_str = event.message_str.strip()
         match = re.search(r'绑定\s*(\d+)', message_str)
         tmp_id = match.group(1) if match else None
-        
+
         if not tmp_id:
             yield event.plain_result("请输入正确的玩家编号，格式：绑定 123456")
             return
@@ -279,9 +324,10 @@ class TmpBotPlugin(Star):
             yield event.plain_result(f"✅ **绑定成功！**\n已将您的账号与TMP玩家 **{player_name}** (ID: {tmp_id}) 绑定")
         else:
             yield event.plain_result("❌ 绑定失败，请稍后重试")
+            yield event.plain_result("❌ 绑定失败，请稍后重试")
 
     # 🚨 修复: filter.message -> filter.command
-    @filter.command(r"^解绑$", regex=True)
+    @filter.command(r"解绑", regex=True)
     async def tmpunbind(self, event: AstrMessageEvent):
         """[命令: 解绑] 解除当前用户的TruckersMP ID绑定。"""
         user_id = event.get_sender_id()
@@ -298,9 +344,9 @@ class TmpBotPlugin(Star):
             yield event.plain_result(f"✅ **解绑成功！**\n已解除与TMP玩家 **{player_name}** (ID: {tmp_id}) 的绑定")
         else:
             yield event.plain_result("❌ 解绑失败，请稍后重试")
-
     # 🚨 修复: filter.message -> filter.command
-    @filter.command(r"^状态\s*(\d+)?$", regex=True)
+    @filter.command(r"状态", regex=True)
+    @filter.command(r"定位", regex=True)
     async def tmpstatus(self, event: AstrMessageEvent):
         """[命令: 状态] 查询玩家的实时在线状态。"""
         message_str = event.message_str.strip()
@@ -349,7 +395,7 @@ class TmpBotPlugin(Star):
         yield event.plain_result(message)
 
     # 🚨 修复: filter.message -> filter.command
-    @filter.command(r"^服务器$", regex=True)
+    @filter.command(r"服务器", regex=True)
     async def tmpserver(self, event: AstrMessageEvent):
         """[命令: 服务器] 查询TruckersMP官方服务器的实时状态。"""
         if not self.session: 
