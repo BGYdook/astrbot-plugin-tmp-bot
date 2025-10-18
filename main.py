@@ -4,6 +4,7 @@
 """
 AstrBot-plugin-tmp-bot
 欧卡2TMP查询插件 - AstrBot版本
+主
 """
 
 import re

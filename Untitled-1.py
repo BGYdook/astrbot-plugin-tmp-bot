@@ -4,7 +4,7 @@
 """
 AstrBot-plugin-tmp-bot
 欧卡2TMP查询插件 - AstrBot版本
-修复版：正确查询不同玩家信息
+修复：正确查询不同玩家信息
 """
 
 import re
