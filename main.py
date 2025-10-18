@@ -19,7 +19,7 @@ from astrbot.api import logger
 
 # 自定义异常类
 class TmpApiException(Exception):
-    """TMP 相关异常的基类"""
+    """TMP API相关异常的基类"""
     pass
 
 
@@ -439,9 +439,9 @@ class TmpBotPlugin(Star):
         help_text = """🚛 TMP查询插件使用说明
 
 📋 可用命令:
-查询 123456    - 查询玩家完整信息
-状态 123456    - 查询玩家在线状态  
-绑定 123456    - 绑定TMP账号
+查询 1    - 查询玩家完整信息
+状态 1    - 查询玩家在线状态  
+绑定 1    - 绑定TMP账号
 解绑          - 解除账号绑定
 服务器        - 查看服务器状态
 帮助          - 显示此帮助信息
