@@ -3,7 +3,7 @@
 
 """
 AstrBot-plugin-tmp-bot
-欧卡2TMP查询插件 - AstrBot版本 (版本 1.0.7：加固封禁原因提取逻辑)
+欧卡2TMP查询插件 - AstrBot版本 (版本 1.0.8：如果被封禁，强制显示最新的历史封禁原因)
 """
 
 import re
@@ -84,8 +84,8 @@ class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
 
-# 版本号更新为 1.0.7
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.0.7", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
+# 版本号更新为 1.0.8
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.0.8", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context: Context):
         """初始化插件，设置数据路径和HTTP会话引用。"""
@@ -99,7 +99,7 @@ class TmpBotPlugin(Star):
     async def initialize(self):
         """在插件启动时，创建持久的HTTP会话。"""
         self.session = aiohttp.ClientSession(
-            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.0.7'},
+            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.0.8'},
             timeout=aiohttp.ClientTimeout(total=10)
         )
         logger.info("TMP Bot 插件HTTP会话已创建")
@@ -203,7 +203,7 @@ class TmpBotPlugin(Star):
             return {'online': False}
 
     def _format_ban_info(self, bans_info: List[Dict]) -> Tuple[int, List[Dict]]:
-        """只返回历史封禁次数和最新的封禁记录，不再负责判断当前状态"""
+        """只返回历史封禁次数和最新的封禁记录"""
         if not bans_info or not isinstance(bans_info, list):
             return 0, []
         
@@ -213,7 +213,7 @@ class TmpBotPlugin(Star):
 
 
     # ******************************************************
-    # 修复后的命令处理器 (版本 1.0.7 - 封禁原因提取修正)
+    # 修复后的命令处理器 (版本 1.0.8 - 强制显示最新封禁原因)
     # ******************************************************
     @filter.command(r"查询", regex=True)
     async def tmpquery(self, event: AstrMessageEvent):
@@ -281,23 +281,24 @@ class TmpBotPlugin(Star):
         if ban_count > 0:
             message += f"🚫 历史封禁: {ban_count}次\n"
 
-        # ⚠️ 修复：加固封禁原因和截止日期的提取
+        # ⚠️ 最终修复：如果被主 API 标记为封禁，则强制显示最新的历史封禁记录信息
         if is_banned and sorted_bans:
-            # 找到当前生效的封禁记录
-            active_bans = [ban for ban in sorted_bans if not ban.get('expired', False)]
             
-            # 使用最新的有效封禁记录（如果有）
-            latest_active_ban = active_bans[0] if active_bans else sorted_bans[0] 
+            # **核心改动：直接使用最新的记录，而不是依赖 'expired' 字段**
+            latest_ban = sorted_bans[0] 
             
-            ban_reason = latest_active_ban.get('reason', '未知封禁原因')
-            ban_expiration = latest_active_ban.get('expiration', '未知')
+            ban_reason = latest_ban.get('reason', '未知封禁原因')
+            ban_expiration = latest_ban.get('expiration', '永久/未知') # 默认为永久/未知
 
             message += f"🚫 当前封禁原因: {ban_reason}\n"
             
+            # 尝试格式化截止日期
             if ban_expiration and ban_expiration.lower().startswith('never'):
                  message += f"🚫 封禁截止: 永久封禁\n"
-            elif ban_expiration != '未知':
-                 message += f"🚫 封禁截止: {ban_expiration}\n"
+            elif ban_expiration != '永久/未知':
+                 # 检查是否未过期，如果已过期但主API仍说被封禁，我们仍显示过期时间，供用户参考
+                 expiration_display = latest_ban.get('expiration', '未知')
+                 message += f"🚫 封禁截止: {expiration_display}\n"
         
         if online_status and online_status.get('online'):
             server_name = online_status.get('serverName', '未知服务器')
