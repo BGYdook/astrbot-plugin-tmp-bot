@@ -38,7 +38,7 @@ class ApiResponseException(TmpApiException):
     pass
 
 
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.0.4", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.0.5", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context: Context):
         """初始化插件，设置数据路径和HTTP会话。"""
@@ -52,11 +52,41 @@ class TmpBotPlugin(Star):
     async def initialize(self):
         """初始化网络会话"""
         self.session = aiohttp.ClientSession(
-            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.0.4'},
+            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.0.5'},
             timeout=aiohttp.ClientTimeout(total=10)
         )
-        # 注册消息处理器
-        self.context.register_message_handler(self.handle_message)
+        
+        # 注册命令
+        self.context.register_command(
+            name="查询",
+            description="查询TMP玩家信息",
+            handler=self._handle_query
+        )
+        self.context.register_command(
+            name="绑定", 
+            description="绑定TMP账号",
+            handler=self._handle_bind
+        )
+        self.context.register_command(
+            name="解绑",
+            description="解绑TMP账号", 
+            handler=self._handle_unbind
+        )
+        self.context.register_command(
+            name="状态",
+            description="查询玩家在线状态",
+            handler=self._handle_status
+        )
+        self.context.register_command(
+            name="服务器",
+            description="查看服务器状态",
+            handler=self._handle_server
+        )
+        self.context.register_command(
+            name="帮助",
+            description="显示帮助信息",
+            handler=self._handle_help
+        )
 
     # --- 内部工具方法 ---
     def _load_bindings(self) -> Dict[str, Any]:
@@ -190,53 +220,15 @@ class TmpBotPlugin(Star):
                 perms_str = ', '.join(perms)
         return perms_str
 
-    async def handle_message(self, event: AstrMessageEvent) -> Optional[MessageEventResult]:
-        """处理消息事件"""
-        message_str = event.message_str.strip()
-        logger.info(f"TMP插件收到消息: {message_str}")
-        
-        # 检查是否是TMP相关命令
-        if message_str in ["服务器", "帮助", "解绑"]:
-            return await self._process_command(event, message_str)
-        elif message_str.startswith("查询"):
-            return await self._process_command(event, "查询", message_str)
-        elif message_str.startswith("绑定"):
-            return await self._process_command(event, "绑定", message_str)
-        elif message_str.startswith("状态"):
-            return await self._process_command(event, "状态", message_str)
-        
-        return None
-
-    async def _process_command(self, event: AstrMessageEvent, command: str, full_message: str = None):
-        """处理具体命令"""
-        logger.info(f"处理TMP命令: {command}, 完整消息: {full_message or command}")
-        
-        if command == "服务器":
-            return await self._handle_server(event)
-        elif command == "帮助":
-            return await self._handle_help(event)
-        elif command == "解绑":
-            return await self._handle_unbind(event)
-        elif command == "查询":
-            return await self._handle_query(event, full_message)
-        elif command == "绑定":
-            return await self._handle_bind(event, full_message)
-        elif command == "状态":
-            return await self._handle_status(event, full_message)
-        
-        return None
-
-    async def _handle_query(self, event: AstrMessageEvent, message_str: str):
+    # 命令处理器
+    async def _handle_query(self, event: AstrMessageEvent, args: List[str]) -> MessageEventResult:
         """处理查询命令"""
-        logger.info(f"处理查询命令: {message_str}")
+        logger.info(f"处理查询命令，参数: {args}")
         
-        # 提取TMP ID
         tmp_id = None
-        if message_str != "查询":
-            match = re.search(r'查询\s*(\d+)', message_str)
-            if match:
-                tmp_id = match.group(1)
-
+        if args and args[0].isdigit():
+            tmp_id = args[0]
+        
         # 如果没有提供ID，尝试使用绑定的ID
         if not tmp_id:
             user_id = event.get_sender_id()
@@ -309,19 +301,14 @@ class TmpBotPlugin(Star):
         logger.info(f"查询成功: {tmp_id}")
         return event.plain_result(message)
 
-    async def _handle_bind(self, event: AstrMessageEvent, message_str: str):
+    async def _handle_bind(self, event: AstrMessageEvent, args: List[str]) -> MessageEventResult:
         """处理绑定命令"""
-        logger.info(f"处理绑定命令: {message_str}")
+        logger.info(f"处理绑定命令，参数: {args}")
         
-        # 提取TMP ID
-        tmp_id = None
-        if message_str != "绑定":
-            match = re.search(r'绑定\s*(\d+)', message_str)
-            if match:
-                tmp_id = match.group(1)
-        
-        if not tmp_id:
+        if not args or not args[0].isdigit():
             return event.plain_result("请输入正确的玩家编号，格式：绑定 123456")
+        
+        tmp_id = args[0]
 
         try:
             player_info = await self._get_player_info(tmp_id)
@@ -339,7 +326,7 @@ class TmpBotPlugin(Star):
         else:
             return event.plain_result("❌ 绑定失败，请稍后重试")
 
-    async def _handle_unbind(self, event: AstrMessageEvent):
+    async def _handle_unbind(self, event: AstrMessageEvent, args: List[str]) -> MessageEventResult:
         """处理解绑命令"""
         logger.info("处理解绑命令")
         
@@ -359,16 +346,13 @@ class TmpBotPlugin(Star):
         else:
             return event.plain_result("❌ 解绑失败，请稍后重试")
 
-    async def _handle_status(self, event: AstrMessageEvent, message_str: str):
+    async def _handle_status(self, event: AstrMessageEvent, args: List[str]) -> MessageEventResult:
         """处理状态命令"""
-        logger.info(f"处理状态命令: {message_str}")
+        logger.info(f"处理状态命令，参数: {args}")
         
-        # 提取TMP ID
         tmp_id = None
-        if message_str != "状态":
-            match = re.search(r'状态\s*(\d+)', message_str)
-            if match:
-                tmp_id = match.group(1)
+        if args and args[0].isdigit():
+            tmp_id = args[0]
         
         # 如果没有提供ID，尝试使用绑定的ID
         if not tmp_id:
@@ -410,7 +394,7 @@ class TmpBotPlugin(Star):
         logger.info(f"状态查询成功: {tmp_id}")
         return event.plain_result(message)
 
-    async def _handle_server(self, event: AstrMessageEvent):
+    async def _handle_server(self, event: AstrMessageEvent, args: List[str]) -> MessageEventResult:
         """处理服务器命令"""
         logger.info("处理服务器命令")
         
@@ -448,11 +432,11 @@ class TmpBotPlugin(Star):
             logger.error(f"查询服务器状态失败: {e}")
             return event.plain_result("网络请求失败")
 
-    async def _handle_help(self, event: AstrMessageEvent):
+    async def _handle_help(self, event: AstrMessageEvent, args: List[str]) -> MessageEventResult:
         """处理帮助命令"""
         logger.info("处理帮助命令")
         
-        help_text = """🚛 TMP查询插件使用说明 (无前缀命令)
+        help_text = """🚛 TMP查询插件使用说明
 
 📋 可用命令:
 查询 123456    - 查询玩家完整信息
