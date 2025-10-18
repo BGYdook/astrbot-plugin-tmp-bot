@@ -4,7 +4,7 @@ version: 1.0.2
 main: main.py
 author: BGYdook
 homepage: https://github.com/BGYdook/astrbot-plugin-tmp-bot
-repo: https://github.com/BGYdook/AstrBot-plugin-tmp-bot
+repo: https://github.com/BGYdook/astrbot-plugin-tmp-bot
 license: MIT
 
 # 插件功能特性
