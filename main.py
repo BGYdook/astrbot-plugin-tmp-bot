@@ -3,7 +3,7 @@
 
 """
 AstrBot-plugin-tmp-bot
-欧卡2TMP查询插件 - AstrBot版本 (版本 1.2.2：修正 ID 解析主逻辑，确保绑定和输入均正常)
+欧卡2TMP查询插件 - AstrBot版本 (版本 1.2.1始终在查询结果中显示 Steam ID)
 """
 
 import re
@@ -88,8 +88,8 @@ class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
 
-# 版本号更新为 1.2.2
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.2.2", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
+# 版本号更新为 1.2.3
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.2.3", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context: Context):
         """初始化插件，设置数据路径和HTTP会话引用。"""
@@ -103,7 +103,7 @@ class TmpBotPlugin(Star):
     async def initialize(self):
         """在插件启动时，创建持久的HTTP会话。"""
         self.session = aiohttp.ClientSession(
-            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.2.2'},
+            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.2.3'},
             timeout=aiohttp.ClientTimeout(total=10)
         )
         logger.info("TMP Bot 插件HTTP会话已创建")
@@ -151,7 +151,7 @@ class TmpBotPlugin(Star):
             return self._save_bindings(bindings)
         return False
 
-    # --- API请求方法 (Steam ID 转换) ---
+    # --- API请求方法 ---
 
     async def _get_tmp_id_from_steam_id(self, steam_id: str) -> str:
         """根据 Steam ID (17位) 查询对应的 TruckersMP ID"""
@@ -159,6 +159,7 @@ class TmpBotPlugin(Star):
             raise NetworkException("插件未初始化，HTTP会话不可用")
         
         try:
+            # 使用 Trucky API 进行 Steam ID 到 TMP ID 的转换
             url = f"https://api.truckyapp.com/v2/truckersmp/player/get_by_steamid/{steam_id}"
             
             async with self.session.get(url, timeout=10) as response:
@@ -183,7 +184,12 @@ class TmpBotPlugin(Star):
         except Exception as e:
             logger.error(f"查询 TMP ID 失败: {e}")
             raise NetworkException("Steam ID 转换查询失败")
-
+            
+    # 新增：从玩家信息中提取 Steam ID
+    def _get_steam_id_from_player_info(self, player_info: Dict) -> Optional[str]:
+        """从 V2 Player API 响应中提取 Steam ID (如果有的话)"""
+        # Steam ID通常在 player_info['steamID64'] 字段中
+        return player_info.get('steamID64')
 
     async def _get_player_info(self, tmp_id: str) -> Dict:
         if not self.session:
@@ -250,7 +256,7 @@ class TmpBotPlugin(Star):
 
 
     # ******************************************************
-    # 命令处理器 (版本 1.2.2 - 修正 ID 解析主逻辑)
+    # 命令处理器 (版本 1.2.3 - 始终显示 Steam ID)
     # ******************************************************
     
     @filter.command(r"查询", regex=True)
@@ -264,15 +270,14 @@ class TmpBotPlugin(Star):
         input_id = match.group(1) if match else None
         
         tmp_id = None
-        steam_id_to_display = None
-
+        
         if input_id:
             # 2. 如果输入了 ID
             if len(input_id) == 17 and input_id.startswith('7'):
                 # 2a. 是 Steam ID，尝试转换
                 try:
+                    # 使用 Steam ID 转换获取 TMP ID
                     tmp_id = await self._get_tmp_id_from_steam_id(input_id)
-                    steam_id_to_display = input_id
                 except SteamIdNotFoundException as e:
                     yield event.plain_result(str(e))
                     return
@@ -291,7 +296,7 @@ class TmpBotPlugin(Star):
             return
         
         try:
-            # 使用获取到的 TMP ID 进行后续查询
+            # 使用获取到的 TMP ID 进行查询，这将是唯一需要的数据
             player_info_raw, bans_info, online_status = await asyncio.gather(
                 self._get_player_info(tmp_id), 
                 self._get_player_bans(tmp_id), 
@@ -304,6 +309,9 @@ class TmpBotPlugin(Star):
         except Exception as e:
             yield event.plain_result(f"查询失败: {str(e)}")
             return
+            
+        # 关键修改：从 player_info 中提取 Steam ID
+        steam_id_to_display = self._get_steam_id_from_player_info(player_info)
         
         # 核心判断：使用主 API 返回的 'banned' 字段
         is_banned = player_info.get('banned', False) 
@@ -377,7 +385,7 @@ class TmpBotPlugin(Star):
         
         yield event.plain_result(message)
 
-    # 以下命令处理器保持不变，但对 tmpbind 和 tmpstatus 进行了类似的 ID 解析修正。
+    # 以下命令处理器需要确保调用 _get_steam_id_from_player_info
     
     @filter.command(r"绑定", regex=True)
     async def tmpbind(self, event: AstrMessageEvent):
@@ -418,11 +426,19 @@ class TmpBotPlugin(Star):
             return
 
         player_name = player_info.get('name', '未知')
+        
+        # 获取 Steam ID 用于显示
+        steam_id_display = self._get_steam_id_from_player_info(player_info)
+        
         if self._bind_tmp_id(user_id, tmp_id, player_name):
-            if is_steam_id:
-                yield event.plain_result(f"✅ 绑定成功！\n已将您的账号与TMP玩家 {player_name} (ID: {tmp_id}) 绑定 (通过 Steam ID: {input_id} 转换)")
-            else:
-                 yield event.plain_result(f"✅ 绑定成功！\n已将您的账号与TMP玩家 {player_name} (ID: {tmp_id}) 绑定")
+            
+            # 构建绑定成功消息
+            message = f"✅ 绑定成功！\n"
+            message += f"已将您的账号与TMP玩家 {player_name} (ID: {tmp_id}) 绑定\n"
+            if steam_id_display:
+                message += f"该玩家的 Steam ID: {steam_id_display}"
+            
+            yield event.plain_result(message)
         else:
             yield event.plain_result("❌ 绑定失败，请稍后重试")
 
@@ -455,15 +471,13 @@ class TmpBotPlugin(Star):
         input_id = match.group(2) if match else None
         
         tmp_id = None
-        steam_id_to_display = None
-
+        
         if input_id:
             # 2. 如果输入了 ID
             if len(input_id) == 17 and input_id.startswith('7'):
                 # 2a. 是 Steam ID，尝试转换
                 try:
                     tmp_id = await self._get_tmp_id_from_steam_id(input_id)
-                    steam_id_to_display = input_id
                 except SteamIdNotFoundException as e:
                     yield event.plain_result(str(e))
                     return
@@ -495,6 +509,7 @@ class TmpBotPlugin(Star):
             return
         
         player_name = player_info.get('name', '未知')
+        steam_id_to_display = self._get_steam_id_from_player_info(player_info)
         
         # 完整的回复消息构建 (纯文本输出)
         message = f"🎮 玩家状态查询\n"
