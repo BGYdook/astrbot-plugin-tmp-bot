@@ -3,7 +3,7 @@
 
 """
 AstrBot-plugin-tmp-bot
-欧卡2TMP查询插件 - AstrBot版本 (优化会话管理)
+欧卡2TMP查询插件 - AstrBot版本 (最终兼容性修复：filter.message -> filter.command)
 """
 
 import re
@@ -12,6 +12,7 @@ import aiohttp
 import json
 import os
 from typing import Optional, List, Dict, Tuple, Any
+# 🚨 修复：导入 filter.command (通常用于匹配命令和文本)
 from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
 from astrbot.api.star import Context, Star, register, StarTools
 from astrbot.api import logger
@@ -37,12 +38,12 @@ class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
 
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.0.1", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
+# 版本号更新为 1.0.2 以示修复
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.0.2", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context: Context):
         """初始化插件，设置数据路径和HTTP会话引用。"""
         super().__init__(context)
-        # 1. 初始化时，会话引用设为 None
         self.session: Optional[aiohttp.ClientSession] = None 
         self.data_dir = StarTools.get_data_dir("tmp-bot")
         self.bind_file = os.path.join(self.data_dir, "tmp_bindings.json")
@@ -51,13 +52,11 @@ class TmpBotPlugin(Star):
 
     async def initialize(self):
         """在插件启动时，创建持久的HTTP会话。"""
-        # 2. 在 initialize 中创建会话实例
         self.session = aiohttp.ClientSession(
-            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.0.1'},
+            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.0.2'},
             timeout=aiohttp.ClientTimeout(total=10)
         )
         logger.info("TMP Bot 插件HTTP会话已创建")
-        # 注意: 命令注册已改用 @filter.message 装饰器，无需在此处调用 register_commands
 
     # --- 内部工具方法 (数据持久化部分保持不变) ---
     def _load_bindings(self) -> Dict[str, Any]:
@@ -109,7 +108,6 @@ class TmpBotPlugin(Star):
         
         try:
             url = f"https://api.truckersmp.com/v2/player/{tmp_id}"
-            # 使用 self.session 进行请求
             async with self.session.get(url, timeout=10) as response:
                 if response.status == 200:
                     data = await response.json()
@@ -152,7 +150,6 @@ class TmpBotPlugin(Star):
                     data = await response.json()
                     response_data = data.get('response', {})
                     if isinstance(response_data, list) and response_data:
-                        # TruckyApp API 返回列表，取第一个元素
                         return response_data[0]
                     return {'online': False}
                 return {'online': False}
@@ -163,7 +160,9 @@ class TmpBotPlugin(Star):
         if not bans_info or not isinstance(bans_info, list):
             return False, 0, [], ""
         
-        active_bans = [ban for ban in bans_info if not ban.get('expired', False)]
+        # 确保按日期排序，以获取最新的封禁信息
+        sorted_bans = sorted(bans_info, key=lambda x: x.get('created_at', ''), reverse=True)
+        active_bans = [ban for ban in sorted_bans if not ban.get('expired', False)]
         ban_count = len(bans_info)
         is_banned = len(active_bans) > 0
         ban_reason = active_bans[0].get('reason', '未知封禁原因') if active_bans else ""
@@ -171,9 +170,10 @@ class TmpBotPlugin(Star):
         return is_banned, ban_count, active_bans, ban_reason
 
     # ******************************************************
-    # 以下使用 @filter.message 注册命令 (保持不变)
+    # 使用 filter.command 修复命令注册错误
     # ******************************************************
-    @filter.message(r"^查询\s*(\d+)?$", regex=True)
+    # 🚨 修复: filter.message -> filter.command
+    @filter.command(r"^查询\s*(\d+)?$", regex=True)
     async def tmpquery(self, event: AstrMessageEvent):
         """[命令: 查询] TMP玩家完整信息查询。"""
         message_str = event.message_str.strip()
@@ -191,13 +191,11 @@ class TmpBotPlugin(Star):
                 return
         
         try:
-            # 兼容性修复：确保 _get_player_info 返回的是 dict
             player_info_raw, bans_info, online_status = await asyncio.gather(
                 self._get_player_info(tmp_id), 
                 self._get_player_bans(tmp_id), 
                 self._get_online_status(tmp_id)
             )
-            # 确保 player_info_raw 是 dict，如果 API 失败会抛出异常
             player_info = player_info_raw 
         except PlayerNotFoundException as e:
             yield event.plain_result(str(e))
@@ -254,7 +252,8 @@ class TmpBotPlugin(Star):
         
         yield event.plain_result(message)
 
-    @filter.message(r"^绑定\s*(\d+)?$", regex=True)
+    # 🚨 修复: filter.message -> filter.command
+    @filter.command(r"^绑定\s*(\d+)?$", regex=True)
     async def tmpbind(self, event: AstrMessageEvent):
         """[命令: 绑定] 绑定QQ/群用户ID与TruckersMP ID。"""
         message_str = event.message_str.strip()
@@ -281,7 +280,8 @@ class TmpBotPlugin(Star):
         else:
             yield event.plain_result("❌ 绑定失败，请稍后重试")
 
-    @filter.message(r"^解绑$", regex=True)
+    # 🚨 修复: filter.message -> filter.command
+    @filter.command(r"^解绑$", regex=True)
     async def tmpunbind(self, event: AstrMessageEvent):
         """[命令: 解绑] 解除当前用户的TruckersMP ID绑定。"""
         user_id = event.get_sender_id()
@@ -299,7 +299,8 @@ class TmpBotPlugin(Star):
         else:
             yield event.plain_result("❌ 解绑失败，请稍后重试")
 
-    @filter.message(r"^状态\s*(\d+)?$", regex=True)
+    # 🚨 修复: filter.message -> filter.command
+    @filter.command(r"^状态\s*(\d+)?$", regex=True)
     async def tmpstatus(self, event: AstrMessageEvent):
         """[命令: 状态] 查询玩家的实时在线状态。"""
         message_str = event.message_str.strip()
@@ -347,7 +348,8 @@ class TmpBotPlugin(Star):
         
         yield event.plain_result(message)
 
-    @filter.message(r"^服务器$", regex=True)
+    # 🚨 修复: filter.message -> filter.command
+    @filter.command(r"^服务器$", regex=True)
     async def tmpserver(self, event: AstrMessageEvent):
         """[命令: 服务器] 查询TruckersMP官方服务器的实时状态。"""
         if not self.session: 
@@ -356,7 +358,6 @@ class TmpBotPlugin(Star):
             
         try:
             url = "https://api.truckersmp.com/v2/servers"
-            # 使用 self.session 进行请求
             async with self.session.get(url, timeout=10) as response:
                 if response.status == 200:
                     data = await response.json()
@@ -365,7 +366,12 @@ class TmpBotPlugin(Star):
                     if servers and isinstance(servers, list):
                         message = "🖥️ **TMP服务器状态** (显示前6个在线服务器)\n"
                         message += "=" * 25 + "\n"
-                        online_servers = [s for s in servers if s.get('online')][:6]
+                        # 仅显示在线且按人数排序
+                        online_servers = sorted(
+                            [s for s in servers if s.get('online')],
+                            key=lambda s: s.get('players', 0),
+                            reverse=True
+                        )[:6]
                         
                         for server in online_servers:
                             name, players, max_players, queue = server.get('name', '未知'), server.get('players', 0), server.get('maxplayers', 0), server.get('queue', 0)
@@ -385,7 +391,8 @@ class TmpBotPlugin(Star):
         except Exception:
             yield event.plain_result("网络请求失败，请检查网络或稍后重试。")
 
-    @filter.message(r"^帮助$", regex=True)
+    # 🚨 修复: filter.message -> filter.command
+    @filter.command(r"^帮助$", regex=True)
     async def tmphelp(self, event: AstrMessageEvent):
         """[命令: 帮助] 显示本插件的命令使用说明。"""
         help_text = """🚛 **TMP查询插件使用说明 (无前缀命令)**
