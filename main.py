@@ -3,7 +3,7 @@
 
 """
 AstrBot-plugin-tmp-bot
-欧卡2TMP查询插件 - AstrBot版本 (版本 1.2.9：最精确的正则匹配 ^命令)
+欧卡2TMP查询插件 - AstrBot版本 (版本 1.2.9：恢复标准命令匹配模式，依赖框架处理群聊前缀)
 """
 
 import re
@@ -21,6 +21,7 @@ try:
 except ImportError:
     # 最小化兼容回退
     class _DummyFilter:
+        # 移除 regex=True 确保匹配的是固定命令，而不是正则
         def command(self, pattern, **kwargs): 
             def decorator(func):
                 return func
@@ -88,8 +89,8 @@ class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
 
-# 版本号更新为 1.2.9
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.2.9", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
+# 版本号更新为 1.2.7
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.2.7", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context: Context):
         """初始化插件，设置数据路径和HTTP会话引用。"""
@@ -103,7 +104,7 @@ class TmpBotPlugin(Star):
     async def initialize(self):
         """在插件启动时，创建持久的HTTP会话。"""
         self.session = aiohttp.ClientSession(
-            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.2.9'},
+            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.2.7'},
             timeout=aiohttp.ClientTimeout(total=10)
         )
         logger.info("TMP Bot 插件HTTP会话已创建")
@@ -254,28 +255,21 @@ class TmpBotPlugin(Star):
 
 
     # ******************************************************
-    # 命令处理器 (版本 1.2.9 - 精确的开头正则匹配)
+    # 命令处理器 (版本 1.2.7 - 恢复标准命令匹配)
     # ******************************************************
     
-    # 核心修改：使用 ^命令 匹配消息的严格开头
-    @filter.command(r"^查询", regex=True) 
+    # 恢复为标准命令匹配，不再使用正则表达式前缀匹配
+    @filter.command("查询") 
     async def tmpquery(self, event: AstrMessageEvent):
         """[命令: 查询] TMP玩家完整信息查询。支持输入 TMP ID 或 Steam ID。"""
         message_str = event.message_str.strip()
         user_id = event.get_sender_id()
         
-        # 匹配消息中 '查询' 后面紧跟着的空格和数字
+        # 匹配 '查询' 后面的空格和数字
         match = re.search(r'查询\s*(\d+)', message_str) 
         input_id = match.group(1) if match else None
         
         tmp_id = None
-        
-        # 如果机器人移除了前缀，但没移除空格，这里可能需要手动清理一下开头
-        if message_str.startswith('查询'):
-            # 尝试重新解析消息，以防 AstrBot 内部处理有异常
-            clean_message = message_str[2:].strip()
-            if clean_message and clean_message.isdigit():
-                 input_id = clean_message
         
         if input_id:
             if len(input_id) == 17 and input_id.startswith('7'):
@@ -387,7 +381,7 @@ class TmpBotPlugin(Star):
         
         yield event.plain_result(message)
 
-    @filter.command(r"^绑定", regex=True)
+    @filter.command("绑定")
     async def tmpbind(self, event: AstrMessageEvent):
         """[命令: 绑定] 绑定您的聊天账号与TMP ID。支持输入 TMP ID 或 Steam ID。"""
         message_str = event.message_str.strip()
@@ -396,12 +390,6 @@ class TmpBotPlugin(Star):
         match = re.search(r'绑定\s*(\d+)', message_str)
         input_id = match.group(1) if match else None
 
-        if not input_id:
-            # 重新尝试解析，以防 AstrBot 内部处理有异常
-            clean_message = message_str[2:].strip() if message_str.startswith('绑定') else ""
-            if clean_message and clean_message.isdigit():
-                 input_id = clean_message
-                 
         if not input_id:
             yield event.plain_result("请输入正确的玩家编号，格式：绑定 [TMP ID] 或 绑定 [Steam ID]")
             return
@@ -443,7 +431,7 @@ class TmpBotPlugin(Star):
         else:
             yield event.plain_result("绑定失败，请稍后重试")
 
-    @filter.command(r"^解绑", regex=True)
+    @filter.command("解绑")
     async def tmpunbind(self, event: AstrMessageEvent):
         """[命令: 解绑] 解除当前用户的TruckersMP ID绑定。"""
         user_id = event.get_sender_id()
@@ -461,12 +449,13 @@ class TmpBotPlugin(Star):
         else:
             yield event.plain_result("解绑失败，请稍后重试")
 
-    @filter.command(r"^(状态|定位)", regex=True)
+    @filter.command("状态", "定位")
     async def tmpstatus(self, event: AstrMessageEvent):
         """[命令: 状态/定位] 查询玩家的实时在线状态。支持输入 TMP ID 或 Steam ID。"""
         message_str = event.message_str.strip()
         user_id = event.get_sender_id()
         
+        # 匹配 '状态' 或 '定位' 后面的空格和数字
         match = re.search(r'(状态|定位)\s*(\d+)', message_str) 
         input_id = match.group(2) if match else None
         
@@ -526,7 +515,7 @@ class TmpBotPlugin(Star):
         
         yield event.plain_result(message)
 
-    @filter.command(r"^服务器", regex=True)
+    @filter.command("服务器")
     async def tmpserver(self, event: AstrMessageEvent):
         """[命令: 服务器] 查询TruckersMP官方服务器的实时状态。"""
         if not self.session: 
@@ -568,7 +557,7 @@ class TmpBotPlugin(Star):
         except Exception:
             yield event.plain_result("网络请求失败，请检查网络或稍后重试。")
 
-    @filter.command(r"^帮助", regex=True)
+    @filter.command("帮助")
     async def tmphelp(self, event: AstrMessageEvent):
         """[命令: 帮助] 显示本插件的命令使用说明。"""
         help_text = """TMP查询插件使用说明 (无前缀命令)
