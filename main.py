@@ -3,7 +3,7 @@
 
 """
 AstrBot-plugin-tmp-bot (final version)
-欧卡2TMP查询插件 - 确保行为被正确加载
+欧卡2TMP查询插件 - 修复 register_commands 错误
 """
 
 import re
@@ -13,6 +13,7 @@ import json
 import os
 from typing import Optional, List, Dict, Tuple, Any
 from astrbot.api.event import AstrMessageEvent, MessageEventResult
+# 确保 astrbot 库和 api 路径正确
 from astrbot.api.star import Context, Star, register, StarTools
 from astrbot.api import logger
 
@@ -38,7 +39,7 @@ class ApiResponseException(TmpApiException):
     pass
 
 
-# 重点：修改了插件ID为 "tmp-bot-final"，绕过旧的缓存
+# 重点：使用新的插件ID来规避旧的缓存问题
 @register("tmp-bot-final", "BGYdook", "欧卡2TMP查询插件", "1.0.6", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context: Context):
@@ -60,13 +61,13 @@ class TmpBotPlugin(Star):
             timeout=aiohttp.ClientTimeout(total=10)
         )
         
-        # 注册所有命令
-        self.context.register_command(name="查询", description="查询TMP玩家完整信息 (查询 ID)", handler=self._handle_query)
-        self.context.register_command(name="状态", description="查询玩家在线状态和位置 (状态 ID)", handler=self._handle_status)
-        self.context.register_command(name="绑定", description="绑定TMP账号 (绑定 ID)", handler=self._handle_bind)
-        self.context.register_command(name="解绑", description="解绑TMP账号", handler=self._handle_unbind)
-        self.context.register_command(name="服务器", description="查看TMP服务器状态", handler=self._handle_server)
-        self.context.register_command(name="帮助", description="显示插件帮助信息", handler=self._handle_help)
+        # 重点修改：将 register_command 替换为 register_commands (全部6处)
+        self.context.register_commands(name="查询", description="查询TMP玩家完整信息 (查询 ID)", handler=self._handle_query)
+        self.context.register_commands(name="状态", description="查询玩家在线状态和位置 (状态 ID)", handler=self._handle_status)
+        self.context.register_commands(name="绑定", description="绑定TMP账号 (绑定 ID)", handler=self._handle_bind)
+        self.context.register_commands(name="解绑", description="解绑TMP账号", handler=self._handle_unbind)
+        self.context.register_commands(name="服务器", description="查看TMP服务器状态", handler=self._handle_server)
+        self.context.register_commands(name="帮助", description="显示插件帮助信息", handler=self._handle_help)
 
     # --- 数据持久化方法 ---
     def _load_bindings(self) -> Dict[str, Any]:
@@ -176,7 +177,7 @@ class TmpBotPlugin(Star):
             logger.error(f"获取在线状态失败 {tmp_id}: {e}")
             return {'online': False}
 
-    # --- 格式化方法 (保持不变) ---
+    # --- 格式化方法 ---
     def _format_ban_info(self, bans_info: List[Dict]) -> Tuple[bool, int, Optional[Dict], str]:
         """格式化封禁信息"""
         if not bans_info or not isinstance(bans_info, list):
@@ -206,7 +207,7 @@ class TmpBotPlugin(Star):
             perms_str = ', '.join(perms)
         return perms_str
 
-    # --- 命令处理器 (保持不变) ---
+    # --- 命令处理器 ---
     async def _handle_query(self, event: AstrMessageEvent, args: List[str]) -> MessageEventResult:
         """处理查询命令: 查询 TMP ID"""
         tmp_id = args[0] if args and args[0].isdigit() else self._get_bound_tmp_id(event.get_sender_id())
@@ -249,7 +250,7 @@ class TmpBotPlugin(Star):
             game_mode = "欧卡2" if online_status.get('game', 0) == 1 else "美卡2" if online_status.get('game', 0) == 2 else "未知游戏"
             city = online_status.get('city', {}).get('name', '未知城市')
             message += f"📶**在线状态: 在线 🟢**\n"
-            message += f"🖥️所在服务器: **{server_name}**\n"
+            message += f"🖥️所在服务器: {server_name}\n"
             message += f"🗺️所在位置: {city} ({game_mode})\n"
         else:
             message += f"📶**在线状态: 离线 🔴**\n"
