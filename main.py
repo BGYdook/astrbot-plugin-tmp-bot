@@ -3,7 +3,7 @@
 
 """
 AstrBot-plugin-tmp-bot
-欧卡2TMP查询插件 - AstrBot版本 (版本 1.0.6：修复封禁状态判断逻辑，使用主API的'banned'字段)
+欧卡2TMP查询插件 - AstrBot版本 (版本 1.0.7：加固封禁原因提取逻辑)
 """
 
 import re
@@ -84,8 +84,8 @@ class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
 
-# 版本号更新为 1.0.6
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.0.6", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
+# 版本号更新为 1.0.7
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.0.7", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context: Context):
         """初始化插件，设置数据路径和HTTP会话引用。"""
@@ -99,7 +99,7 @@ class TmpBotPlugin(Star):
     async def initialize(self):
         """在插件启动时，创建持久的HTTP会话。"""
         self.session = aiohttp.ClientSession(
-            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.0.6'},
+            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.0.7'},
             timeout=aiohttp.ClientTimeout(total=10)
         )
         logger.info("TMP Bot 插件HTTP会话已创建")
@@ -202,18 +202,18 @@ class TmpBotPlugin(Star):
         except Exception:
             return {'online': False}
 
-    # ⚠️ 废弃旧的封禁判断逻辑，以防误导
     def _format_ban_info(self, bans_info: List[Dict]) -> Tuple[int, List[Dict]]:
         """只返回历史封禁次数和最新的封禁记录，不再负责判断当前状态"""
         if not bans_info or not isinstance(bans_info, list):
             return 0, []
         
+        # 按创建时间降序排列，确保第一个是最新记录
         sorted_bans = sorted(bans_info, key=lambda x: x.get('created_at', ''), reverse=True)
         return len(bans_info), sorted_bans
 
 
     # ******************************************************
-    # 修复后的命令处理器 (版本 1.0.6 - 封禁状态修正)
+    # 修复后的命令处理器 (版本 1.0.7 - 封禁原因提取修正)
     # ******************************************************
     @filter.command(r"查询", regex=True)
     async def tmpquery(self, event: AstrMessageEvent):
@@ -234,7 +234,6 @@ class TmpBotPlugin(Star):
                 return
         
         try:
-            # player_info_raw 包含 'banned' 字段
             player_info_raw, bans_info, online_status = await asyncio.gather(
                 self._get_player_info(tmp_id), 
                 self._get_player_bans(tmp_id), 
@@ -248,8 +247,8 @@ class TmpBotPlugin(Star):
             yield event.plain_result(f"查询失败: {str(e)}")
             return
         
-        # 核心修复点：直接使用 player_info 中的 'banned' 字段
-        is_banned = player_info.get('banned', False) # True/False
+        # 核心判断：使用主 API 返回的 'banned' 字段
+        is_banned = player_info.get('banned', False) 
         
         ban_count, sorted_bans = self._format_ban_info(bans_info)
         
@@ -282,14 +281,23 @@ class TmpBotPlugin(Star):
         if ban_count > 0:
             message += f"🚫 历史封禁: {ban_count}次\n"
 
+        # ⚠️ 修复：加固封禁原因和截止日期的提取
         if is_banned and sorted_bans:
-            # 如果被封禁，显示最近一次的封禁信息
-            latest_ban = sorted_bans[0] 
-            message += f"🚫 当前封禁原因: {latest_ban.get('reason', '未知')}\n"
-            if latest_ban.get('expiration') and not latest_ban.get('expiration').lower().startswith('never'):
-                 message += f"🚫 封禁截止: {latest_ban['expiration']}\n"
-            elif latest_ban.get('expiration') and latest_ban.get('expiration').lower().startswith('never'):
+            # 找到当前生效的封禁记录
+            active_bans = [ban for ban in sorted_bans if not ban.get('expired', False)]
+            
+            # 使用最新的有效封禁记录（如果有）
+            latest_active_ban = active_bans[0] if active_bans else sorted_bans[0] 
+            
+            ban_reason = latest_active_ban.get('reason', '未知封禁原因')
+            ban_expiration = latest_active_ban.get('expiration', '未知')
+
+            message += f"🚫 当前封禁原因: {ban_reason}\n"
+            
+            if ban_expiration and ban_expiration.lower().startswith('never'):
                  message += f"🚫 封禁截止: 永久封禁\n"
+            elif ban_expiration != '未知':
+                 message += f"🚫 封禁截止: {ban_expiration}\n"
         
         if online_status and online_status.get('online'):
             server_name = online_status.get('serverName', '未知服务器')
@@ -303,7 +311,7 @@ class TmpBotPlugin(Star):
         
         yield event.plain_result(message)
 
-    # 以下命令处理器保持不变 (已修复 'no such group' 错误)
+    # 以下命令处理器保持不变 
     @filter.command(r"绑定", regex=True)
     async def tmpbind(self, event: AstrMessageEvent):
         """[命令: 绑定] 绑定您的聊天账号与TMP ID。"""
