@@ -279,7 +279,7 @@ class TmpBotPlugin(Star):
         if vtc_role:
              message += f"🚚 车队角色: {vtc_role}\n"
         
-        message += f"🚫 是否封禁: {'是 🚨' if is_banned ? '否 ✅'}\n"
+        message += f"🚫 是否封禁: {'是 🚨' if is_banned else '否 ✅'}\n"
         if is_banned:
             latest_ban = active_bans[0] if active_bans else {}
             message += f"🚫 封禁次数: {ban_count}次\n"
