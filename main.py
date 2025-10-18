@@ -3,7 +3,7 @@
 
 """
 AstrBot-plugin-tmp-bot
-欧卡2TMP查询插件 - AstrBot版本 (版本 1.2.1始终在查询结果中显示 Steam ID)
+欧卡2TMP查询插件 - AstrBot版本 (版本 1.2.1修正封禁原因解析逻辑，增强鲁棒性)
 """
 
 import re
@@ -88,8 +88,8 @@ class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
 
-# 版本号更新为 1.2.3
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.2.3", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
+# 版本号更新为 1.2.4
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.2.4", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context: Context):
         """初始化插件，设置数据路径和HTTP会话引用。"""
@@ -103,7 +103,7 @@ class TmpBotPlugin(Star):
     async def initialize(self):
         """在插件启动时，创建持久的HTTP会话。"""
         self.session = aiohttp.ClientSession(
-            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.2.3'},
+            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.2.4'},
             timeout=aiohttp.ClientTimeout(total=10)
         )
         logger.info("TMP Bot 插件HTTP会话已创建")
@@ -185,11 +185,11 @@ class TmpBotPlugin(Star):
             logger.error(f"查询 TMP ID 失败: {e}")
             raise NetworkException("Steam ID 转换查询失败")
             
-    # 新增：从玩家信息中提取 Steam ID
     def _get_steam_id_from_player_info(self, player_info: Dict) -> Optional[str]:
-        """从 V2 Player API 响应中提取 Steam ID (如果有的话)"""
+        """从 V2 Player API 响应中提取 Steam ID"""
         # Steam ID通常在 player_info['steamID64'] 字段中
-        return player_info.get('steamID64')
+        steam_id = player_info.get('steamID64')
+        return str(steam_id) if steam_id else None
 
     async def _get_player_info(self, tmp_id: str) -> Dict:
         if not self.session:
@@ -220,7 +220,8 @@ class TmpBotPlugin(Star):
         if not self.session: return []
 
         try:
-            url = f"https://api.truckersmp.com/v2/player/{tmp_id}/bans"
+            # 采用官方文档明确的 /v2/bans/{id} 结构，更安全
+            url = f"https://api.truckersmp.com/v2/bans/{tmp_id}"
             async with self.session.get(url, timeout=10) as response:
                 if response.status == 200:
                     data = await response.json()
@@ -246,17 +247,18 @@ class TmpBotPlugin(Star):
             return {'online': False}
 
     def _format_ban_info(self, bans_info: List[Dict]) -> Tuple[int, List[Dict]]:
-        """只返回历史封禁次数和最新的封禁记录"""
+        """只返回历史封禁次数和最新的封禁记录（按时间倒序）"""
         if not bans_info or not isinstance(bans_info, list):
             return 0, []
         
         # 按创建时间降序排列，确保第一个是最新记录
-        sorted_bans = sorted(bans_info, key=lambda x: x.get('created_at', ''), reverse=True)
+        # 注意: TMP API V2 bans endpoint 使用 'timeAdded' 作为创建时间
+        sorted_bans = sorted(bans_info, key=lambda x: x.get('timeAdded', ''), reverse=True)
         return len(bans_info), sorted_bans
 
 
     # ******************************************************
-    # 命令处理器 (版本 1.2.3 - 始终显示 Steam ID)
+    # 命令处理器 (版本 1.2.4 - 增强封禁原因解析)
     # ******************************************************
     
     @filter.command(r"查询", regex=True)
@@ -276,7 +278,6 @@ class TmpBotPlugin(Star):
             if len(input_id) == 17 and input_id.startswith('7'):
                 # 2a. 是 Steam ID，尝试转换
                 try:
-                    # 使用 Steam ID 转换获取 TMP ID
                     tmp_id = await self._get_tmp_id_from_steam_id(input_id)
                 except SteamIdNotFoundException as e:
                     yield event.plain_result(str(e))
@@ -310,11 +311,10 @@ class TmpBotPlugin(Star):
             yield event.plain_result(f"查询失败: {str(e)}")
             return
             
-        # 关键修改：从 player_info 中提取 Steam ID
+        # 关键修改：提取 Steam ID 和 封禁状态/截止时间
         steam_id_to_display = self._get_steam_id_from_player_info(player_info)
-        
-        # 核心判断：使用主 API 返回的 'banned' 字段
         is_banned = player_info.get('banned', False) 
+        banned_until_main = player_info.get('bannedUntil', '永久/未知') 
         
         ban_count, sorted_bans = self._format_ban_info(bans_info)
         
@@ -352,26 +352,39 @@ class TmpBotPlugin(Star):
         if ban_count > 0:
             message += f"🚫 历史封禁: {ban_count}次\n"
 
-        # 2. 如果被主 API 标记为封禁，且我们有任何历史记录
-        if is_banned and sorted_bans:
+        # 2. 如果当前被封禁 (is_banned = True)
+        if is_banned:
             
-            latest_ban = sorted_bans[0] 
-            
-            ban_reason = latest_ban.get('reason', '未知封禁原因')
-            ban_expiration = latest_ban.get('expiration', '永久/未知') 
-
-            message += f"🚫 当前封禁原因: {ban_reason}\n"
-            
-            if ban_expiration and ban_expiration.lower().startswith('never'):
-                 message += f"🚫 封禁截止: 永久封禁\n"
-            elif ban_expiration != '永久/未知':
-                 expiration_display = latest_ban.get('expiration', '未知')
-                 message += f"🚫 封禁截止: {expiration_display}\n"
+            current_ban = None
+            # 尝试在详细记录中找到当前的封禁记录
+            if sorted_bans:
+                # 寻找 active=True 的记录，如果没有，则默认为最新的记录
+                current_ban = next((ban for ban in sorted_bans if ban.get('active')), None)
+                if not current_ban:
+                    current_ban = sorted_bans[0]
+                    
+            if current_ban:
+                # 提取详细信息
+                ban_reason = current_ban.get('reason', '未知封禁原因 (API V2)')
+                ban_expiration = current_ban.get('expiration', banned_until_main) 
+                
+                message += f"🚫 当前封禁原因: {ban_reason}\n"
+                
+                # 格式化截止日期
+                if ban_expiration and ban_expiration.lower().startswith('never'):
+                    message += f"🚫 封禁截止: 永久封禁\n"
+                else:
+                    message += f"🚫 封禁截止: {ban_expiration}\n"
+                    
+            else:
+                # Fallback: is_banned=True, 但详细记录缺失或无法匹配
+                message += f"🚫 当前封禁原因: API详细记录缺失。可能原因：封禁信息被隐藏或数据同步延迟。\n"
+                # 使用主 API 提供的截止时间
+                if banned_until_main and banned_until_main.lower().startswith('never'):
+                    message += f"🚫 封禁截止: 永久封禁\n"
+                else:
+                    message += f"🚫 封禁截止: {banned_until_main}\n"
         
-        # 3. 如果被标记为封禁，但 API 没提供记录（针对记录缺失的情况）
-        elif is_banned: 
-            message += f"🚫 当前封禁原因: API记录缺失，请前往官网查询。\n"
-            message += f"🚫 封禁截止: 官网信息缺失或永久封禁。\n"
         
         if online_status and online_status.get('online'):
             server_name = online_status.get('serverName', '未知服务器')
@@ -385,7 +398,7 @@ class TmpBotPlugin(Star):
         
         yield event.plain_result(message)
 
-    # 以下命令处理器需要确保调用 _get_steam_id_from_player_info
+    # 以下命令处理器保持不变 (除版本号外)
     
     @filter.command(r"绑定", regex=True)
     async def tmpbind(self, event: AstrMessageEvent):
