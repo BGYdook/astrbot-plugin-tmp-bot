@@ -3,7 +3,7 @@
 
 """
 AstrBot-plugin-tmp-bot
-欧卡2TMP查询插件 - AstrBot版本 (最终稳定版：修复'no such group'和命令匹配逻辑)
+欧卡2TMP查询插件 - AstrBot版本 (版本 1.0.6：修复封禁状态判断逻辑，使用主API的'banned'字段)
 """
 
 import re
@@ -84,8 +84,8 @@ class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
 
-# 版本号更新为 1.0.5 以示最终稳定修复
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.0.5", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
+# 版本号更新为 1.0.6
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.0.6", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context: Context):
         """初始化插件，设置数据路径和HTTP会话引用。"""
@@ -99,7 +99,7 @@ class TmpBotPlugin(Star):
     async def initialize(self):
         """在插件启动时，创建持久的HTTP会话。"""
         self.session = aiohttp.ClientSession(
-            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.0.5'},
+            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.0.6'},
             timeout=aiohttp.ClientTimeout(total=10)
         )
         logger.info("TMP Bot 插件HTTP会话已创建")
@@ -202,34 +202,29 @@ class TmpBotPlugin(Star):
         except Exception:
             return {'online': False}
 
-    def _format_ban_info(self, bans_info: List[Dict]) -> Tuple[bool, int, List[Dict], str]:
+    # ⚠️ 废弃旧的封禁判断逻辑，以防误导
+    def _format_ban_info(self, bans_info: List[Dict]) -> Tuple[int, List[Dict]]:
+        """只返回历史封禁次数和最新的封禁记录，不再负责判断当前状态"""
         if not bans_info or not isinstance(bans_info, list):
-            return False, 0, [], ""
+            return 0, []
         
         sorted_bans = sorted(bans_info, key=lambda x: x.get('created_at', ''), reverse=True)
-        active_bans = [ban for ban in sorted_bans if not ban.get('expired', False)]
-        ban_count = len(bans_info)
-        is_banned = len(active_bans) > 0
-        ban_reason = active_bans[0].get('reason', '未知封禁原因') if active_bans else ""
-            
-        return is_banned, ban_count, active_bans, ban_reason
+        return len(bans_info), sorted_bans
+
 
     # ******************************************************
-    # 修复后的命令处理器 (最终稳定版 - 修复 'no such group')
+    # 修复后的命令处理器 (版本 1.0.6 - 封禁状态修正)
     # ******************************************************
-    # 匹配 "查询" 或 "查询 123456"
     @filter.command(r"查询", regex=True)
     async def tmpquery(self, event: AstrMessageEvent):
         """[命令: 查询] TMP玩家完整信息查询。"""
         message_str = event.message_str.strip()
         
-        # ⚠️ 修复：手动运行 re.search 来获取 ID，使用捕获组 (\d+)，并安全地检查 group(1)
-        # 正则表达式：匹配 "查询" 后面的任意数字 ID
+        # 手动运行 re.search 来获取 ID
         match = re.search(r'查询\s*(\d+)', message_str) 
-        tmp_id = match.group(1) if match else None # 修复: 只有当 match 存在时才尝试获取 group(1)
+        tmp_id = match.group(1) if match else None
         
         if not tmp_id:
-            # 如果没有 ID（即只输入了 "查询"），尝试从绑定中获取
             if message_str.strip().lower() == '查询':
                 user_id = event.get_sender_id()
                 tmp_id = self._get_bound_tmp_id(user_id)
@@ -238,8 +233,8 @@ class TmpBotPlugin(Star):
                 yield event.plain_result("请输入正确的玩家编号，格式：查询 123456，或先使用 绑定 123456 绑定您的账号。")
                 return
         
-        # 后续查询逻辑保持不变
         try:
+            # player_info_raw 包含 'banned' 字段
             player_info_raw, bans_info, online_status = await asyncio.gather(
                 self._get_player_info(tmp_id), 
                 self._get_player_bans(tmp_id), 
@@ -253,7 +248,10 @@ class TmpBotPlugin(Star):
             yield event.plain_result(f"查询失败: {str(e)}")
             return
         
-        is_banned, ban_count, active_bans, ban_reason = self._format_ban_info(bans_info)
+        # 核心修复点：直接使用 player_info 中的 'banned' 字段
+        is_banned = player_info.get('banned', False) # True/False
+        
+        ban_count, sorted_bans = self._format_ban_info(bans_info)
         
         # 完整的回复消息构建 (纯文本输出)
         message = "🚛 TMP玩家详细信息\n"
@@ -280,14 +278,18 @@ class TmpBotPlugin(Star):
              message += f"🚚 车队角色: {vtc_role}\n"
         
         message += f"🚫 是否封禁: {'是 🚨' if is_banned else '否 ✅'}\n"
-        if is_banned:
-            latest_ban = active_bans[0] if active_bans else {}
-            message += f"🚫 封禁次数: {ban_count}次\n"
-            message += f"🚫 封禁原因: {latest_ban.get('reason', '未知')}\n"
-            if latest_ban.get('expiration'):
-                 message += f"🚫 封禁截止: {latest_ban['expiration']}\n"
-        elif ban_count > 0:
+        
+        if ban_count > 0:
             message += f"🚫 历史封禁: {ban_count}次\n"
+
+        if is_banned and sorted_bans:
+            # 如果被封禁，显示最近一次的封禁信息
+            latest_ban = sorted_bans[0] 
+            message += f"🚫 当前封禁原因: {latest_ban.get('reason', '未知')}\n"
+            if latest_ban.get('expiration') and not latest_ban.get('expiration').lower().startswith('never'):
+                 message += f"🚫 封禁截止: {latest_ban['expiration']}\n"
+            elif latest_ban.get('expiration') and latest_ban.get('expiration').lower().startswith('never'):
+                 message += f"🚫 封禁截止: 永久封禁\n"
         
         if online_status and online_status.get('online'):
             server_name = online_status.get('serverName', '未知服务器')
@@ -301,17 +303,15 @@ class TmpBotPlugin(Star):
         
         yield event.plain_result(message)
 
-    # 匹配 "绑定 123456"
+    # 以下命令处理器保持不变 (已修复 'no such group' 错误)
     @filter.command(r"绑定", regex=True)
     async def tmpbind(self, event: AstrMessageEvent):
         """[命令: 绑定] 绑定您的聊天账号与TMP ID。"""
         message_str = event.message_str.strip()
-        # ⚠️ 修复：手动运行 re.search 来获取 ID，使用捕获组 (\d+)
         match = re.search(r'绑定\s*(\d+)', message_str)
         tmp_id = match.group(1) if match else None
 
         if not tmp_id:
-            # 此时用户可能只输入了 "绑定"，但没有ID，需要提示
             yield event.plain_result("请输入正确的玩家编号，格式：绑定 123456")
             return
 
@@ -331,7 +331,6 @@ class TmpBotPlugin(Star):
         else:
             yield event.plain_result("❌ 绑定失败，请稍后重试")
 
-    # 精确匹配 "解绑"
     @filter.command(r"解绑", regex=True)
     async def tmpunbind(self, event: AstrMessageEvent):
         """[命令: 解绑] 解除当前用户的TruckersMP ID绑定。"""
@@ -350,19 +349,15 @@ class TmpBotPlugin(Star):
         else:
             yield event.plain_result("❌ 解绑失败，请稍后重试")
 
-    # 匹配 "状态" 或 "状态 123456" (同时支持 "定位")
     @filter.command(r"(状态|定位)", regex=True)
     async def tmpstatus(self, event: AstrMessageEvent):
         """[命令: 状态/定位] 查询玩家的实时在线状态。"""
         message_str = event.message_str.strip()
         
-        # ⚠️ 修复：手动运行 re.search 来获取 ID，使用捕获组 (\d+)
-        # 正则表达式：匹配 "状态" 或 "定位" 后面的任意数字 ID
         match = re.search(r'(状态|定位)\s*(\d+)', message_str) 
-        tmp_id = match.group(2) if match else None # 修复: match.group(2) 是数字ID (match.group(1) 是 '状态'/'定位')
+        tmp_id = match.group(2) if match else None
 
         if not tmp_id:
-            # 如果没有ID（即只输入了 "状态" 或 "定位"），尝试从绑定中获取
             user_id = event.get_sender_id()
             tmp_id = self._get_bound_tmp_id(user_id)
             
@@ -403,7 +398,6 @@ class TmpBotPlugin(Star):
         
         yield event.plain_result(message)
 
-    # 精确匹配 "服务器"
     @filter.command(r"服务器", regex=True)
     async def tmpserver(self, event: AstrMessageEvent):
         """[命令: 服务器] 查询TruckersMP官方服务器的实时状态。"""
@@ -446,7 +440,6 @@ class TmpBotPlugin(Star):
         except Exception:
             yield event.plain_result("网络请求失败，请检查网络或稍后重试。")
 
-    # 精确匹配 "帮助"
     @filter.command(r"帮助", regex=True)
     async def tmphelp(self, event: AstrMessageEvent):
         """[命令: 帮助] 显示本插件的命令使用说明。"""
