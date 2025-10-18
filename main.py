@@ -219,13 +219,13 @@ class TmpBotPlugin(Star):
     # 修复后的命令处理器 (手动 re.search)
     # ******************************************************
     # 修复：移除 (\d+)?，避免正则捕获分组导致 match.group(1) 索引错误。让它只匹配 "查询" 或 "查询 "开头
-    @filter.command(r"^查询(\s+\d+)?$", regex=True)
+    @filter.command(r"查询", regex=True)
     async def tmpquery(self, event: AstrMessageEvent):
         """[命令: 查询] TMP玩家完整信息查询。"""
         message_str = event.message_str.strip()
         
         # ⚠️ 修复：手动运行 re.search 来获取 ID，不依赖 event.match
-        match = re.search(r'查询\s*(\d+)', message_str)
+        match = re.search(r'查询', message_str)
         tmp_id = match.group(1) if match else None
         
         if not tmp_id:
@@ -301,12 +301,12 @@ class TmpBotPlugin(Star):
         yield event.plain_result(message)
 
     # 修复：只匹配 "绑定" 开头，手动获取ID
-    @filter.command(r"^绑定\s*\d+$", regex=True)
+    @filter.command(r"绑定", regex=True)
     async def tmpbind(self, event: AstrMessageEvent):
         """[命令: 绑定] 绑定您的聊天账号与TMP ID。"""
         message_str = event.message_str.strip()
         # ⚠️ 修复：手动运行 re.search 来获取 ID，不依赖 event.match
-        match = re.search(r'绑定\s*(\d+)', message_str)
+        match = re.search(r'绑定', message_str)
         tmp_id = match.group(1) if match else None
 
         if not tmp_id:
@@ -331,7 +331,7 @@ class TmpBotPlugin(Star):
             yield event.plain_result("❌ 绑定失败，请稍后重试")
 
     # 精确匹配 "解绑"
-    @filter.command(r"^解绑$", regex=True)
+    @filter.command(r"解绑", regex=True)
     async def tmpunbind(self, event: AstrMessageEvent):
         """[命令: 解绑] 解除当前用户的TruckersMP ID绑定。"""
         user_id = event.get_sender_id()
@@ -350,13 +350,13 @@ class TmpBotPlugin(Star):
             yield event.plain_result("❌ 解绑失败，请稍后重试")
 
     # 修复：只匹配 "状态" 或 "状态 "开头，手动获取ID
-    @filter.command(r"^(状态|定位)(\s+\d+)?$", regex=True)
+    @filter.command(r"定位", regex=True)
     async def tmpstatus(self, event: AstrMessageEvent):
         """[命令: 状态] 查询玩家的实时在线状态。"""
         message_str = event.message_str.strip()
         
         # ⚠️ 修复：手动运行 re.search 来获取 ID，不依赖 event.match
-        match = re.search(r'(状态|定位)\s*(\d+)', message_str)
+        match = re.search(r'定位', message_str)
         tmp_id = match.group(2) if match and len(match.groups()) > 1 else None
         
         if not tmp_id:
@@ -402,7 +402,7 @@ class TmpBotPlugin(Star):
         yield event.plain_result(message)
 
     # 精确匹配 "服务器"
-    @filter.command(r"^服务器$", regex=True)
+    @filter.command(r"服务器", regex=True)
     async def tmpserver(self, event: AstrMessageEvent):
         """[命令: 服务器] 查询TruckersMP官方服务器的实时状态。"""
         if not self.session: 
@@ -445,7 +445,7 @@ class TmpBotPlugin(Star):
             yield event.plain_result("网络请求失败，请检查网络或稍后重试。")
 
     # 精确匹配 "帮助"
-    @filter.command(r"^帮助$", regex=True)
+    @filter.command(r"帮助", regex=True)
     async def tmphelp(self, event: AstrMessageEvent):
         """[命令: 帮助] 显示本插件的命令使用说明。"""
         help_text = """🚛 TMP查询插件使用说明 (无前缀命令)
