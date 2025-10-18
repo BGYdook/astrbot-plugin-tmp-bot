@@ -3,7 +3,7 @@
 
 """
 AstrBot-plugin-tmp-bot (final version)
-欧卡2TMP查询插件 - 修复 register_commands 错误
+欧卡2TMP查询插件 - 修复 register_commands 参数错误
 """
 
 import re
@@ -39,7 +39,7 @@ class ApiResponseException(TmpApiException):
     pass
 
 
-# 重点：使用新的插件ID来规避旧的缓存问题
+# 重点：使用新的插件ID "tmp-bot-final" 来规避旧的缓存问题
 @register("tmp-bot-final", "BGYdook", "欧卡2TMP查询插件", "1.0.6", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context: Context):
@@ -61,15 +61,45 @@ class TmpBotPlugin(Star):
             timeout=aiohttp.ClientTimeout(total=10)
         )
         
-        # 重点修改：将 register_command 替换为 register_commands (全部6处)
-        self.context.register_commands(name="查询", description="查询TMP玩家完整信息 (查询 ID)", handler=self._handle_query)
-        self.context.register_commands(name="状态", description="查询玩家在线状态和位置 (状态 ID)", handler=self._handle_status)
-        self.context.register_commands(name="绑定", description="绑定TMP账号 (绑定 ID)", handler=self._handle_bind)
-        self.context.register_commands(name="解绑", description="解绑TMP账号", handler=self._handle_unbind)
-        self.context.register_commands(name="服务器", description="查看TMP服务器状态", handler=self._handle_server)
-        self.context.register_commands(name="帮助", description="显示插件帮助信息", handler=self._handle_help)
-
-    # --- 数据持久化方法 ---
+        # 🚨 最终修复：将所有命令封装成一个 List[Dict] 传递给 register_commands
+        commands = [
+            {
+                "name": "查询",
+                "description": "查询TMP玩家完整信息 (查询 ID)",
+                "handler": self._handle_query
+            },
+            {
+                "name": "状态",
+                "description": "查询玩家在线状态和位置 (状态 ID)",
+                "handler": self._handle_status
+            },
+            {
+                "name": "绑定", 
+                "description": "绑定TMP账号 (绑定 ID)",
+                "handler": self._handle_bind
+            },
+            {
+                "name": "解绑",
+                "description": "解绑TMP账号", 
+                "handler": self._handle_unbind
+            },
+            {
+                "name": "服务器",
+                "description": "查看TMP服务器状态",
+                "handler": self._handle_server
+            },
+            {
+                "name": "帮助",
+                "description": "显示插件帮助信息",
+                "handler": self._handle_help
+            }
+        ]
+        
+        # 将命令列表传递给 register_commands
+        self.context.register_commands(commands)
+        # 修复完毕
+    
+    # --- 数据持久化方法 (保持不变) ---
     def _load_bindings(self) -> Dict[str, Any]:
         """从文件加载用户绑定数据"""
         try:
@@ -117,7 +147,7 @@ class TmpBotPlugin(Star):
             return self._save_bindings(bindings)
         return False
 
-    # --- API请求方法 ---
+    # --- API请求方法 (保持不变) ---
     async def _get_player_info(self, tmp_id: str) -> Dict:
         """获取玩家基本信息 (v2/player/{tmp_id})"""
         if not self.session:
@@ -177,7 +207,7 @@ class TmpBotPlugin(Star):
             logger.error(f"获取在线状态失败 {tmp_id}: {e}")
             return {'online': False}
 
-    # --- 格式化方法 ---
+    # --- 格式化方法 (保持不变) ---
     def _format_ban_info(self, bans_info: List[Dict]) -> Tuple[bool, int, Optional[Dict], str]:
         """格式化封禁信息"""
         if not bans_info or not isinstance(bans_info, list):
@@ -207,7 +237,7 @@ class TmpBotPlugin(Star):
             perms_str = ', '.join(perms)
         return perms_str
 
-    # --- 命令处理器 ---
+    # --- 命令处理器 (保持不变) ---
     async def _handle_query(self, event: AstrMessageEvent, args: List[str]) -> MessageEventResult:
         """处理查询命令: 查询 TMP ID"""
         tmp_id = args[0] if args and args[0].isdigit() else self._get_bound_tmp_id(event.get_sender_id())
