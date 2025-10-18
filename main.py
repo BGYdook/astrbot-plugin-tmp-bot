@@ -3,7 +3,7 @@
 
 """
 AstrBot-plugin-tmp-bot
-欧卡2TMP查询插件 - AstrBot版本 (版本 1.0.9：优化空封禁列表时的输出逻辑)
+欧卡2TMP查询插件 - AstrBot版本 (版本 1.1.0：优化 API 记录缺失时的封禁原因提示)
 """
 
 import re
@@ -84,8 +84,8 @@ class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
 
-# 版本号更新为 1.0.9
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.0.9", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
+# 版本号更新为 1.1.0
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.1.0", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context: Context):
         """初始化插件，设置数据路径和HTTP会话引用。"""
@@ -99,7 +99,7 @@ class TmpBotPlugin(Star):
     async def initialize(self):
         """在插件启动时，创建持久的HTTP会话。"""
         self.session = aiohttp.ClientSession(
-            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.0.9'},
+            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.1.0'},
             timeout=aiohttp.ClientTimeout(total=10)
         )
         logger.info("TMP Bot 插件HTTP会话已创建")
@@ -213,7 +213,7 @@ class TmpBotPlugin(Star):
 
 
     # ******************************************************
-    # 修复后的命令处理器 (版本 1.0.9 - 优化空封禁列表时的输出)
+    # 修复后的命令处理器 (版本 1.1.0 - 封禁提示优化)
     # ******************************************************
     @filter.command(r"查询", regex=True)
     async def tmpquery(self, event: AstrMessageEvent):
@@ -278,31 +278,31 @@ class TmpBotPlugin(Star):
         
         message += f"🚫 是否封禁: {'是 🚨' if is_banned else '否 ✅'}\n"
         
-        # 关键改动：只有当 API 提供了历史记录时才显示历史封禁次数
+        # 1. 如果有历史记录，显示次数
         if ban_count > 0:
             message += f"🚫 历史封禁: {ban_count}次\n"
 
-        # 关键改动：如果被主 API 标记为封禁，且我们有任何历史记录（即使API未标记为过期），就显示最新的记录信息
+        # 2. 如果被主 API 标记为封禁，且我们有任何历史记录
         if is_banned and sorted_bans:
             
             latest_ban = sorted_bans[0] 
             
             ban_reason = latest_ban.get('reason', '未知封禁原因')
-            ban_expiration = latest_ban.get('expiration', '永久/未知') # 默认为永久/未知
+            ban_expiration = latest_ban.get('expiration', '永久/未知') 
 
             message += f"🚫 当前封禁原因: {ban_reason}\n"
             
-            # 尝试格式化截止日期
             if ban_expiration and ban_expiration.lower().startswith('never'):
                  message += f"🚫 封禁截止: 永久封禁\n"
             elif ban_expiration != '永久/未知':
                  expiration_display = latest_ban.get('expiration', '未知')
                  message += f"🚫 封禁截止: {expiration_display}\n"
         
-        # 针对当前遇到的特殊情况，但我们有“被封禁”状态，但无记录。我们手动添加提示。
-        elif is_banned and ban_count == 0:
-            message += f"🚫 当前封禁原因: API无详细记录，请前往TruckersMP官网查询。\n"
-            message += f"🚫 封禁截止: 永久封禁或API记录缺失。\n"
+        # 3. 如果被标记为封禁，但 API 没提供记录（针对你遇到的情况）
+        elif is_banned: # 修正为只检查 is_banned，因为 ban_count == 0 隐含在这里
+            message += f"🚫 当前封禁原因: API记录缺失，请前往官网查询。\n"
+            # 我们可以假设大部分记录缺失的都是永久或长期封禁，给出保守提示
+            message += f"🚫 封禁截止: 官网信息缺失或永久封禁。\n"
         
         if online_status and online_status.get('online'):
             server_name = online_status.get('serverName', '未知服务器')
@@ -405,7 +405,7 @@ class TmpBotPlugin(Star):
             city = online_status.get('city', {}).get('name', '未知城市')
             message += f"📶 在线状态: 在线 🟢\n"
             message += f"🖥️ 所在服务器: {server_name}\n"
-            message += f"🗺️️ 所在位置: {city} ({game_mode})\n"
+            message += f"🗺️ 所在位置: {city} ({game_mode})\n"
         else:
             message += f"📶 在线状态: 离线 🔴\n"
         
