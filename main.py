@@ -89,8 +89,8 @@ class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
 
-# 版本号更新为 1.2.7
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.2.7", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
+# 版本号更新为 1.2.9
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.2.9", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context: Context):
         """初始化插件，设置数据路径和HTTP会话引用。"""
@@ -255,7 +255,7 @@ class TmpBotPlugin(Star):
 
 
     # ******************************************************
-    # 命令处理器 (版本 1.2.7 - 恢复标准命令匹配)
+    # 命令处理器 (版本 1.2.9 - 恢复标准命令匹配)
     # ******************************************************
     
     # 恢复为标准命令匹配，不再使用正则表达式前缀匹配
@@ -287,7 +287,7 @@ class TmpBotPlugin(Star):
             tmp_id = self._get_bound_tmp_id(user_id)
         
         if not tmp_id:
-            yield event.plain_result("请输入正确的玩家编号（TMP ID 或 Steam ID），或先使用 绑定 [TMP ID] 绑定您的账号。")
+            yield event.plain_result("请输入正确的玩家编号（TMP ID 或 Steam ID）")
             return
         
         try:
@@ -371,7 +371,7 @@ class TmpBotPlugin(Star):
         
         if online_status and online_status.get('online'):
             server_name = online_status.get('serverName', '未知服务器')
-            game_mode = "欧卡2" if online_status.get('game', 0) == 1 else "美卡2" if online_status.get('game', 0) == 2 else "未知游戏"
+            game_mode = "欧卡2" if online_status.get('game', 0) == 1 else "美卡" if online_status.get('game', 0) == 2 else "未知游戏"
             city = online_status.get('city', {}).get('name', '未知城市')
             message += f"在线状态: 在线\n"
             message += f"所在服务器: {server_name}\n"
@@ -391,7 +391,7 @@ class TmpBotPlugin(Star):
         input_id = match.group(1) if match else None
 
         if not input_id:
-            yield event.plain_result("请输入正确的玩家编号，格式：绑定 [TMP ID] 或 绑定 [Steam ID]")
+            yield event.plain_result("请输入正确的玩家编号，格式：绑定 [TMP ID]")
             return
 
         tmp_id = input_id
@@ -449,14 +449,14 @@ class TmpBotPlugin(Star):
         else:
             yield event.plain_result("解绑失败，请稍后重试")
 
-    @filter.command("状态", "定位")
+    @filter.command("定位")
     async def tmpstatus(self, event: AstrMessageEvent):
-        """[命令: 状态/定位] 查询玩家的实时在线状态。支持输入 TMP ID 或 Steam ID。"""
+        """[命令:定位] 查询玩家的实时在线状态。支持输入 TMP ID 或 Steam ID。"""
         message_str = event.message_str.strip()
         user_id = event.get_sender_id()
         
-        # 匹配 '状态' 或 '定位' 后面的空格和数字
-        match = re.search(r'(状态|定位)\s*(\d+)', message_str) 
+        # 匹配 '定位' 后面的空格和数字
+        match = re.search(r'(定位)\s*(\d+)', message_str) 
         input_id = match.group(2) if match else None
         
         tmp_id = None
@@ -530,7 +530,7 @@ class TmpBotPlugin(Star):
                     servers = data.get('response', [])
                     
                     if servers and isinstance(servers, list):
-                        message = "TMP服务器状态 (显示前6个在线服务器)\n"
+                        message = "TMP服务器状态\n"
                         message += "=" * 25 + "\n"
                         
                         online_servers = sorted(
@@ -557,9 +557,9 @@ class TmpBotPlugin(Star):
         except Exception:
             yield event.plain_result("网络请求失败，请检查网络或稍后重试。")
 
-    @filter.command("帮助")
+    @filter.command("help")
     async def tmphelp(self, event: AstrMessageEvent):
-        """[命令: 帮助] 显示本插件的命令使用说明。"""
+        """[命令: help] 显示本插件的命令使用说明。"""
         help_text = """TMP查询插件使用说明 (无前缀命令)
 
 可用命令:
@@ -568,9 +568,9 @@ class TmpBotPlugin(Star):
 3. 绑定 [ID] - 绑定您的聊天账号与 TMP ID（支持输入 Steam ID 转换）。
 4. 解绑 - 解除账号绑定。
 5. 服务器 - 查看主要TMP服务器的实时状态和在线人数。
-6. 帮助 - 显示此帮助信息。
+6. help - 显示此帮助信息。
 
-使用提示: 绑定后可直接发送 查询 或 状态 (无需ID参数)
+使用提示: 绑定后可直接发送 查询 或 定位 (无需ID参数)
 """
         yield event.plain_result(help_text)
 
