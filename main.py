@@ -11,7 +11,7 @@ import asyncio
 import aiohttp
 import json
 import os
-from typing import Optional, List, Dict, Tuple
+from typing import Optional, List, Dict, Tuple, Any
 from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
 from astrbot.api.star import Context, Star, register, StarTools
 from astrbot.api import logger
@@ -28,7 +28,7 @@ class PlayerNotFoundException(TmpApiException):
     pass
 
 
-class NetworkException(Exception):
+class NetworkException(TmpApiException):
     """网络请求异常"""
     pass
 
@@ -36,6 +36,7 @@ class NetworkException(Exception):
 class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
+
 
 @register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.0.0", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
@@ -48,8 +49,15 @@ class TmpBotPlugin(Star):
         os.makedirs(self.data_dir, exist_ok=True)
         logger.info("TMP Bot 插件已加载")
 
+    async def initialize(self):
+        """初始化网络会话"""
+        self.session = aiohttp.ClientSession(
+            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.0.0'},
+            timeout=aiohttp.ClientTimeout(total=10)
+        )
+
     # --- 内部工具方法 ---
-    def _load_bindings(self) -> Dict[str, any]:
+    def _load_bindings(self) -> Dict[str, Any]:
         try:
             if os.path.exists(self.bind_file):
                 with open(self.bind_file, 'r', encoding='utf-8') as f:
@@ -92,88 +100,127 @@ class TmpBotPlugin(Star):
         return False
 
     async def _get_player_info(self, tmp_id: str) -> Dict:
+        """获取玩家基本信息"""
         try:
             url = f"https://api.truckersmp.com/v2/player/{tmp_id}"
-            async with aiohttp.ClientSession(headers={'User-Agent': 'AstrBot-TMP-Plugin/1.0.0'}) as session:
-                async with session.get(url, timeout=10) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        if data and isinstance(data, dict):
-                            return data.get('response') or data
-                        raise PlayerNotFoundException(f"玩家 {tmp_id} 不存在")
-                    elif response.status == 404:
-                        raise PlayerNotFoundException(f"玩家 {tmp_id} 不存在")
-                    else:
-                        raise ApiResponseException(f"API返回错误状态码: {response.status}")
+            async with self.session.get(url) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    if data and isinstance(data, dict):
+                        return data.get('response', data)
+                    raise PlayerNotFoundException(f"玩家 {tmp_id} 不存在")
+                elif response.status == 404:
+                    raise PlayerNotFoundException(f"玩家 {tmp_id} 不存在")
+                else:
+                    raise ApiResponseException(f"API返回错误状态码: {response.status}")
         except aiohttp.ClientError as e:
-            raise NetworkException("网络请求失败")
-        except Exception as e:
-            raise NetworkException("查询失败")
+            logger.error(f"网络请求失败: {e}")
+            raise NetworkException("网络请求失败，请稍后重试")
+        except asyncio.TimeoutError:
+            logger.error(f"请求超时: {tmp_id}")
+            raise NetworkException("请求超时，请稍后重试")
 
     async def _get_player_bans(self, tmp_id: str) -> List[Dict]:
+        """获取玩家封禁信息"""
         try:
             url = f"https://api.truckersmp.com/v2/player/{tmp_id}/bans"
-            async with aiohttp.ClientSession(headers={'User-Agent': 'AstrBot-TMP-Plugin/1.0.0'}) as session:
-                async with session.get(url, timeout=10) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        return data.get('response', [])
-                    return []
-        except Exception:
+            async with self.session.get(url) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    return data.get('response', [])
+                return []
+        except Exception as e:
+            logger.error(f"获取封禁信息失败 {tmp_id}: {e}")
             return []
 
     async def _get_online_status(self, tmp_id: str) -> Dict:
+        """获取玩家在线状态"""
         try:
             url = f"https://api.truckyapp.com/v3/map/online?playerID={tmp_id}"
-            async with aiohttp.ClientSession(headers={'User-Agent': 'AstrBot-TMP-Plugin/1.0.0'}) as session:
-                async with session.get(url, timeout=10) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        return data.get('response', {'online': False})
-                    return {'online': False}
-        except Exception:
+            async with self.session.get(url) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    # 处理可能的响应格式
+                    response_data = data.get('response', {})
+                    if isinstance(response_data, list) and response_data:
+                        return response_data[0]
+                    return response_data
+                return {'online': False}
+        except Exception as e:
+            logger.error(f"获取在线状态失败 {tmp_id}: {e}")
             return {'online': False}
 
     def _format_ban_info(self, bans_info: List[Dict]) -> Tuple[bool, int, List[Dict], str]:
+        """格式化封禁信息"""
         if not bans_info or not isinstance(bans_info, list):
             return False, 0, [], ""
         
-        active_bans = [ban for ban in bans_info if not ban.get('expired', False)]
+        # 按时间排序，获取最新的封禁信息
+        sorted_bans = sorted(bans_info, 
+                           key=lambda x: x.get('created', ''), 
+                           reverse=True)
+        
+        active_bans = [ban for ban in sorted_bans if not ban.get('expired', False)]
         ban_count = len(bans_info)
         is_banned = len(active_bans) > 0
+        
+        # 获取最新封禁的原因
         ban_reason = active_bans[0].get('reason', '未知封禁原因') if active_bans else ""
             
         return is_banned, ban_count, active_bans, ban_reason
 
+    def _format_player_info(self, player_info: Dict) -> str:
+        """格式化玩家权限信息"""
+        perms_str = "玩家"
+        if player_info.get('permissions'):
+            perms = player_info['permissions']
+            if isinstance(perms, dict):
+                groups = []
+                if perms.get('isStaff'):
+                    groups.append("Staff")
+                if perms.get('isManagement'):
+                    groups.append("Management") 
+                if perms.get('isGameAdmin'):
+                    groups.append("Game Admin")
+                if groups:
+                    perms_str = ', '.join(groups)
+            elif isinstance(perms, list) and perms:
+                perms_str = ', '.join(perms)
+        return perms_str
+
     # ******************************************************
-    # 使用 filter.message 适配无前缀命令，匹配 "查询" 或 "查询 123456"
+    # 修复后的命令处理器
     # ******************************************************
-    @filter.message(r"^查询\s*(\d+)?$", regex=True)
+    @filter.message(r"^查询(?:\s+(\d+))?$", regex=True)
     async def tmpquery(self, event: AstrMessageEvent):
         """[命令: 查询] TMP玩家完整信息查询。"""
-        # 完整的消息内容，例如 "查询 123456"
         message_str = event.message_str.strip()
         
-        # 1. 尝试从消息中提取 ID。
-        # 使用正则表达式从 "查询 123456" 中提取 123456
-        match = re.search(r'查询\s*(\d+)', message_str)
-        tmp_id = match.group(1) if match else None # 如果找到了数字，使用它
+        # 提取参数
+        match = re.match(r"^查询(?:\s+(\d+))?$", message_str)
+        tmp_id = match.group(1) if match else None
 
-        # 2. 只有当用户没有输入 ID 时，才尝试使用绑定的 ID（例如只输入“查询”）
+        # 如果没有提供ID，尝试使用绑定的ID
         if not tmp_id:
-            # 检查用户是否只输入了命令本身（例如 "查询"）
-            if message_str.strip().lower() == '查询':
-                user_id = event.get_sender_id()
-                tmp_id = self._get_bound_tmp_id(user_id)
-            
+            user_id = event.get_sender_id()
+            tmp_id = self._get_bound_tmp_id(user_id)
             if not tmp_id:
                 yield event.plain_result("请输入正确的玩家编号，格式：查询 123456，或先使用 绑定 123456 绑定您的账号。")
                 return
-        # *** 修复结束：现在 tmp_id 必定是用户输入的 ID 或绑定的 ID ***
-        
+
         try:
-            tasks = [self._get_player_info(tmp_id), self._get_player_bans(tmp_id), self._get_online_status(tmp_id)]
-            player_info, bans_info, online_status = await asyncio.gather(*tasks)
+            # 并发获取所有信息
+            tasks = [
+                self._get_player_info(tmp_id),
+                self._get_player_bans(tmp_id), 
+                self._get_online_status(tmp_id)
+            ]
+            player_info, bans_info, online_status = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # 处理可能的异常
+            if isinstance(player_info, Exception):
+                raise player_info
+                
         except PlayerNotFoundException as e:
             yield event.plain_result(str(e))
             return
@@ -181,34 +228,28 @@ class TmpBotPlugin(Star):
             yield event.plain_result(f"查询失败: {str(e)}")
             return
         
+        # 格式化信息
         is_banned, ban_count, active_bans, ban_reason = self._format_ban_info(bans_info)
+        perms_str = self._format_player_info(player_info)
         
-        # 完整的回复消息构建
+        # 构建回复消息
         message = "🚛 TMP玩家详细信息\n"
         message += "=" * 20 + "\n"
         message += f"🆔TMP编号: {tmp_id}\n"
         message += f"😀玩家名称: {player_info.get('name', '未知')}\n"
-        
-        message += f"🎮SteamID: {player_info.get('steam_id', player_info.get('steamID64', 'N/A'))}\n"
-        message += f"📑注册日期: {player_info.get('created_at', player_info.get('joinDate', 'N/A'))}\n"
-        
-        perms_str = "玩家"
-        if player_info.get('permissions'):
-            perms = player_info['permissions']
-            if isinstance(perms, dict):
-                groups = [g for g in ["Staff", "Management", "Game Admin"] if perms.get(f'is{g.replace(" ", "")}')]
-                if groups:
-                    perms_str = ', '.join(groups)
-            elif isinstance(perms, list) and perms:
-                perms_str = ', '.join(perms)
+        message += f"🎮SteamID: {player_info.get('steamID64', player_info.get('steam_id', 'N/A'))}\n"
+        message += f"📑注册日期: {player_info.get('joinDate', player_info.get('created_at', 'N/A'))}\n"
         message += f"💼所属分组: {perms_str}\n"
 
-        vtc_name = player_info.get('vtc', {}).get('name')
-        vtc_role = player_info.get('vtc', {}).get('role')
+        # 车队信息
+        vtc = player_info.get('vtc', {})
+        vtc_name = vtc.get('name')
+        vtc_role = vtc.get('role')
         message += f"🚚所属车队: {vtc_name if vtc_name else '无'}\n"
         if vtc_role:
-             message += f"🚚车队角色: {vtc_role}\n"
+            message += f"🚚车队角色: {vtc_role}\n"
         
+        # 封禁信息
         message += f"🚫是否封禁: {'是' if is_banned else '否'}\n"
         if is_banned:
             message += f"🚫封禁次数: {ban_count}次\n"
@@ -218,6 +259,7 @@ class TmpBotPlugin(Star):
         elif ban_count > 0:
             message += f"🚫历史封禁: {ban_count}次\n"
         
+        # 在线状态
         if online_status and online_status.get('online'):
             message += f"📶在线状态: 在线 🟢\n"
             server_name = online_status.get('serverName', '未知服务器')
@@ -225,18 +267,18 @@ class TmpBotPlugin(Star):
         else:
             message += f"📶在线状态: 离线 🔴\n"
         
+        # 最后更新
         if player_info.get('updated_at'):
             message += f"📶最后更新: {player_info.get('updated_at')}\n"
         
         yield event.plain_result(message)
 
-    @filter.message(r"^绑定\s*(\d+)?$", regex=True)
+    @filter.message(r"^绑定(?:\s+(\d+))?$", regex=True)
     async def tmpbind(self, event: AstrMessageEvent):
         """[命令: 绑定] 绑定QQ/群用户ID与TruckersMP ID。"""
-        # 修复兼容性问题：使用 event.message_str 手动解析参数
         message_str = event.message_str.strip()
         
-        match = re.search(r'绑定\s*(\d+)', message_str)
+        match = re.match(r"^绑定(?:\s+(\d+))?$", message_str)
         tmp_id = match.group(1) if match else None
         
         if not tmp_id:
@@ -263,15 +305,14 @@ class TmpBotPlugin(Star):
     async def tmpunbind(self, event: AstrMessageEvent):
         """[命令: 解绑] 解除当前用户的TruckersMP ID绑定。"""
         user_id = event.get_sender_id()
-        bound_info = self._get_bound_tmp_id(user_id)
+        bindings = self._load_bindings()
+        user_binding = bindings.get(user_id, {})
         
-        if not bound_info:
+        if not user_binding:
             yield event.plain_result("❌ 您还没有绑定任何TMP账号")
             return
         
-        bindings = self._load_bindings()
-        user_binding = bindings.get(user_id, {})
-        tmp_id = user_binding.get('tmp_id', bound_info)
+        tmp_id = user_binding.get('tmp_id')
         player_name = user_binding.get('player_name', '未知玩家')
         
         if self._unbind_tmp_id(user_id):
@@ -279,28 +320,32 @@ class TmpBotPlugin(Star):
         else:
             yield event.plain_result("❌ 解绑失败，请稍后重试")
 
-    @filter.message(r"^状态\s*(\d+)?$", regex=True)
+    @filter.message(r"^状态(?:\s+(\d+))?$", regex=True)
     async def tmpstatus(self, event: AstrMessageEvent):
         """[命令: 状态] 查询玩家的实时在线状态。"""
-        # 提取参数逻辑
         message_str = event.message_str.strip()
-        match = re.search(r'状态\s*(\d+)', message_str)
+        
+        match = re.match(r"^状态(?:\s+(\d+))?$", message_str)
         tmp_id = match.group(1) if match else None
         
-        # 优先级逻辑
+        # 如果没有提供ID，尝试使用绑定的ID
         if not tmp_id:
-            if message_str.strip().lower() == '状态':
-                user_id = event.get_sender_id()
-                tmp_id = self._get_bound_tmp_id(user_id)
-            
+            user_id = event.get_sender_id()
+            tmp_id = self._get_bound_tmp_id(user_id)
             if not tmp_id:
                 yield event.plain_result("请输入正确的玩家编号，格式：状态 123456，或先使用 绑定 123456 绑定您的账号。")
                 return
 
         try:
-            tasks = [self._get_online_status(tmp_id), self._get_player_info(tmp_id)]
-            online_status, player_info = await asyncio.gather(*tasks)
-
+            tasks = [
+                self._get_online_status(tmp_id),
+                self._get_player_info(tmp_id)
+            ]
+            online_status, player_info = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            if isinstance(player_info, Exception):
+                raise player_info
+                
         except PlayerNotFoundException as e:
             yield event.plain_result(str(e))
             return
@@ -329,29 +374,35 @@ class TmpBotPlugin(Star):
         """[命令: 服务器] 查询TruckersMP官方服务器的实时状态。"""
         try:
             url = "https://api.truckersmp.com/v2/servers"
-            async with aiohttp.ClientSession(headers={'User-Agent': 'AstrBot-TMP-Plugin/1.0.0'}) as session:
-                async with session.get(url, timeout=10) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        if data.get('response'):
-                            servers = data['response']
-                            message = "🖥️ TMP服务器状态\n\n"
-                            online_servers = [s for s in servers if s.get('online')][:6]
+            async with self.session.get(url) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    if data.get('response'):
+                        servers = data['response']
+                        message = "🖥️ TMP服务器状态\n\n"
+                        online_servers = [s for s in servers if s.get('online')][:6]
+                        
+                        for server in online_servers:
+                            name = server.get('name', '未知')
+                            players = server.get('players', 0)
+                            max_players = server.get('maxplayers', 0)
+                            queue = server.get('queue', 0)
                             
-                            for server in online_servers:
-                                name, players, max_players, queue = server.get('name', '未知'), server.get('players', 0), server.get('maxplayers', 0), server.get('queue', 0)
-                                message += f"{'🟢' if players > 0 else '🟡'} {name}\n"
-                                message += f"   👥 {players}/{max_players}"
-                                if queue > 0: message += f" (排队: {queue})"
-                                message += "\n"
-                            
-                            if not online_servers: message += "暂无在线服务器"
-                            yield event.plain_result(message)
-                        else:
-                            yield event.plain_result("查询服务器状态失败")
+                            message += f"{'🟢' if players > 0 else '🟡'} {name}\n"
+                            message += f"   👥 {players}/{max_players}"
+                            if queue > 0:
+                                message += f" (排队: {queue})"
+                            message += "\n"
+                        
+                        if not online_servers:
+                            message += "暂无在线服务器"
+                        yield event.plain_result(message)
                     else:
                         yield event.plain_result("查询服务器状态失败")
+                else:
+                    yield event.plain_result("查询服务器状态失败")
         except Exception as e:
+            logger.error(f"查询服务器状态失败: {e}")
             yield event.plain_result("网络请求失败")
 
     @filter.message(r"^帮助$", regex=True)
@@ -360,12 +411,12 @@ class TmpBotPlugin(Star):
         help_text = """🚛 TMP查询插件使用说明 (无前缀命令)
 
 📋 可用命令:
-查询 123456    - 查询玩家完整信息
-状态 123456    - 查询玩家在线状态  
-绑定 123456    - 绑定TMP账号
-解绑          - 解除账号绑定
-服务器        - 查看服务器状态
-帮助          - 显示此帮助信息
+查询 123456    - 查询玩家完整信息
+状态 123456    - 查询玩家在线状态  
+绑定 123456    - 绑定TMP账号
+解绑          - 解除账号绑定
+服务器        - 查看服务器状态
+帮助          - 显示此帮助信息
 
 💡 使用提示: 绑定后可直接使用 查询 和 状态 (无需参数)
 """
