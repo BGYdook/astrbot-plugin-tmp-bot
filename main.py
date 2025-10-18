@@ -3,7 +3,7 @@
 
 """
 AstrBot-plugin-tmp-bot
-欧卡2TMP查询插件 - AstrBot版本 (版本 1.2.1修正封禁原因解析逻辑，增强鲁棒性)
+欧卡2TMP查询插件 - AstrBot版本 (版本 1.2.5：优化群聊命令匹配，尝试解决群内无法直接响应问题)
 """
 
 import re
@@ -88,8 +88,8 @@ class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
 
-# 版本号更新为 1.2.4
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.2.4", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
+# 版本号更新为 1.2.5
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.2.5", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context: Context):
         """初始化插件，设置数据路径和HTTP会话引用。"""
@@ -103,12 +103,12 @@ class TmpBotPlugin(Star):
     async def initialize(self):
         """在插件启动时，创建持久的HTTP会话。"""
         self.session = aiohttp.ClientSession(
-            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.2.4'},
+            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.2.5'},
             timeout=aiohttp.ClientTimeout(total=10)
         )
         logger.info("TMP Bot 插件HTTP会话已创建")
 
-    # --- 内部工具方法 (数据持久化部分保持不变) ---
+    # --- 内部工具方法 (保持不变) ---
     def _load_bindings(self) -> Dict[str, Any]:
         try:
             if os.path.exists(self.bind_file):
@@ -151,7 +151,7 @@ class TmpBotPlugin(Star):
             return self._save_bindings(bindings)
         return False
 
-    # --- API请求方法 ---
+    # --- API请求方法 (保持不变) ---
 
     async def _get_tmp_id_from_steam_id(self, steam_id: str) -> str:
         """根据 Steam ID (17位) 查询对应的 TruckersMP ID"""
@@ -187,7 +187,6 @@ class TmpBotPlugin(Star):
             
     def _get_steam_id_from_player_info(self, player_info: Dict) -> Optional[str]:
         """从 V2 Player API 响应中提取 Steam ID"""
-        # Steam ID通常在 player_info['steamID64'] 字段中
         steam_id = player_info.get('steamID64')
         return str(steam_id) if steam_id else None
 
@@ -220,7 +219,6 @@ class TmpBotPlugin(Star):
         if not self.session: return []
 
         try:
-            # 采用官方文档明确的 /v2/bans/{id} 结构，更安全
             url = f"https://api.truckersmp.com/v2/bans/{tmp_id}"
             async with self.session.get(url, timeout=10) as response:
                 if response.status == 200:
@@ -252,22 +250,23 @@ class TmpBotPlugin(Star):
             return 0, []
         
         # 按创建时间降序排列，确保第一个是最新记录
-        # 注意: TMP API V2 bans endpoint 使用 'timeAdded' 作为创建时间
         sorted_bans = sorted(bans_info, key=lambda x: x.get('timeAdded', ''), reverse=True)
         return len(bans_info), sorted_bans
 
 
     # ******************************************************
-    # 命令处理器 (版本 1.2.4 - 增强封禁原因解析)
+    # 命令处理器 (版本 1.2.5 - 优化群聊匹配)
     # ******************************************************
     
-    @filter.command(r"查询", regex=True)
+    # 核心修改：使用 ^\s* 匹配开头的空格或 @ 符号后的内容
+    @filter.command(r"^\s*查询", regex=True)
     async def tmpquery(self, event: AstrMessageEvent):
         """[命令: 查询] TMP玩家完整信息查询。支持输入 TMP ID 或 Steam ID。"""
         message_str = event.message_str.strip()
         user_id = event.get_sender_id()
         
         # 1. 尝试从命令中提取 ID (TMP ID 或 Steam ID)
+        # 修正：匹配 '查询' 后面紧跟着的空格和数字
         match = re.search(r'查询\s*(\d+)', message_str) 
         input_id = match.group(1) if match else None
         
@@ -297,7 +296,6 @@ class TmpBotPlugin(Star):
             return
         
         try:
-            # 使用获取到的 TMP ID 进行查询，这将是唯一需要的数据
             player_info_raw, bans_info, online_status = await asyncio.gather(
                 self._get_player_info(tmp_id), 
                 self._get_player_bans(tmp_id), 
@@ -311,7 +309,6 @@ class TmpBotPlugin(Star):
             yield event.plain_result(f"查询失败: {str(e)}")
             return
             
-        # 关键修改：提取 Steam ID 和 封禁状态/截止时间
         steam_id_to_display = self._get_steam_id_from_player_info(player_info)
         is_banned = player_info.get('banned', False) 
         banned_until_main = player_info.get('bannedUntil', '永久/未知') 
@@ -322,7 +319,6 @@ class TmpBotPlugin(Star):
         message = "🚛 TMP玩家详细信息\n"
         message += "=" * 20 + "\n"
         message += f"ID TMP编号: {tmp_id}\n"
-        # 关键修正：如果 Steam ID 存在，则显示它
         if steam_id_to_display:
             message += f"ID Steam编号: {steam_id_to_display}\n" 
             
@@ -356,21 +352,17 @@ class TmpBotPlugin(Star):
         if is_banned:
             
             current_ban = None
-            # 尝试在详细记录中找到当前的封禁记录
             if sorted_bans:
-                # 寻找 active=True 的记录，如果没有，则默认为最新的记录
                 current_ban = next((ban for ban in sorted_bans if ban.get('active')), None)
                 if not current_ban:
                     current_ban = sorted_bans[0]
                     
             if current_ban:
-                # 提取详细信息
                 ban_reason = current_ban.get('reason', '未知封禁原因 (API V2)')
                 ban_expiration = current_ban.get('expiration', banned_until_main) 
                 
                 message += f"🚫 当前封禁原因: {ban_reason}\n"
                 
-                # 格式化截止日期
                 if ban_expiration and ban_expiration.lower().startswith('never'):
                     message += f"🚫 封禁截止: 永久封禁\n"
                 else:
@@ -379,7 +371,6 @@ class TmpBotPlugin(Star):
             else:
                 # Fallback: is_banned=True, 但详细记录缺失或无法匹配
                 message += f"🚫 当前封禁原因: API详细记录缺失。可能原因：封禁信息被隐藏或数据同步延迟。\n"
-                # 使用主 API 提供的截止时间
                 if banned_until_main and banned_until_main.lower().startswith('never'):
                     message += f"🚫 封禁截止: 永久封禁\n"
                 else:
@@ -398,9 +389,7 @@ class TmpBotPlugin(Star):
         
         yield event.plain_result(message)
 
-    # 以下命令处理器保持不变 (除版本号外)
-    
-    @filter.command(r"绑定", regex=True)
+    @filter.command(r"^\s*绑定", regex=True)
     async def tmpbind(self, event: AstrMessageEvent):
         """[命令: 绑定] 绑定您的聊天账号与TMP ID。支持输入 TMP ID 或 Steam ID。"""
         message_str = event.message_str.strip()
@@ -455,7 +444,7 @@ class TmpBotPlugin(Star):
         else:
             yield event.plain_result("❌ 绑定失败，请稍后重试")
 
-    @filter.command(r"解绑", regex=True)
+    @filter.command(r"^\s*解绑", regex=True)
     async def tmpunbind(self, event: AstrMessageEvent):
         """[命令: 解绑] 解除当前用户的TruckersMP ID绑定。"""
         user_id = event.get_sender_id()
@@ -473,7 +462,7 @@ class TmpBotPlugin(Star):
         else:
             yield event.plain_result("❌ 解绑失败，请稍后重试")
 
-    @filter.command(r"(状态|定位)", regex=True)
+    @filter.command(r"^\s*(状态|定位)", regex=True)
     async def tmpstatus(self, event: AstrMessageEvent):
         """[命令: 状态/定位] 查询玩家的实时在线状态。支持输入 TMP ID 或 Steam ID。"""
         message_str = event.message_str.strip()
@@ -537,14 +526,14 @@ class TmpBotPlugin(Star):
             game_mode = "欧卡2" if online_status.get('game', 0) == 1 else "美卡2" if online_status.get('game', 0) == 2 else "未知游戏"
             city = online_status.get('city', {}).get('name', '未知城市')
             message += f"📶 在线状态: 在线 🟢\n"
-            message += f"🖥️ 所在服务器: {server_name}\n"
+            message += f"🖥️️ 所在服务器: {server_name}\n"
             message += f"🗺️ 所在位置: {city} ({game_mode})\n"
         else:
             message += f"📶 在线状态: 离线 🔴\n"
         
         yield event.plain_result(message)
 
-    @filter.command(r"服务器", regex=True)
+    @filter.command(r"^\s*服务器", regex=True)
     async def tmpserver(self, event: AstrMessageEvent):
         """[命令: 服务器] 查询TruckersMP官方服务器的实时状态。"""
         if not self.session: 
@@ -586,7 +575,7 @@ class TmpBotPlugin(Star):
         except Exception:
             yield event.plain_result("网络请求失败，请检查网络或稍后重试。")
 
-    @filter.command(r"帮助", regex=True)
+    @filter.command(r"^\s*帮助", regex=True)
     async def tmphelp(self, event: AstrMessageEvent):
         """[命令: 帮助] 显示本插件的命令使用说明。"""
         help_text = """🚛 TMP查询插件使用说明 (无前缀命令)
