@@ -3,7 +3,7 @@
 
 """
 AstrBot-plugin-tmp-bot
-欧卡2TMP查询插件 - AstrBot版本 (最终兼容性修复：回退到手动re.search，消除'match'属性依赖)
+欧卡2TMP查询插件 - AstrBot版本 (最终稳定版：修复'no such group'和命令匹配逻辑)
 """
 
 import re
@@ -21,7 +21,6 @@ try:
 except ImportError:
     # 最小化兼容回退
     class _DummyFilter:
-        # 即使无法导入，也需要确保 filter.command 存在，以防代码无法运行
         def command(self, pattern, **kwargs):
             def decorator(func):
                 return func
@@ -85,8 +84,8 @@ class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
 
-# 版本号更新为 1.0.4 以示兼容性修复
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.0.4", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
+# 版本号更新为 1.0.5 以示最终稳定修复
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.0.5", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context: Context):
         """初始化插件，设置数据路径和HTTP会话引用。"""
@@ -100,7 +99,7 @@ class TmpBotPlugin(Star):
     async def initialize(self):
         """在插件启动时，创建持久的HTTP会话。"""
         self.session = aiohttp.ClientSession(
-            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.0.4'},
+            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.0.5'},
             timeout=aiohttp.ClientTimeout(total=10)
         )
         logger.info("TMP Bot 插件HTTP会话已创建")
@@ -216,20 +215,21 @@ class TmpBotPlugin(Star):
         return is_banned, ban_count, active_bans, ban_reason
 
     # ******************************************************
-    # 修复后的命令处理器 (手动 re.search)
+    # 修复后的命令处理器 (最终稳定版 - 修复 'no such group')
     # ******************************************************
-    # 修复：移除 (\d+)?，避免正则捕获分组导致 match.group(1) 索引错误。让它只匹配 "查询" 或 "查询 "开头
+    # 匹配 "查询" 或 "查询 123456"
     @filter.command(r"查询", regex=True)
     async def tmpquery(self, event: AstrMessageEvent):
         """[命令: 查询] TMP玩家完整信息查询。"""
         message_str = event.message_str.strip()
         
-        # ⚠️ 修复：手动运行 re.search 来获取 ID，不依赖 event.match
-        match = re.search(r'查询', message_str)
-        tmp_id = match.group(1) if match else None
+        # ⚠️ 修复：手动运行 re.search 来获取 ID，使用捕获组 (\d+)，并安全地检查 group(1)
+        # 正则表达式：匹配 "查询" 后面的任意数字 ID
+        match = re.search(r'查询\s*(\d+)', message_str) 
+        tmp_id = match.group(1) if match else None # 修复: 只有当 match 存在时才尝试获取 group(1)
         
         if not tmp_id:
-            # 如果没有ID，检查是否是裸查询 ("查询")，并尝试从绑定中获取
+            # 如果没有 ID（即只输入了 "查询"），尝试从绑定中获取
             if message_str.strip().lower() == '查询':
                 user_id = event.get_sender_id()
                 tmp_id = self._get_bound_tmp_id(user_id)
@@ -238,6 +238,7 @@ class TmpBotPlugin(Star):
                 yield event.plain_result("请输入正确的玩家编号，格式：查询 123456，或先使用 绑定 123456 绑定您的账号。")
                 return
         
+        # 后续查询逻辑保持不变
         try:
             player_info_raw, bans_info, online_status = await asyncio.gather(
                 self._get_player_info(tmp_id), 
@@ -278,7 +279,7 @@ class TmpBotPlugin(Star):
         if vtc_role:
              message += f"🚚 车队角色: {vtc_role}\n"
         
-        message += f"🚫 是否封禁: {'是 🚨' if is_banned else '否 ✅'}\n"
+        message += f"🚫 是否封禁: {'是 🚨' if is_banned ? '否 ✅'}\n"
         if is_banned:
             latest_ban = active_bans[0] if active_bans else {}
             message += f"🚫 封禁次数: {ban_count}次\n"
@@ -300,17 +301,17 @@ class TmpBotPlugin(Star):
         
         yield event.plain_result(message)
 
-    # 修复：只匹配 "绑定" 开头，手动获取ID
+    # 匹配 "绑定 123456"
     @filter.command(r"绑定", regex=True)
     async def tmpbind(self, event: AstrMessageEvent):
         """[命令: 绑定] 绑定您的聊天账号与TMP ID。"""
         message_str = event.message_str.strip()
-        # ⚠️ 修复：手动运行 re.search 来获取 ID，不依赖 event.match
-        match = re.search(r'绑定', message_str)
+        # ⚠️ 修复：手动运行 re.search 来获取 ID，使用捕获组 (\d+)
+        match = re.search(r'绑定\s*(\d+)', message_str)
         tmp_id = match.group(1) if match else None
 
         if not tmp_id:
-            # 理论上不会走到这里，但作为兜底
+            # 此时用户可能只输入了 "绑定"，但没有ID，需要提示
             yield event.plain_result("请输入正确的玩家编号，格式：绑定 123456")
             return
 
@@ -349,18 +350,19 @@ class TmpBotPlugin(Star):
         else:
             yield event.plain_result("❌ 解绑失败，请稍后重试")
 
-    # 修复：只匹配 "状态" 或 "状态 "开头，手动获取ID
-    @filter.command(r"定位", regex=True)
+    # 匹配 "状态" 或 "状态 123456" (同时支持 "定位")
+    @filter.command(r"(状态|定位)", regex=True)
     async def tmpstatus(self, event: AstrMessageEvent):
-        """[命令: 状态] 查询玩家的实时在线状态。"""
+        """[命令: 状态/定位] 查询玩家的实时在线状态。"""
         message_str = event.message_str.strip()
         
-        # ⚠️ 修复：手动运行 re.search 来获取 ID，不依赖 event.match
-        match = re.search(r'定位', message_str)
-        tmp_id = match.group(2) if match and len(match.groups()) > 1 else None
-        
+        # ⚠️ 修复：手动运行 re.search 来获取 ID，使用捕获组 (\d+)
+        # 正则表达式：匹配 "状态" 或 "定位" 后面的任意数字 ID
+        match = re.search(r'(状态|定位)\s*(\d+)', message_str) 
+        tmp_id = match.group(2) if match else None # 修复: match.group(2) 是数字ID (match.group(1) 是 '状态'/'定位')
+
         if not tmp_id:
-            # 如果没有ID，检查是否是裸命令，并尝试从绑定中获取
+            # 如果没有ID（即只输入了 "状态" 或 "定位"），尝试从绑定中获取
             user_id = event.get_sender_id()
             tmp_id = self._get_bound_tmp_id(user_id)
             
