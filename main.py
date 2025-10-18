@@ -14,6 +14,7 @@ import json
 import os
 from typing import Optional, List, Dict, Tuple, Any
 from astrbot.api.event import AstrMessageEvent, MessageEventResult
+# 确保 astrbot 库和 api 路径正确
 from astrbot.api.star import Context, Star, register, StarTools
 from astrbot.api import logger
 
@@ -122,7 +123,6 @@ class TmpBotPlugin(Star):
         user_binding = bindings.get(user_id)
         if isinstance(user_binding, dict):
             return user_binding.get('tmp_id')
-        # 兼容旧版本可能直接存储tmp_id的情况
         return user_binding 
 
     def _bind_tmp_id(self, user_id: str, tmp_id: str, player_name: str) -> bool:
@@ -146,7 +146,6 @@ class TmpBotPlugin(Star):
     # --- API请求方法 ---
     async def _get_player_info(self, tmp_id: str) -> Dict:
         """获取玩家基本信息 (v2/player/{tmp_id})"""
-        # 确保 session 存在
         if not self.session:
             raise NetworkException("插件未初始化，HTTP会话不可用")
 
@@ -155,11 +154,9 @@ class TmpBotPlugin(Star):
             async with self.session.get(url) as response:
                 if response.status == 200:
                     data = await response.json()
-                    # 检查 'response' 字段，或者直接返回数据（兼容性考虑）
                     if data and isinstance(data, dict) and data.get('response'):
                          return data['response']
                     elif data and isinstance(data, dict):
-                         # 有些API直接返回数据，没有包裹在response里
                          return data 
                     raise PlayerNotFoundException(f"玩家 {tmp_id} 不存在")
                 elif response.status == 404:
@@ -182,7 +179,6 @@ class TmpBotPlugin(Star):
             async with self.session.get(url) as response:
                 if response.status == 200:
                     data = await response.json()
-                    # 封禁信息在 'response' 字段中，是一个列表
                     return data.get('response', [])
                 return []
         except Exception as e:
@@ -194,17 +190,13 @@ class TmpBotPlugin(Star):
         if not self.session: return {'online': False}
         
         try:
-            # TruckyApp API 提供更详细的在线位置信息
             url = f"https://api.truckyapp.com/v3/map/online?playerID={tmp_id}"
             async with self.session.get(url) as response:
                 if response.status == 200:
                     data = await response.json()
                     response_data = data.get('response', {})
-                    # Trucky API 返回的是一个包含玩家信息的列表
                     if isinstance(response_data, list) and response_data:
-                        # 返回第一个（通常是唯一的）玩家信息
                         return response_data[0]
-                    # 如果返回空列表或其他非预期格式，表示玩家可能离线或不在地图上
                     return {'online': False}
                 return {'online': False}
         except Exception as e:
@@ -217,12 +209,10 @@ class TmpBotPlugin(Star):
         if not bans_info or not isinstance(bans_info, list):
             return False, 0, None, ""
         
-        # 按时间排序，获取最新的封禁信息
         sorted_bans = sorted(bans_info, 
                              key=lambda x: x.get('created', ''), 
                              reverse=True)
         
-        # 激活的（未过期的）封禁
         active_bans = [ban for ban in sorted_bans if not ban.get('expired', False)]
         ban_count = len(bans_info)
         is_banned = len(active_bans) > 0
@@ -248,7 +238,6 @@ class TmpBotPlugin(Star):
             if groups:
                 perms_str = ', '.join(groups)
         elif perms and isinstance(perms, list) and perms:
-            # 兼容其他可能的列表格式
             perms_str = ', '.join(perms)
         return perms_str
 
@@ -258,11 +247,10 @@ class TmpBotPlugin(Star):
         logger.info(f"处理查询命令，参数: {args}")
         
         tmp_id = None
-        # 检查参数是否是数字ID
         if args and args[0].isdigit():
             tmp_id = args[0]
         
-        # 如果没有提供ID，尝试使用绑定的ID
+        # 尝试使用绑定的ID
         if not tmp_id:
             user_id = event.get_sender_id()
             tmp_id = self._get_bound_tmp_id(user_id)
@@ -278,14 +266,11 @@ class TmpBotPlugin(Star):
             ]
             player_info, bans_info, online_status = await asyncio.gather(*tasks, return_exceptions=True)
             
-            # 必须成功获取基本信息
             if isinstance(player_info, Exception):
                 raise player_info
             
         except PlayerNotFoundException as e:
             return event.plain_result(str(e))
-        except NetworkException as e:
-            return event.plain_result(f"网络异常: {str(e)}")
         except Exception as e:
             logger.error(f"查询失败: {e}", exc_info=True)
             return event.plain_result(f"查询失败: {type(e).__name__}: {str(e)}")
@@ -324,7 +309,6 @@ class TmpBotPlugin(Star):
         # 在线状态
         if online_status and online_status.get('online'):
             server_name = online_status.get('serverName', '未知服务器')
-            # TruckyApp API 额外信息
             game_mode = "欧卡2" if online_status.get('game', 0) == 1 else "美卡2" if online_status.get('game', 0) == 2 else "未知游戏"
             city = online_status.get('city', {}).get('name', '未知城市')
             
@@ -351,7 +335,6 @@ class TmpBotPlugin(Star):
         tmp_id = args[0]
 
         try:
-            # 检查TMP ID是否存在
             player_info = await self._get_player_info(tmp_id)
         except PlayerNotFoundException:
             return event.plain_result("玩家不存在，请检查TMP ID是否正确")
@@ -395,7 +378,7 @@ class TmpBotPlugin(Star):
         if args and args[0].isdigit():
             tmp_id = args[0]
         
-        # 如果没有提供ID，尝试使用绑定的ID
+        # 尝试使用绑定的ID
         if not tmp_id:
             user_id = event.get_sender_id()
             tmp_id = self._get_bound_tmp_id(user_id)
@@ -410,7 +393,6 @@ class TmpBotPlugin(Star):
             ]
             online_status, player_info = await asyncio.gather(*tasks, return_exceptions=True)
             
-            # 如果基本信息查询失败，通常是ID不存在
             if isinstance(player_info, PlayerNotFoundException):
                 raise player_info
             elif isinstance(player_info, Exception):
@@ -420,8 +402,6 @@ class TmpBotPlugin(Star):
 
         except PlayerNotFoundException as e:
             return event.plain_result(str(e))
-        except NetworkException as e:
-            return event.plain_result(f"网络异常: {str(e)}")
         except Exception as e:
             logger.error(f"状态查询失败: {e}", exc_info=True)
             return event.plain_result(f"查询失败: {type(e).__name__}: {str(e)}")
