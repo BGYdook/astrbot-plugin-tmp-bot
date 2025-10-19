@@ -3,7 +3,7 @@
 
 """
 AstrBot-plugin-tmp-bot
-欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.1：修复定位功能因API解析严格导致的查询失败问题)
+欧卡2TMP查询插件 - AstrBot版本 (版本 1.2.9：恢复标准命令匹配模式，依赖框架处理群聊前缀)
 """
 
 import re
@@ -65,7 +65,7 @@ except ImportError:
     logger = _Logger()
 
 
-# 自定义异常类
+# 自定义异常类 (保持不变)
 class TmpApiException(Exception):
     """TMP 相关异常的基类"""
     pass
@@ -89,8 +89,8 @@ class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
 
-# 版本号更新为 1.3.1
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.1", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
+# 版本号更新为 1.2.9
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.2.9", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context: Context):
         """初始化插件，设置数据路径和HTTP会话引用。"""
@@ -152,7 +152,7 @@ class TmpBotPlugin(Star):
             return self._save_bindings(bindings)
         return False
 
-    # --- API请求方法 (修复了 _get_online_status) ---
+    # --- API请求方法 (保持不变) ---
 
     async def _get_tmp_id_from_steam_id(self, steam_id: str) -> str:
         """根据 Steam ID (17位) 查询对应的 TruckersMP ID"""
@@ -228,69 +228,21 @@ class TmpBotPlugin(Star):
         except Exception:
             return []
 
-    # 修复后的 _get_online_status 函数 (解决了定位/状态查询不准的问题)
     async def _get_online_status(self, tmp_id: str) -> Dict:
-        """
-        [修复版本] 获取玩家的实时在线状态和定位数据。
-        """
         if not self.session: return {'online': False}
 
-        url = f"https://api.truckyapp.com/v3/map/online?playerID={tmp_id}"
-        
         try:
+            url = f"https://api.truckyapp.com/v3/map/online?playerID={tmp_id}"
             async with self.session.get(url, timeout=10) as response:
-                
-                if response.status != 200:
-                    logger.error(f"Trucky API 返回非 200 状态码: {response.status}, ID: {tmp_id}")
+                if response.status == 200:
+                    data = await response.json()
+                    response_data = data.get('response', {})
+                    if isinstance(response_data, list) and response_data:
+                        return response_data[0]
                     return {'online': False}
-
-                data = await response.json()
-                response_data = data.get('response') 
-
-                if isinstance(response_data, list) and response_data:
-                    # 如果列表非空，返回第一个玩家的数据
-                    return response_data[0]
-                
-                if not response_data:
-                    logger.info(f"Trucky API 响应 'response' 列表为空, ID: {tmp_id}. 玩家可能离线或未被地图服务捕获。")
-                
                 return {'online': False}
-
-        except aiohttp.ClientError as e:
-            logger.error(f"Trucky API 网络请求失败 (ID: {tmp_id}): {e}")
+        except Exception:
             return {'online': False}
-        except asyncio.TimeoutError:
-            logger.error(f"Trucky API 请求超时 (ID: {tmp_id})")
-            return {'online': False}
-        except json.JSONDecodeError:
-            logger.error(f"Trucky API 返回了无效的 JSON 格式 (ID: {tmp_id})")
-            return {'online': False}
-        except Exception as e:
-            logger.error(f"获取玩家在线状态发生未知错误 (ID: {tmp_id}): {e}")
-            return {'online': False}
-
-    # 新增的定位API获取函数 (使用修复后的 _get_online_status)
-    async def _get_player_position_data(self, tmp_id: str) -> Dict:
-        """
-        通过 Trucky App API 获取玩家的实时位置信息和货物信息。
-        """
-        if not self.session:
-            raise NetworkException("插件未初始化，HTTP会话不可用")
-        
-        try:
-            online_data = await self._get_online_status(tmp_id)
-            
-            # 使用 _get_online_status 的结果进行判断
-            if online_data.get('online'):
-                return online_data
-            else:
-                raise PlayerNotFoundException(f"玩家 {tmp_id} 当前不在线，无法获取实时位置。")
-                
-        except PlayerNotFoundException:
-            raise
-        except Exception as e:
-            logger.error(f"查询玩家定位失败: {e}")
-            raise NetworkException("查询实时位置失败")
 
     def _format_ban_info(self, bans_info: List[Dict]) -> Tuple[int, List[Dict]]:
         """只返回历史封禁次数和最新的封禁记录（按时间倒序）"""
@@ -303,9 +255,10 @@ class TmpBotPlugin(Star):
 
 
     # ******************************************************
-    # 命令处理器 (版本 1.3.1 - 包含定位命令和修复)
+    # 命令处理器 (版本 1.2.9 - 恢复标准命令匹配)
     # ******************************************************
     
+    # 恢复为标准命令匹配，不再使用正则表达式前缀匹配
     @filter.command("查询") 
     async def tmpquery(self, event: AstrMessageEvent):
         """[命令: 查询] TMP玩家完整信息查询。支持输入 TMP ID 或 Steam ID。"""
@@ -562,77 +515,6 @@ class TmpBotPlugin(Star):
         
         yield event.plain_result(message)
 
-    @filter.command("定位")
-    async def tmpposition(self, event: AstrMessageEvent):
-        """[命令: 定位] 查询玩家的实时位置和货物运输信息。支持输入 TMP ID 或 Steam ID。"""
-        message_str = event.message_str.strip()
-        user_id = event.get_sender_id()
-        
-        # 1. 提取 ID 或使用绑定 ID
-        match = re.search(r'定位\s*(\d+)', message_str)
-        input_id = match.group(1) if match else None
-        tmp_id = None
-        
-        if input_id:
-            if len(input_id) == 17 and input_id.startswith('7'):
-                try:
-                    # 尝试从 Steam ID 转换
-                    tmp_id = await self._get_tmp_id_from_steam_id(input_id)
-                except Exception as e:
-                    yield event.plain_result(f"查询失败: {str(e)}")
-                    return
-            else:
-                tmp_id = input_id
-        else:
-            # 使用绑定 ID
-            tmp_id = self._get_bound_tmp_id(user_id)
-        
-        if not tmp_id:
-            yield event.plain_result("请输入正确的玩家编号（TMP ID 或 Steam ID），或先使用 绑定 [TMP ID] 绑定您的账号。")
-            return
-            
-        # 2. 查询位置数据和玩家名称
-        try:
-            position_data, player_info = await asyncio.gather(
-                self._get_player_position_data(tmp_id),
-                self._get_player_info(tmp_id)
-            )
-        except PlayerNotFoundException as e:
-            # 捕获玩家不在线等定位失败情况
-            yield event.plain_result(str(e))
-            return
-        except Exception as e:
-            yield event.plain_result(f"查询失败: {str(e)}")
-            return
-            
-        player_name = player_info.get('name', f"ID:{tmp_id}")
-        
-        # 3. 格式化定位信息
-        server_name = position_data.get('serverName', '未知')
-        game_mode = "欧卡2" if position_data.get('game', 0) == 1 else "美卡" if position_data.get('game', 0) == 2 else "未知"
-        
-        # 提取位置和货物信息
-        city_from = position_data.get('city', {}).get('name', '未知城市')
-        city_to = position_data.get('destinationCity', {}).get('name', '无目的地')
-        cargo_name = position_data.get('cargo', {}).get('name', '空载/未知货物')
-        
-        # 提取车辆信息
-        truck_name = position_data.get('truck', {}).get('name', '未知卡车')
-        truck_speed = position_data.get('speed', 0)
-        
-        message = f"🚛 玩家实时位置报告 ({player_name})\n"
-        message += "=" * 25 + "\n"
-        message += f"🌐 所在服务器: **{server_name}** ({game_mode})\n"
-        message += f"📍 **当前位置:** {city_from}\n"
-        message += f"💨 当前时速: {truck_speed} km/h\n"
-        message += f"---------------------------------\n"
-        message += f"🚚 **卡车型号:** {truck_name}\n"
-        message += f"📦 **运输货物:** {cargo_name}\n"
-        message += f"🛣️ **目的地:** {city_to}\n"
-        
-        yield event.plain_result(message)
-
-
     @filter.command("服务器")
     async def tmpserver(self, event: AstrMessageEvent):
         """[命令: 服务器] 查询TruckersMP官方服务器的实时状态。"""
@@ -662,7 +544,7 @@ class TmpBotPlugin(Star):
                             status_str = '[在线]' if players > 0 else '[空闲]'
                             
                             message += f"{status_str} {name}\n"
-                            message += f"  在线人数: {players}/{max_players}"
+                            message += f"  在线人数: {players}/{max_players}"
                             if queue > 0: message += f" (排队: {queue})"
                             message += "\n"
                         
@@ -683,13 +565,12 @@ class TmpBotPlugin(Star):
 可用命令:
 1. 查询 [ID] - 查询玩家的完整信息（支持 TMP ID 或 Steam ID）。
 2. 状态 [ID]- 查询玩家的实时在线状态（支持 TMP ID 或 Steam ID）。 
-3. **定位 [ID]** - **查询玩家的实时位置和运输货物信息。**
-4. 绑定 [ID] - 绑定您的聊天账号与 TMP ID（支持输入 Steam ID 转换）。
-5. 解绑 - 解除账号绑定。
-6. 服务器 - 查看主要TMP服务器的实时状态和在线人数。
-7. help - 显示此帮助信息。
+3. 绑定 [ID] - 绑定您的聊天账号与 TMP ID（支持输入 Steam ID 转换）。
+4. 解绑 - 解除账号绑定。
+5. 服务器 - 查看主要TMP服务器的实时状态和在线人数。
+6. help - 显示此帮助信息。
 
-使用提示: 绑定后可直接发送 查询/状态/定位 (无需ID参数)
+使用提示: 绑定后可直接发送 查询 或 定位 (无需ID参数)
 """
         yield event.plain_result(help_text)
 
