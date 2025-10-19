@@ -449,14 +449,14 @@ class TmpBotPlugin(Star):
         else:
             yield event.plain_result("解绑失败，请稍后重试")
 
-    @filter.command("定位")
+    @filter.command("状态")
     async def tmpstatus(self, event: AstrMessageEvent):
-        """[命令:定位] 查询玩家的实时在线状态。支持输入 TMP ID 或 Steam ID。"""
+        """[命令:状态] 查询玩家的实时在线状态。支持输入 TMP ID 或 Steam ID。"""
         message_str = event.message_str.strip()
         user_id = event.get_sender_id()
         
-        # 匹配 '定位' 后面的空格和数字
-        match = re.search(r'(定位)\s*(\d+)', message_str) 
+        # 匹配 '状态' 后面的空格和数字
+        match = re.search(r'(状态)\s*(\d+)', message_str) 
         input_id = match.group(2) if match else None
         
         tmp_id = None
@@ -564,7 +564,7 @@ class TmpBotPlugin(Star):
 
 可用命令:
 1. 查询 [ID] - 查询玩家的完整信息（支持 TMP ID 或 Steam ID）。
-2. 状态 [ID] 或 定位 [ID] - 查询玩家的实时在线状态（支持 TMP ID 或 Steam ID）。 
+2. 状态 [ID]- 查询玩家的实时在线状态（支持 TMP ID 或 Steam ID）。 
 3. 绑定 [ID] - 绑定您的聊天账号与 TMP ID（支持输入 Steam ID 转换）。
 4. 解绑 - 解除账号绑定。
 5. 服务器 - 查看主要TMP服务器的实时状态和在线人数。
