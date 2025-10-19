@@ -3,7 +3,7 @@
 
 """
 AstrBot-plugin-tmp-bot
-欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.0：新增图片定位功能)
+欧卡2TMP查询插件 - AstrBot版本 (版本 1.2.9：恢复标准命令匹配模式，依赖框架处理群聊前缀)
 """
 
 import re
@@ -12,33 +12,23 @@ import aiohttp
 import json
 import os
 from typing import Optional, List, Dict, Tuple, Any
-import io # 引入 io 库用于处理图片字节流
-
-# 引入图片处理库 Pillow
-try:
-    from PIL import Image, ImageDraw, ImageFont
-except ImportError:
-    print("[ERROR] Pillow 库未安装。请运行 'pip install Pillow' 安装以启用图片生成功能。")
-    Image = None
-    ImageDraw = None
-    ImageFont = None
-
 
 # 引入 AstrBot 核心 API
 try:
     from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
     from astrbot.api.star import Context, Star, register, StarTools
     from astrbot.api import logger
-    from astrbot.api.message import ImageMessage  # 引入 ImageMessage 用于发送图片
 except ImportError:
     # 最小化兼容回退
     class _DummyFilter:
+        # 移除 regex=True 确保匹配的是固定命令，而不是正则
         def command(self, pattern, **kwargs): 
             def decorator(func):
                 return func
             return decorator
     filter = _DummyFilter()
 
+    # 简化模拟类以确保代码块可执行
     class AstrMessageEvent:
         def __init__(self, message_str: str = "", sender_id: str = "0", match=None):
             self.message_str = message_str
@@ -48,9 +38,6 @@ except ImportError:
             return self._sender_id
         async def plain_result(self, msg):
             return msg
-        async def image_result(self, image_bytes, **kwargs): # 模拟 image_result
-            print(f"[DEBUG] 模拟发送图片: {len(image_bytes)} 字节")
-            return f"[图片消息: {len(image_bytes)} 字节]"
 
     MessageEventResult = Any 
     class Context: pass
@@ -65,7 +52,6 @@ except ImportError:
     class StarTools:
         @staticmethod
         def get_data_dir(name: str):
-            # 兼容模式下，将 font.ttf 放在当前目录
             return os.path.join(os.getcwd(), name)
 
     class _Logger:
@@ -77,7 +63,6 @@ except ImportError:
             print("[ERROR]", msg)
 
     logger = _Logger()
-    ImageMessage = lambda image: image # 兼容模式下，ImageMessage 只是透传图片字节
 
 
 # 自定义异常类 (保持不变)
@@ -104,8 +89,8 @@ class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
 
-# 版本号更新为 1.3.0
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.0", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
+# 版本号更新为 1.2.9
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.2.9", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context: Context):
         """初始化插件，设置数据路径和HTTP会话引用。"""
@@ -113,14 +98,13 @@ class TmpBotPlugin(Star):
         self.session: Optional[aiohttp.ClientSession] = None 
         self.data_dir = StarTools.get_data_dir("tmp-bot")
         self.bind_file = os.path.join(self.data_dir, "tmp_bindings.json")
-        self.font_path = os.path.join(self.data_dir, "font.ttf") # 确保有中文字体文件
         os.makedirs(self.data_dir, exist_ok=True)
         logger.info("TMP Bot 插件已加载")
 
     async def initialize(self):
         """在插件启动时，创建持久的HTTP会话。"""
         self.session = aiohttp.ClientSession(
-            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.3.0'},
+            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.2.7'},
             timeout=aiohttp.ClientTimeout(total=10)
         )
         logger.info("TMP Bot 插件HTTP会话已创建")
@@ -269,130 +253,19 @@ class TmpBotPlugin(Star):
         sorted_bans = sorted(bans_info, key=lambda x: x.get('timeAdded', ''), reverse=True)
         return len(bans_info), sorted_bans
 
-    # --- 新增：图片生成函数 ---
-    async def _generate_player_location_image(self, 
-                                               player_info: Dict, 
-                                               online_status: Dict) -> Optional[bytes]:
-        if Image is None or ImageDraw is None or ImageFont is None:
-            logger.error("Pillow 库未安装，无法生成图片。")
-            return None
-
-        # 图片尺寸和背景颜色
-        img_width, img_height = 800, 450
-        bg_color = (25, 25, 25) # 深灰色背景
-
-        # 创建基础图片
-        img = Image.new('RGB', (img_width, img_height), color = bg_color)
-        draw = ImageDraw.Draw(img)
-
-        # 字体加载 (确保字体文件存在)
-        try:
-            font_title = ImageFont.truetype(self.font_path, 32)
-            font_info = ImageFont.truetype(self.font_path, 24)
-            font_small = ImageFont.truetype(self.font_path, 20)
-        except Exception as e:
-            logger.error(f"加载字体文件失败: {e}。请确保 '{self.font_path}' 存在且是有效的TTF字体文件。")
-            return None
-
-        # 玩家信息
-        player_name = player_info.get('name', '未知玩家')
-        tmp_id = player_info.get('id', '未知TMPID')
-        avatar_url = player_info.get('avatar')
-        
-        # 在线状态信息
-        is_online = online_status and online_status.get('online', False)
-        server_name = online_status.get('serverName', 'N/A')
-        game_id = online_status.get('game', 0)
-        game_name = "欧卡2" if game_id == 1 else "美卡" if game_id == 2 else "未知游戏"
-        city_name = online_status.get('city', {}).get('name', '未知城市')
-
-        # 1. 下载并放置玩家头像
-        avatar_size = 128
-        avatar_pos_x, avatar_pos_y = 50, 50
-        if avatar_url and self.session:
-            try:
-                async with self.session.get(avatar_url, timeout=5) as response:
-                    if response.status == 200:
-                        avatar_data = await response.read()
-                        avatar_img = Image.open(io.BytesIO(avatar_data)).convert("RGBA")
-                        avatar_img = avatar_img.resize((avatar_size, avatar_size))
-                        
-                        # 创建圆形头像 (可选)
-                        mask = Image.new('L', (avatar_size, avatar_size), 0)
-                        mask_draw = ImageDraw.Draw(mask)
-                        mask_draw.ellipse((0, 0, avatar_size, avatar_size), fill=255)
-                        
-                        # 粘贴头像到主图
-                        img.paste(avatar_img, (avatar_pos_x, avatar_pos_y), mask)
-                    else:
-                        logger.warning(f"下载头像失败，状态码: {response.status}")
-            except Exception as e:
-                logger.error(f"下载或处理头像失败: {e}")
-        
-        # 2. 绘制标题和基本信息
-        text_color_online = (100, 255, 100) # 绿色
-        text_color_offline = (255, 100, 100) # 红色
-        text_color_info = (255, 255, 255) # 白色
-
-        current_y = avatar_pos_y + 10 # 初始文本Y坐标，与头像顶部对齐
-        text_x_start = avatar_pos_x + avatar_size + 30
-
-        # 玩家名称
-        draw.text((text_x_start, current_y), f"玩家: {player_name}", fill=text_color_info, font=font_title)
-        current_y += font_title.getbbox(f"玩家: {player_name}")[3] - font_title.getbbox(f"玩家: {player_name}")[1] + 10 # 字体高度 + 间距
-
-        # TMP ID
-        draw.text((text_x_start, current_y), f"TMP ID: {tmp_id}", fill=text_color_info, font=font_info)
-        current_y += font_info.getbbox(f"TMP ID: {tmp_id}")[3] - font_info.getbbox(f"TMP ID: {tmp_id}")[1] + 10
-
-        # 在线状态
-        online_status_text = "在线" if is_online else "离线"
-        online_status_color = text_color_online if is_online else text_color_offline
-        draw.text((text_x_start, current_y), f"状态: {online_status_text}", fill=online_status_color, font=font_info)
-        current_y += font_info.getbbox(f"状态: {online_status_text}")[3] - font_info.getbbox(f"状态: {online_status_text}")[1] + 10
-
-        # 如果在线，显示位置信息
-        if is_online:
-            draw.text((text_x_start, current_y), f"服务器: {server_name}", fill=text_color_info, font=font_info)
-            current_y += font_info.getbbox(f"服务器: {server_name}")[3] - font_info.getbbox(f"服务器: {server_name}")[1] + 10
-
-            draw.text((text_x_start, current_y), f"位置: {city_name} ({game_name})", fill=text_color_info, font=font_info)
-            current_y += font_info.getbbox(f"位置: {city_name} ({game_name})")[3] - font_info.getbbox(f"位置: {city_name} ({game_name})")[1] + 10
-        
-        # 3. 放置一个“地图区域”的占位符（简化处理）
-        map_area_x, map_area_y = 50, current_y + 30
-        map_area_width, map_area_height = img_width - 100, img_height - map_area_y - 30
-        
-        if map_area_width > 0 and map_area_height > 0:
-            draw.rectangle([map_area_x, map_area_y, map_area_x + map_area_width, map_area_y + map_area_height], 
-                           fill=(50, 50, 50), outline=(100, 100, 100), width=2)
-            map_text = "玩家当前位置（简易示意图）"
-            text_bbox = draw.textbbox((0, 0), map_text, font=font_info)
-            text_width = text_bbox[2] - text_bbox[0]
-            text_height = text_bbox[3] - text_bbox[1]
-            
-            # 计算居中位置
-            text_x = map_area_x + (map_area_width - text_width) // 2
-            text_y = map_area_y + (map_area_height - text_height) // 2
-            draw.text((text_x, text_y), map_text, fill=(150, 150, 150), font=font_info)
-
-
-        # 将图片保存到字节流
-        byte_arr = io.BytesIO()
-        img.save(byte_arr, format='PNG')
-        return byte_arr.getvalue()
-
 
     # ******************************************************
-    # 命令处理器 (版本 1.3.0 - 新增图片定位命令)
+    # 命令处理器 (版本 1.2.9 - 恢复标准命令匹配)
     # ******************************************************
     
+    # 恢复为标准命令匹配，不再使用正则表达式前缀匹配
     @filter.command("查询") 
     async def tmpquery(self, event: AstrMessageEvent):
         """[命令: 查询] TMP玩家完整信息查询。支持输入 TMP ID 或 Steam ID。"""
         message_str = event.message_str.strip()
         user_id = event.get_sender_id()
         
+        # 匹配 '查询' 后面的空格和数字
         match = re.search(r'查询\s*(\d+)', message_str) 
         input_id = match.group(1) if match else None
         
@@ -446,6 +319,7 @@ class TmpBotPlugin(Star):
             
         message += f"玩家名称: {player_info.get('name', '未知')}\n"
         
+        # 权限/分组信息
         perms_str = "玩家"
         if player_info.get('permissions'):
             perms = player_info['permissions']
@@ -469,6 +343,7 @@ class TmpBotPlugin(Star):
             message += f"历史封禁: {ban_count}次\n"
 
         if is_banned:
+            
             current_ban = None
             if sorted_bans:
                 current_ban = next((ban for ban in sorted_bans if ban.get('active')), None)
@@ -516,7 +391,7 @@ class TmpBotPlugin(Star):
         input_id = match.group(1) if match else None
 
         if not input_id:
-            yield event.plain_result("请输入正确的玩家编号，格式：绑定 [TMP ID] 或 绑定 [Steam ID]")
+            yield event.plain_result("请输入正确的玩家编号，格式：绑定 [TMP ID]")
             return
 
         tmp_id = input_id
@@ -574,14 +449,15 @@ class TmpBotPlugin(Star):
         else:
             yield event.plain_result("解绑失败，请稍后重试")
 
-    @filter.command("定位")
-    async def tmplocation_image(self, event: AstrMessageEvent): # 改为 tmplocation_image
-        """[命令: 定位] 查询玩家的实时在线状态，并以图片形式显示位置和头像。支持 TMP ID 或 Steam ID。"""
+    @filter.command("状态")
+    async def tmpstatus(self, event: AstrMessageEvent):
+        """[命令:状态] 查询玩家的实时在线状态。支持输入 TMP ID 或 Steam ID。"""
         message_str = event.message_str.strip()
         user_id = event.get_sender_id()
         
-        match = re.search(r'定位\s*(\d+)', message_str) 
-        input_id = match.group(1) if match else None # 注意这里是 group(1) 因为正则只有一个捕获组
+        # 匹配 '状态' 后面的空格和数字
+        match = re.search(r'(状态)\s*(\d+)', message_str) 
+        input_id = match.group(2) if match else None
         
         tmp_id = None
         
@@ -605,10 +481,9 @@ class TmpBotPlugin(Star):
             return
 
         try:
-            # 同时获取玩家信息和在线状态
-            player_info, online_status = await asyncio.gather(
-                self._get_player_info(tmp_id), 
-                self._get_online_status(tmp_id)
+            online_status, player_info = await asyncio.gather(
+                self._get_online_status(tmp_id), 
+                self._get_player_info(tmp_id)
             )
 
         except PlayerNotFoundException as e:
@@ -618,13 +493,27 @@ class TmpBotPlugin(Star):
             yield event.plain_result(f"查询失败: {str(e)}")
             return
         
-        # 调用图片生成函数
-        image_bytes = await self._generate_player_location_image(player_info, online_status)
-
-        if image_bytes:
-            yield event.image_result(ImageMessage(image_bytes)) # 使用 ImageMessage 发送图片
+        player_name = player_info.get('name', '未知')
+        steam_id_to_display = self._get_steam_id_from_player_info(player_info)
+        
+        message = f"玩家状态查询\n"
+        message += "=" * 15 + "\n"
+        message += f"玩家名称: {player_name}\n"
+        message += f"TMP编号: {tmp_id}\n"
+        if steam_id_to_display:
+            message += f"Steam编号: {steam_id_to_display}\n"
+        
+        if online_status and online_status.get('online'):
+            server_name = online_status.get('serverName', '未知服务器')
+            game_mode = "欧卡2" if online_status.get('game', 0) == 1 else "美卡2" if online_status.get('game', 0) == 2 else "未知游戏"
+            city = online_status.get('city', {}).get('name', '未知城市')
+            message += f"在线状态: 在线\n"
+            message += f"所在服务器: {server_name}\n"
+            message += f"所在位置: {city} ({game_mode})\n"
         else:
-            yield event.plain_result("生成定位图片失败，请检查日志或稍后重试。")
+            message += f"在线状态: 离线\n"
+        
+        yield event.plain_result(message)
 
     @filter.command("服务器")
     async def tmpserver(self, event: AstrMessageEvent):
@@ -641,7 +530,7 @@ class TmpBotPlugin(Star):
                     servers = data.get('response', [])
                     
                     if servers and isinstance(servers, list):
-                        message = "TMP服务器状态 (显示前6个在线服务器)\n"
+                        message = "TMP服务器状态\n"
                         message += "=" * 25 + "\n"
                         
                         online_servers = sorted(
@@ -668,18 +557,18 @@ class TmpBotPlugin(Star):
         except Exception:
             yield event.plain_result("网络请求失败，请检查网络或稍后重试。")
 
-    @filter.command("帮助") # 改回 "帮助" 命令
+    @filter.command("help")
     async def tmphelp(self, event: AstrMessageEvent):
-        """[命令: 帮助] 显示本插件的命令使用说明。"""
+        """[命令: help] 显示本插件的命令使用说明。"""
         help_text = """TMP查询插件使用说明 (无前缀命令)
 
 可用命令:
 1. 查询 [ID] - 查询玩家的完整信息（支持 TMP ID 或 Steam ID）。
-2. 定位 [ID] - 查询玩家的实时在线状态，并以图片形式显示位置和头像。
+2. 状态 [ID]- 查询玩家的实时在线状态（支持 TMP ID 或 Steam ID）。 
 3. 绑定 [ID] - 绑定您的聊天账号与 TMP ID（支持输入 Steam ID 转换）。
 4. 解绑 - 解除账号绑定。
 5. 服务器 - 查看主要TMP服务器的实时状态和在线人数。
-6. 帮助 - 显示此帮助信息。
+6. help - 显示此帮助信息。
 
 使用提示: 绑定后可直接发送 查询 或 定位 (无需ID参数)
 """
