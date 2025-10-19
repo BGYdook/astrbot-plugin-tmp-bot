@@ -3,7 +3,7 @@
 
 """
 AstrBot-plugin-tmp-bot
-欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.0：新增玩家定位功能)
+欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.1：修复定位功能因API解析严格导致的查询失败问题)
 """
 
 import re
@@ -89,8 +89,8 @@ class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
 
-# 版本号更新为 1.3.0
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.0", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
+# 版本号更新为 1.3.1
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.1", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context: Context):
         """初始化插件，设置数据路径和HTTP会话引用。"""
@@ -109,7 +109,7 @@ class TmpBotPlugin(Star):
         )
         logger.info("TMP Bot 插件HTTP会话已创建")
 
-    # --- 内部工具方法 ---
+    # --- 内部工具方法 (保持不变) ---
     def _load_bindings(self) -> Dict[str, Any]:
         try:
             if os.path.exists(self.bind_file):
@@ -152,7 +152,7 @@ class TmpBotPlugin(Star):
             return self._save_bindings(bindings)
         return False
 
-    # --- API请求方法 ---
+    # --- API请求方法 (修复了 _get_online_status) ---
 
     async def _get_tmp_id_from_steam_id(self, steam_id: str) -> str:
         """根据 Steam ID (17位) 查询对应的 TruckersMP ID"""
@@ -228,27 +228,51 @@ class TmpBotPlugin(Star):
         except Exception:
             return []
 
+    # 修复后的 _get_online_status 函数 (解决了定位/状态查询不准的问题)
     async def _get_online_status(self, tmp_id: str) -> Dict:
+        """
+        [修复版本] 获取玩家的实时在线状态和定位数据。
+        """
         if not self.session: return {'online': False}
 
+        url = f"https://api.truckyapp.com/v3/map/online?playerID={tmp_id}"
+        
         try:
-            url = f"https://api.truckyapp.com/v3/map/online?playerID={tmp_id}"
             async with self.session.get(url, timeout=10) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    response_data = data.get('response', {})
-                    if isinstance(response_data, list) and response_data:
-                        return response_data[0]
+                
+                if response.status != 200:
+                    logger.error(f"Trucky API 返回非 200 状态码: {response.status}, ID: {tmp_id}")
                     return {'online': False}
+
+                data = await response.json()
+                response_data = data.get('response') 
+
+                if isinstance(response_data, list) and response_data:
+                    # 如果列表非空，返回第一个玩家的数据
+                    return response_data[0]
+                
+                if not response_data:
+                    logger.info(f"Trucky API 响应 'response' 列表为空, ID: {tmp_id}. 玩家可能离线或未被地图服务捕获。")
+                
                 return {'online': False}
-        except Exception:
+
+        except aiohttp.ClientError as e:
+            logger.error(f"Trucky API 网络请求失败 (ID: {tmp_id}): {e}")
+            return {'online': False}
+        except asyncio.TimeoutError:
+            logger.error(f"Trucky API 请求超时 (ID: {tmp_id})")
+            return {'online': False}
+        except json.JSONDecodeError:
+            logger.error(f"Trucky API 返回了无效的 JSON 格式 (ID: {tmp_id})")
+            return {'online': False}
+        except Exception as e:
+            logger.error(f"获取玩家在线状态发生未知错误 (ID: {tmp_id}): {e}")
             return {'online': False}
 
-    # 新增的定位API获取函数 (复用 _get_online_status 的数据)
+    # 新增的定位API获取函数 (使用修复后的 _get_online_status)
     async def _get_player_position_data(self, tmp_id: str) -> Dict:
         """
         通过 Trucky App API 获取玩家的实时位置信息和货物信息。
-        注意：复用 _get_online_status 的逻辑，因为它返回的数据已包含位置和货物信息。
         """
         if not self.session:
             raise NetworkException("插件未初始化，HTTP会话不可用")
@@ -256,10 +280,10 @@ class TmpBotPlugin(Star):
         try:
             online_data = await self._get_online_status(tmp_id)
             
+            # 使用 _get_online_status 的结果进行判断
             if online_data.get('online'):
                 return online_data
             else:
-                # 抛出玩家不在线异常，让命令处理器捕获并返回提示
                 raise PlayerNotFoundException(f"玩家 {tmp_id} 当前不在线，无法获取实时位置。")
                 
         except PlayerNotFoundException:
@@ -279,7 +303,7 @@ class TmpBotPlugin(Star):
 
 
     # ******************************************************
-    # 命令处理器 (版本 1.3.0)
+    # 命令处理器 (版本 1.3.1 - 包含定位命令和修复)
     # ******************************************************
     
     @filter.command("查询") 
@@ -528,7 +552,7 @@ class TmpBotPlugin(Star):
         
         if online_status and online_status.get('online'):
             server_name = online_status.get('serverName', '未知服务器')
-            game_mode = "欧卡2" if online_status.get('game', 0) == 1 else "美卡2" if online_array.get('game', 0) == 2 else "未知游戏"
+            game_mode = "欧卡2" if online_status.get('game', 0) == 1 else "美卡2" if online_status.get('game', 0) == 2 else "未知游戏"
             city = online_status.get('city', {}).get('name', '未知城市')
             message += f"在线状态: 在线\n"
             message += f"所在服务器: {server_name}\n"
