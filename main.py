@@ -3,7 +3,7 @@
 
 """
 AstrBot-plugin-tmp-bot
-欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.16：加入历史里程和今日里程查询)
+欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.17：加入上次在线时间查询)
 """
 
 import re
@@ -12,6 +12,7 @@ import aiohttp
 import json
 import os
 from typing import Optional, List, Dict, Tuple, Any
+from datetime import datetime
 
 # 引入 AstrBot 核心 API
 try:
@@ -60,6 +61,29 @@ except ImportError:
     logger = _Logger()
 
 
+# --- 辅助函数：格式化时间戳 ---
+def _format_timestamp_to_readable(timestamp_str: Optional[str]) -> str:
+    """将 TruckersMP API 返回的 UTC 时间戳转换为可读格式 (ISO 8601)。"""
+    if not timestamp_str:
+        return "未知"
+    
+    try:
+        # TruckersMP V2 返回 ISO 8601 (e.g., "2024-05-28T14:30:00.000Z")
+        # 清理字符串，去除毫秒和时区指示符，以便简单解析
+        clean_str = timestamp_str.replace('T', ' ').split('.')[0].replace('Z', '')
+        
+        # 解析为 UTC datetime 对象
+        dt_utc = datetime.strptime(clean_str, '%Y-%m-%d %H:%M:%S')
+
+        # 直接显示 UTC 时间，并标注时区
+        return dt_utc.strftime('%Y-%m-%d %H:%M:%S') + " (UTC)"
+        
+    except Exception:
+        # 兼容性回退
+        return timestamp_str.split('T')[0] if 'T' in timestamp_str else timestamp_str
+# -----------------------------
+
+
 # 自定义异常类 
 class TmpApiException(Exception):
     """TMP 相关异常的基类"""
@@ -81,8 +105,8 @@ class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
 
-# 版本号更新为 1.3.16
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.16", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
+# 版本号更新为 1.3.17
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.17", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -95,7 +119,7 @@ class TmpBotPlugin(Star):
     async def initialize(self):
         # 统一 User-Agent，并更新版本号
         self.session = aiohttp.ClientSession(
-            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.3.16'}, 
+            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.3.17'}, 
             timeout=aiohttp.ClientTimeout(total=10)
         )
         logger.info("TMP Bot 插件HTTP会话已创建")
@@ -184,7 +208,7 @@ class TmpBotPlugin(Star):
             raise NetworkException("插件未初始化，HTTP会话不可用")
         
         try:
-            # TMP 官方 V2 接口 (用于基本信息和封禁查询)
+            # TMP 官方 V2 接口 (用于基本信息、封禁、上次在线查询)
             url = f"https://api.truckersmp.com/v2/player/{tmp_id}"
             async with self.session.get(url, timeout=10) as response:
                 if response.status == 200:
@@ -218,7 +242,6 @@ class TmpBotPlugin(Star):
         except Exception:
             return []
             
-    # --- 新增：获取玩家里程统计数据 ---
     async def _get_player_stats(self, tmp_id: str) -> Dict[str, int]:
         """
         通过 TruckyApp V3 API 获取玩家的总里程和今日里程 (以米为单位)。
@@ -256,7 +279,6 @@ class TmpBotPlugin(Star):
             logger.error(f"获取玩家统计数据失败: {e.__class__.__name__}")
             return {'total_km': 0, 'daily_km': 0, 'debug_error': f'获取里程失败: {e.__class__.__name__}'}
 
-    # --- 采用 TruckyApp V3 官方 API 的在线状态查询方法 (版本 1.3.15 最终位置输出) ---
     async def _get_online_status(self, tmp_id: str) -> Dict:
         """
         仅使用 TruckyApp V3 地图实时接口查询状态。
@@ -289,11 +311,9 @@ class TmpBotPlugin(Star):
                         
                         # --- 位置信息解析 ---
                         location_data = online_data.get('location', {})
-                        # 尝试从 poi 中获取位置信息
                         country = location_data.get('poi', {}).get('country')
                         real_name = location_data.get('poi', {}).get('realName')
                         
-                        # 如果 poi 中没有，尝试从 location 根部获取
                         if not country:
                             country = location_data.get('country')
                         if not real_name:
@@ -386,7 +406,7 @@ class TmpBotPlugin(Star):
                 self._get_player_info(tmp_id), 
                 self._get_player_bans(tmp_id), 
                 self._get_online_status(tmp_id),
-                self._get_player_stats(tmp_id) # 新增：里程统计
+                self._get_player_stats(tmp_id) 
             )
             player_info = player_info_raw 
         except PlayerNotFoundException as e:
@@ -402,6 +422,10 @@ class TmpBotPlugin(Star):
         
         ban_count, sorted_bans = self._format_ban_info(bans_info)
         
+        # --- 获取并格式化上次在线时间 ---
+        last_online_raw = player_info.get('lastOnline')
+        last_online_formatted = _format_timestamp_to_readable(last_online_raw)
+        
         # 完整的回复消息构建 (纯文本输出)
         message = "TMP玩家详细信息\n"
         message += "=" * 20 + "\n"
@@ -410,6 +434,9 @@ class TmpBotPlugin(Star):
             message += f"ID Steam编号: {steam_id_to_display}\n" 
             
         message += f"玩家名称: {player_info.get('name', '未知')}\n"
+        
+        # --- 新增：上次在线时间 ---
+        message += f"上次在线: {last_online_formatted}\n"
         
         # 权限/分组信息
         perms_str = "玩家"
@@ -433,8 +460,9 @@ class TmpBotPlugin(Star):
         total_km = stats_info.get('total_km', 0)
         daily_km = stats_info.get('daily_km', 0)
         
-        message += f"🚩历史里程: {total_km:,} km\n".replace(',', ' ')
-        message += f"🚩今日里程: {daily_km:,} km\n".replace(',', ' ')
+        # 注意：这里使用 : , 格式化数字，并将逗号替换为空格以适应中文数字分隔习惯
+        message += f"历史里程: {total_km:,} km\n".replace(',', ' ')
+        message += f"今日里程: {daily_km:,} km\n".replace(',', ' ')
         
         # --- 封禁信息 ---
         message += f"是否封禁: {'是' if is_banned else '否'}\n"
