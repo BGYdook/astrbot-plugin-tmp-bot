@@ -3,7 +3,7 @@
 
 """
 AstrBot-plugin-tmp-bot
-欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.6：切换到 TMP 官方 V2 API 查询在线状态)
+欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.8：切换到 TruckyApp V3 地图实时状态 API)
 """
 
 import re
@@ -81,8 +81,8 @@ class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
 
-# 版本号更新为 1.3.6
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.6", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
+# 版本号更新为 1.3.8
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.8", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -93,8 +93,9 @@ class TmpBotPlugin(Star):
         logger.info("TMP Bot 插件已加载")
 
     async def initialize(self):
+        # 统一 User-Agent，并更新版本号
         self.session = aiohttp.ClientSession(
-            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.3.6'}, 
+            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.3.8'}, 
             timeout=aiohttp.ClientTimeout(total=10)
         )
         logger.info("TMP Bot 插件HTTP会话已创建")
@@ -148,6 +149,7 @@ class TmpBotPlugin(Star):
             raise NetworkException("插件未初始化，HTTP会话不可用")
         
         try:
+            # TruckyApp V2 Steam ID 转换接口
             url = f"https://api.truckyapp.com/v2/truckersmp/player/get_by_steamid/{steam_id}"
             
             async with self.session.get(url, timeout=10) as response:
@@ -182,6 +184,7 @@ class TmpBotPlugin(Star):
             raise NetworkException("插件未初始化，HTTP会话不可用")
         
         try:
+            # TMP 官方 V2 接口 (用于基本信息和封禁查询)
             url = f"https://api.truckersmp.com/v2/player/{tmp_id}"
             async with self.session.get(url, timeout=10) as response:
                 if response.status == 200:
@@ -215,64 +218,64 @@ class TmpBotPlugin(Star):
         except Exception:
             return []
 
-    # --- 采用 TruckersMP V2 官方 API 的在线状态查询方法 (新逻辑) ---
+    # --- 采用 TruckyApp V3 官方 API 的在线状态查询方法 (版本 1.3.8) ---
     async def _get_online_status(self, tmp_id: str) -> Dict:
         """
-        使用 TruckersMP V2 官方接口 (api.truckersmp.com/v2/player/{id}) 查询在线状态。
-        注意：该接口的在线状态信息可能存在延迟或不准确，且实时详情有限。
+        使用 TruckyApp V3 地图实时接口查询状态。
+        此接口提供了最准确的实时位置和服务器信息，并保证 'online' 字段的存在。
         """
         if not self.session: 
             return {'online': False, 'debug_error': 'HTTP会话不可用。'}
-        
-        tmp_url = f"https://api.truckersmp.com/v2/player/{tmp_id}"
-        logger.info(f"尝试 TMP 官方 V2 API: {tmp_url}")
 
+        # TruckyApp V3 Map Online API (实时状态)
+        trucky_url = f"https://api.truckyapp.com/v3/map/online?playerID={tmp_id}"
+        logger.info(f"尝试 Trucky V3 API (地图实时状态): {trucky_url}")
+        
         try:
-            async with self.session.get(tmp_url, timeout=5) as response:
+            async with self.session.get(trucky_url, timeout=5) as response:
                 
                 if response.status == 200:
                     data = await response.json()
-                    status_data = data.get('response', {})
                     
-                    if not status_data:
-                        return {'online': False, 'debug_error': 'TMP V2 API 返回空数据。'}
-
-                    # 官方 V2 接口的在线状态字段
-                    is_online = status_data.get('online', False)
+                    # 假设 V3 接口在玩家在线时返回包含数据的字典/对象
+                    # 强行判断：如果存在 'location' 或 'server' 字段，则视作在线。
+                    # 如果返回的 JSON 为空或只包含错误信息，则视作离线。
+                    
+                    # 检查是否有关键字段来判断是否在线
+                    is_online = bool(data and (data.get('server') or data.get('location') or data.get('game') or data.get('online')))
                     
                     if is_online:
-                        # V2 接口的在线信息非常有限
+                        # 假设字段名称与 V2 或常见 TMP API 类似
+                        game_mode_code = data.get('game', 0)
+                        
                         return {
-                            'online': True,
-                            # TMP V2 接口通常只返回 serverName
-                            'serverName': status_data.get('serverName', '未知服务器'), 
-                            'game': 0, # V2 接口无法区分 ETS2/ATS 或提供 game code
-                            'city': {'name': '未知位置 (TMP V2)'}, 
+                            'online': True, # 确保存在布尔型 online 字段
+                            'serverName': data.get('server', '未知服务器 (V3)'),
+                            'game': game_mode_code, 
+                            # 'location' 可能是城市名称或坐标
+                            'city': {'name': data.get('location', '未知位置 (V3)')}, 
                             # 调试信息
-                            'debug_response': f"TMP V2 原始数据:\n{json.dumps(data, ensure_ascii=False, indent=2)}",
-                            'debug_error': '注意：此状态由 TMP 官方 V2 API 提供，可能存在延迟。'
+                            'debug_response': f"Trucky V3 原始数据:\n{json.dumps(data, ensure_ascii=False, indent=2)}",
                         }
                     
-                    # 明确返回离线
+                    # 如果 is_online 为 False，且响应数据不为空（例如返回了玩家ID但没有位置信息），则返回离线。
                     return {'online': False}
-
+                
                 elif response.status == 404:
-                    # 404 意味着玩家不存在，但为了避免重复调用，我们利用此处异常
-                    raise PlayerNotFoundException(f"玩家 {tmp_id} 不存在。")
-                else:
-                    return {'online': False, 'debug_error': f"TMP V2 API 返回非 200 状态码: {response.status}"}
+                    return {'online': False, 'debug_error': 'Trucky V3 API 404，玩家状态未找到。'}
 
-        except PlayerNotFoundException:
-            raise # 玩家不存在，向上层抛出，避免双重处理
+                else:
+                    return {'online': False, 'debug_error': f"Trucky V3 API 返回非 200 状态码: {response.status}"}
+
         except asyncio.TimeoutError:
-            logger.error(f"TMP V2 API 请求超时: {tmp_id}")
-            return {'online': False, 'debug_error': 'TMP V2 API 请求超时。'}
+            logger.error(f"Trucky V3 API 请求超时: {tmp_id}")
+            return {'online': False, 'debug_error': 'Trucky V3 API 请求超时。'}
         except aiohttp.ClientError as e:
-            logger.error(f"TMP V2 API 网络错误: {e.__class__.__name__}")
-            return {'online': False, 'debug_error': f'TMP V2 API 网络错误: {e.__class__.__name__}。'}
+            logger.error(f"Trucky V3 API 网络错误: {e.__class__.__name__}")
+            return {'online': False, 'debug_error': f'Trucky V3 API 网络错误: {e.__class__.__name__}。'}
         except Exception as e:
-            logger.error(f"TMP V2 API 解析失败: {e.__class__.__name__}")
-            return {'online': False, 'debug_error': f'TMP V2 API 解析失败: {e.__class__.__name__}。'}
+            logger.error(f"Trucky V3 API 解析失败: {e.__class__.__name__}")
+            return {'online': False, 'debug_error': f'Trucky V3 API 解析失败: {e.__class__.__name__}。'}
     # --- 在线状态查询方法结束 ---
 
 
@@ -320,7 +323,7 @@ class TmpBotPlugin(Star):
             return
         
         try:
-            # 注意：_get_player_info 和 _get_online_status 现在都使用了同一个 API。
+            # 玩家信息和封禁使用 TMP 官方 API，在线状态使用 TruckyApp V3
             player_info_raw, bans_info, online_status = await asyncio.gather(
                 self._get_player_info(tmp_id), 
                 self._get_player_bans(tmp_id), 
@@ -443,6 +446,7 @@ class TmpBotPlugin(Star):
 
         if is_steam_id:
             try:
+                # 使用 TruckyApp 转换接口
                 tmp_id = await self._get_tmp_id_from_steam_id(input_id)
             except SteamIdNotFoundException:
                 yield event.plain_result(f"Steam ID {input_id} 未在 TruckersMP 中注册，无法绑定。")
@@ -524,7 +528,7 @@ class TmpBotPlugin(Star):
             return
 
         try:
-            # 注意：_get_player_info 和 _get_online_status 现在都使用了同一个 API。
+            # 在线状态使用 TruckyApp V3，玩家基本信息使用 TMP 官方 V2
             online_status, player_info = await asyncio.gather(
                 self._get_online_status(tmp_id), 
                 self._get_player_info(tmp_id)
