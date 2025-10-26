@@ -3,7 +3,7 @@
 
 """
 AstrBot-plugin-tmp-bot
-欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.15：删除所有在线 API 调试信息)
+欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.16：加入历史里程和今日里程查询)
 """
 
 import re
@@ -81,8 +81,8 @@ class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
 
-# 版本号更新为 1.3.15
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.15", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
+# 版本号更新为 1.3.16
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.16", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -95,7 +95,7 @@ class TmpBotPlugin(Star):
     async def initialize(self):
         # 统一 User-Agent，并更新版本号
         self.session = aiohttp.ClientSession(
-            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.3.15'}, 
+            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.3.16'}, 
             timeout=aiohttp.ClientTimeout(total=10)
         )
         logger.info("TMP Bot 插件HTTP会话已创建")
@@ -143,7 +143,7 @@ class TmpBotPlugin(Star):
             return self._save_bindings(bindings)
         return False
 
-    # --- API请求方法 (保持不变) ---
+    # --- API请求方法 ---
     async def _get_tmp_id_from_steam_id(self, steam_id: str) -> str:
         if not self.session:
             raise NetworkException("插件未初始化，HTTP会话不可用")
@@ -217,22 +217,56 @@ class TmpBotPlugin(Star):
                 return []
         except Exception:
             return []
+            
+    # --- 新增：获取玩家里程统计数据 ---
+    async def _get_player_stats(self, tmp_id: str) -> Dict[str, int]:
+        """
+        通过 TruckyApp V3 API 获取玩家的总里程和今日里程 (以米为单位)。
+        返回: {'total_km': 0, 'daily_km': 0}
+        """
+        if not self.session: 
+            return {'total_km': 0, 'daily_km': 0, 'debug_error': 'HTTP会话不可用。'}
+
+        trucky_stats_url = f"https://api.truckyapp.com/v3/player/{tmp_id}/stats"
+        logger.info(f"尝试 Trucky V3 API (玩家统计): {trucky_stats_url}")
+        
+        try:
+            async with self.session.get(trucky_stats_url, timeout=5) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    response_data = data.get('response', {})
+                    
+                    # 里程数据通常在 'total' 和 'daily' 字段下，单位为米 (m)
+                    total_m = response_data.get('total', 0)
+                    daily_m = response_data.get('daily', 0)
+                    
+                    # 转换为公里 (km) 并取整数
+                    total_km = int(total_m / 1000)
+                    daily_km = int(daily_m / 1000)
+
+                    return {
+                        'total_km': total_km, 
+                        'daily_km': daily_km,
+                        'debug_error': '里程数据获取成功。'
+                    }
+                else:
+                    return {'total_km': 0, 'daily_km': 0, 'debug_error': f'里程 API 返回状态码: {response.status}'}
+
+        except Exception as e:
+            logger.error(f"获取玩家统计数据失败: {e.__class__.__name__}")
+            return {'total_km': 0, 'daily_km': 0, 'debug_error': f'获取里程失败: {e.__class__.__name__}'}
 
     # --- 采用 TruckyApp V3 官方 API 的在线状态查询方法 (版本 1.3.15 最终位置输出) ---
     async def _get_online_status(self, tmp_id: str) -> Dict:
         """
         仅使用 TruckyApp V3 地图实时接口查询状态。
-        此版本旨在修复 V3 接口在玩家在线时的特殊响应结构和错误判断，并优化位置显示。
         """
         if not self.session: 
-            # 简化离线返回的调试信息，因为不再输出给用户
             return {'online': False, 'debug_error': 'HTTP会话不可用。'}
 
         # TruckyApp V3 Map Online API (实时状态)
         trucky_url = f"https://api.truckyapp.com/v3/map/online?playerID={tmp_id}"
         logger.info(f"尝试 Trucky V3 API (地图实时状态): {trucky_url}")
-        
-        # response_data_for_debug = {} # 不再需要完整原始数据
         
         try:
             async with self.session.get(trucky_url, timeout=5) as response:
@@ -241,11 +275,8 @@ class TmpBotPlugin(Star):
                 
                 if status == 200:
                     data = await response.json()
-                    # response_data_for_debug = data # 不再需要完整原始数据
-                    
                     online_data = data.get('response') if 'response' in data else data
                     
-                    # === 关键修复点：如果存在 online: true 并且没有 error: true，则判断为在线 ===
                     is_online = bool(
                         online_data and 
                         online_data.get('online') is True and 
@@ -256,14 +287,13 @@ class TmpBotPlugin(Star):
                         server_details = online_data.get('serverDetails', {})
                         server_name = server_details.get('name', f"未知服务器 ({online_data.get('server')})")
                         
-                        # === 关键修改点：优化位置信息的显示 ===
-                        # Trucky V3 接口中，location 是一个字典，包含 country 和 realName
+                        # --- 位置信息解析 ---
                         location_data = online_data.get('location', {})
+                        # 尝试从 poi 中获取位置信息
                         country = location_data.get('poi', {}).get('country')
                         real_name = location_data.get('poi', {}).get('realName')
                         
-                        # 注意：根据您的截图，location 下可能直接是 location 字典，也可能 under poi
-                        # 采用更稳健的方式，先检查 poi 下是否有，如果没有，直接检查 location 根部
+                        # 如果 poi 中没有，尝试从 location 根部获取
                         if not country:
                             country = location_data.get('country')
                         if not real_name:
@@ -271,23 +301,21 @@ class TmpBotPlugin(Star):
 
                         formatted_location = '未知位置'
                         if country and real_name:
-                            # 优先组合：国家 城市 (例如：德国 杜塞尔多夫)
                             formatted_location = f"{country} {real_name}"
                         elif real_name:
                             formatted_location = real_name
                         elif country:
                             formatted_location = country
-                        # ==================================
+                        # --- 位置信息解析结束 ---
                         
                         return {
                             'online': True,
                             'serverName': server_name,
                             'game': 1 if server_details.get('game') == 'ETS2' else 2 if server_details.get('game') == 'ATS' else 0,
                             'city': {'name': formatted_location}, 
-                            'debug_error': 'Trucky V3 判断在线，并获取到实时数据。' # 调试信息保留在内部，但不再是原始数据
+                            'debug_error': 'Trucky V3 判断在线，并获取到实时数据。'
                         }
                     
-                    # 玩家离线，或者 V3 API 返回了 {"error": true, "online": false} 的延迟/错误状态
                     debug_msg = 'Trucky V3 API 响应判断为离线。'
                     if online_data and online_data.get('error') is True:
                          debug_msg = 'Trucky V3 API 返回错误/延迟状态 (error: true)。'
@@ -303,12 +331,6 @@ class TmpBotPlugin(Star):
                         'debug_error': f"Trucky V3 API 返回非 200 状态码: {status}",
                     }
 
-        except asyncio.TimeoutError:
-            logger.error(f"Trucky V3 API 请求超时: {tmp_id}")
-            return {'online': False, 'debug_error': 'Trucky V3 API 请求超时。'}
-        except aiohttp.ClientError as e:
-            logger.error(f"Trucky V3 API 网络错误: {e.__class__.__name__}")
-            return {'online': False, 'debug_error': f'Trucky V3 API 网络错误: {e.__class__.__name__}。'}
         except Exception as e:
             logger.error(f"Trucky V3 API 解析失败: {e.__class__.__name__}", exc_info=True)
             return {'online': False, 'debug_error': f'Trucky V3 API 发生意外错误: {e.__class__.__name__}。'}
@@ -359,11 +381,12 @@ class TmpBotPlugin(Star):
             return
         
         try:
-            # 玩家信息和封禁使用 TMP 官方 API，在线状态使用 TruckyApp V3
-            player_info_raw, bans_info, online_status = await asyncio.gather(
+            # 玩家信息、封禁、在线状态和里程并行查询
+            player_info_raw, bans_info, online_status, stats_info = await asyncio.gather(
                 self._get_player_info(tmp_id), 
                 self._get_player_bans(tmp_id), 
-                self._get_online_status(tmp_id) 
+                self._get_online_status(tmp_id),
+                self._get_player_stats(tmp_id) # 新增：里程统计
             )
             player_info = player_info_raw 
         except PlayerNotFoundException as e:
@@ -406,6 +429,14 @@ class TmpBotPlugin(Star):
         if vtc_role:
              message += f"车队角色: {vtc_role}\n"
         
+        # --- 里程信息输出 ---
+        total_km = stats_info.get('total_km', 0)
+        daily_km = stats_info.get('daily_km', 0)
+        
+        message += f"🚩历史里程: {total_km:,} km\n".replace(',', ' ')
+        message += f"🚩今日里程: {daily_km:,} km\n".replace(',', ' ')
+        
+        # --- 封禁信息 ---
         message += f"是否封禁: {'是' if is_banned else '否'}\n"
         
         if ban_count > 0:
@@ -442,16 +473,13 @@ class TmpBotPlugin(Star):
             server_name = online_status.get('serverName', '未知服务器')
             game_mode_code = online_status.get('game', 0)
             game_mode = "欧卡2" if game_mode_code == 1 else "美卡" if game_mode_code == 2 else "未知游戏"
-            # 修正：确保能获取到 _get_online_status 中 city 字典下的 name
             city = online_status.get('city', {}).get('name', '未知位置') 
             
             message += f"在线状态: 在线\n"
             message += f"所在服务器: {server_name}\n"
             message += f"所在位置: {city} ({game_mode})\n"
         else:
-            # 离线时，不再输出调试信息
             message += f"在线状态: 离线\n"
-
 
         yield event.plain_result(message)
 
@@ -584,16 +612,13 @@ class TmpBotPlugin(Star):
             server_name = online_status.get('serverName', '未知服务器')
             game_mode_code = online_status.get('game', 0)
             game_mode = "欧卡2" if game_mode_code == 1 else "美卡2" if game_mode_code == 2 else "未知游戏"
-            # 修正：确保能获取到 _get_online_status 中 city 字典下的 name
             city = online_status.get('city', {}).get('name', '未知位置')
             
             message += f"在线状态: 在线\n"
             message += f"所在服务器: {server_name}\n"
             message += f"所在位置: {city} ({game_mode})\n"
         else:
-            # 离线时，不再输出调试信息
             message += f"在线状态: 离线\n"
-
 
         yield event.plain_result(message)
 
