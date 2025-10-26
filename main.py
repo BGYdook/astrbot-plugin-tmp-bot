@@ -3,7 +3,7 @@
 
 """
 AstrBot-plugin-tmp-bot
-欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.19：优化 DLC 查询逻辑，聚焦地图扩展包)
+欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.20：加入玩家里程排行榜查询)
 """
 
 import re
@@ -87,11 +87,10 @@ def _get_dlc_info(player_info: Dict) -> Dict[str, List[str]]:
     ets2_dlc: List[str] = []
     ats_dlc: List[str] = []
 
-    # 包含所有地图扩展包名称的集合（基于官方 API 响应的前缀）
     ETS2_MAP_PREFIX = "Euro Truck Simulator 2 - "
     ATS_MAP_PREFIX = "American Truck Simulator - "
     
-    # 已知地图扩展包的后缀关键词（排除无关的涂装、货物等）
+    # 包含了几乎所有地图扩展包的关键词
     MAP_KEYWORDS = [
         "Going East!", "Scandinavia", "Vive la France !", "Italia", "Beyond the Baltic Sea", 
         "Road to the Black Sea", "Iberia", "West Balkans", "Heart of Russia", 
@@ -108,21 +107,16 @@ def _get_dlc_info(player_info: Dict) -> Dict[str, List[str]]:
                 name = dlc_name_full[len(ETS2_MAP_PREFIX):].strip()
                 if name in MAP_KEYWORDS:
                     ets2_dlc.append(name)
-                # 特殊处理：免费 DLC
-                elif name == "Going East!": # Going East! 是第一个，但仍是地图扩展
-                     ets2_dlc.append(name)
                 elif "Germany Rework" in name:
                      ets2_dlc.append("Germany Rework")
                      
             # 2. ATS DLC
             elif dlc_name_full.startswith(ATS_MAP_PREFIX):
                 name = dlc_name_full[len(ATS_MAP_PREFIX):].strip()
-                # 排除免费的 Arizona 和 Nevada
                 if name not in ["Arizona", "Nevada"] and name in MAP_KEYWORDS: 
                     ats_dlc.append(name)
-                elif name in ["Arizona", "Nevada"]: # 明确标注免费 DLC
+                elif name in ["Arizona", "Nevada"]: 
                     ats_dlc.append(f"{name} (基础地图)")
-
 
     return {
         'ets2': sorted(list(set(ets2_dlc))), # 去重并排序
@@ -152,8 +146,8 @@ class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
 
-# 版本号更新为 1.3.19
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.19", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
+# 版本号更新为 1.3.20
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.20", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -166,7 +160,7 @@ class TmpBotPlugin(Star):
     async def initialize(self):
         # 统一 User-Agent，并更新版本号
         self.session = aiohttp.ClientSession(
-            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.3.19'}, 
+            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.3.20'}, 
             timeout=aiohttp.ClientTimeout(total=10)
         )
         logger.info("TMP Bot 插件HTTP会话已创建")
@@ -400,6 +394,42 @@ class TmpBotPlugin(Star):
             logger.error(f"Trucky V3 API 解析失败: {e.__class__.__name__}", exc_info=True)
             return {'online': False, 'debug_error': f'Trucky V3 API 发生意外错误: {e.__class__.__name__}。'}
     # --- 在线状态查询方法结束 ---
+    
+    async def _get_rank_list(self, limit: int = 10) -> Optional[List[Dict]]:
+        """
+        获取 TruckersMP 里程排行榜列表 (使用 Trucky App V3 接口)。
+        默认获取总里程排行榜前 N 名。
+        """
+        if not self.session:
+            raise NetworkException("插件未初始化，HTTP会话不可用")
+
+        # Trucky App V3 里程总榜 API
+        url = f"https://api.truckyapp.com/v3/rankings/distance/total/1?limit={limit}"
+        logger.info(f"尝试 Trucky V3 API (排行榜): {url}")
+        
+        try:
+            async with self.session.get(url, timeout=10) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    response_data = data.get('response', [])
+                    
+                    if isinstance(response_data, list):
+                         return response_data
+                    else:
+                        raise ApiResponseException("排行榜 API 数据结构异常")
+
+                elif response.status == 404:
+                    # 404 可能是由于没有数据或 API 路径改变，返回空列表
+                    return []
+                else:
+                    raise ApiResponseException(f"排行榜 API 返回错误状态码: {response.status}")
+        except aiohttp.ClientError:
+            raise NetworkException("排行榜 API 网络请求失败")
+        except asyncio.TimeoutError:
+            raise NetworkException("请求排行榜 API 超时")
+        except Exception as e:
+            logger.error(f"查询排行榜失败: {e}")
+            raise NetworkException("查询排行榜失败")
 
 
     def _format_ban_info(self, bans_info: List[Dict]) -> Tuple[int, List[Dict]]:
@@ -505,7 +535,6 @@ class TmpBotPlugin(Star):
         total_km = stats_info.get('total_km', 0)
         daily_km = stats_info.get('daily_km', 0)
         
-        # 注意：这里使用 : , 格式化数字，并将逗号替换为空格以适应中文数字分隔习惯
         message += f"🚩历史里程: {total_km:,} km\n".replace(',', ' ')
         message += f"🚩今日里程: {daily_km:,} km\n".replace(',', ' ')
         
@@ -556,7 +585,6 @@ class TmpBotPlugin(Star):
 
         yield event.plain_result(message)
     
-    # --- 新增 DLC 命令处理器 ---
     @filter.command("DLC") 
     async def tmpdlc(self, event: AstrMessageEvent):
         """[命令: DLC] 查询玩家拥有的地图 DLC 列表。支持输入 TMP ID 或 Steam ID。"""
@@ -607,7 +635,6 @@ class TmpBotPlugin(Star):
 
         message += f"🚛 Euro Truck Simulator 2 (数量: {len(ets2_dlc)}):\n"
         if ets2_dlc:
-            # 每行最多显示 3 个 DLC
             chunks = [ets2_dlc[i:i + 3] for i in range(0, len(ets2_dlc), 3)]
             for chunk in chunks:
                  message += "  " + " | ".join(chunk) + "\n"
@@ -616,7 +643,6 @@ class TmpBotPlugin(Star):
             
         message += f"\n🇺🇸 American Truck Simulator (数量: {len(ats_dlc)}):\n"
         if ats_dlc:
-            # 每行最多显示 3 个 DLC
             chunks = [ats_dlc[i:i + 3] for i in range(0, len(ats_dlc), 3)]
             for chunk in chunks:
                  message += "  " + " | ".join(chunk) + "\n"
@@ -766,6 +792,55 @@ class TmpBotPlugin(Star):
             message += f"在线状态: 离线\n"
 
         yield event.plain_result(message)
+    
+    # --- 里程排行榜命令处理器 ---
+    @filter.command("排行") 
+    async def tmprank(self, event: AstrMessageEvent):
+        """[命令: 排行] 查询 TruckersMP 玩家总里程排行榜前10名。"""
+        
+        try:
+            # 获取排行榜数据，默认为前10名
+            rank_list = await self._get_rank_list(limit=10)
+        except NetworkException as e:
+            yield event.plain_result(f"查询排行榜失败: {str(e)}")
+            return
+        except ApiResponseException as e:
+            yield event.plain_result(f"查询排行榜失败: API返回数据异常。")
+            return
+        except Exception:
+            yield event.plain_result("查询排行榜时发生未知错误。")
+            return
+
+        if not rank_list:
+            yield event.plain_result("当前无法获取排行榜数据或排行榜为空。")
+            return
+            
+        message = "🏆 TruckersMP 玩家总里程排行榜 (前10名)\n"
+        message += "=" * 35 + "\n"
+        
+        for idx, player in enumerate(rank_list):
+            rank = player.get('rank', idx + 1)
+            name = player.get('playerName', player.get('name', '未知玩家'))
+            distance_m = player.get('totalDistance', player.get('distance', 0))
+            
+            # 转换为公里并格式化
+            distance_km = int(distance_m / 1000)
+            distance_str = f"{distance_km:,}".replace(',', ' ')
+            
+            # 格式化输出：[排名] 玩家名 (ID: TMP ID) - 里程
+            tmp_id = player.get('id', 'N/A')
+            
+            line = f"No.{rank:<2} | {name} (ID:{tmp_id})\n"
+            line += f"       {distance_str} km\n"
+            
+            message += line
+
+        message += "=" * 35 + "\n"
+        message += "数据来源: Trucky App V3 API"
+
+        yield event.plain_result(message)
+    # --- 里程排行榜命令处理器结束 ---
+
 
     @filter.command("服务器")
     async def tmpserver(self, event: AstrMessageEvent):
@@ -817,11 +892,12 @@ class TmpBotPlugin(Star):
 可用命令:
 1. 查询 [ID] - 查询玩家的完整信息（支持 TMP ID 或 Steam ID）。
 2. 状态 [ID]- 查询玩家的实时在线状态（支持 TMP ID 或 Steam ID）。 
-3. DLC [ID] - 查询玩家拥有的主要地图 DLC 列表（支持 TMP ID 或 Steam ID）。
-4. 绑定 [ID] - 绑定您的聊天账号与 TMP ID（支持输入 Steam ID 转换）。
-5. 解绑 - 解除账号绑定。
-6. 服务器 - 查看主要TMP服务器的实时状态和在线人数。
-7. help - 显示此帮助信息。
+3. DLC [ID] - 查询玩家拥有的主要地图 DLC 列表（修复中）。
+4. 排行 - 查询 TruckersMP 总里程排行榜前10名。 **【新增】**
+5. 绑定 [ID] - 绑定您的聊天账号与 TMP ID（支持输入 Steam ID 转换）。
+6. 解绑 - 解除账号绑定。
+7. 服务器 - 查看主要TMP服务器的实时状态和在线人数。
+8. help - 显示此帮助信息。
 
 使用提示: 绑定后可直接发送 查询/状态/DLC (无需ID参数)
 """
