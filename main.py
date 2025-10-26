@@ -3,7 +3,7 @@
 
 """
 AstrBot-plugin-tmp-bot
-欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.8：切换到 TruckyApp V3 地图实时状态 API)
+欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.9：切换到 TruckyApp V3 地图实时状态 API + 增强调试)
 """
 
 import re
@@ -81,8 +81,8 @@ class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
 
-# 版本号更新为 1.3.8
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.8", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
+# 版本号更新为 1.3.9
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.9", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -95,7 +95,7 @@ class TmpBotPlugin(Star):
     async def initialize(self):
         # 统一 User-Agent，并更新版本号
         self.session = aiohttp.ClientSession(
-            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.3.8'}, 
+            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.3.9'}, 
             timeout=aiohttp.ClientTimeout(total=10)
         )
         logger.info("TMP Bot 插件HTTP会话已创建")
@@ -218,11 +218,11 @@ class TmpBotPlugin(Star):
         except Exception:
             return []
 
-    # --- 采用 TruckyApp V3 官方 API 的在线状态查询方法 (版本 1.3.8) ---
+    # --- 采用 TruckyApp V3 官方 API 的在线状态查询方法 (版本 1.3.9 增强调试) ---
     async def _get_online_status(self, tmp_id: str) -> Dict:
         """
         使用 TruckyApp V3 地图实时接口查询状态。
-        此接口提供了最准确的实时位置和服务器信息，并保证 'online' 字段的存在。
+        此接口提供了最准确的实时位置和服务器信息。
         """
         if not self.session: 
             return {'online': False, 'debug_error': 'HTTP会话不可用。'}
@@ -231,41 +231,54 @@ class TmpBotPlugin(Star):
         trucky_url = f"https://api.truckyapp.com/v3/map/online?playerID={tmp_id}"
         logger.info(f"尝试 Trucky V3 API (地图实时状态): {trucky_url}")
         
+        # 定义一个字典用于存储调试信息，无论成功失败都会尝试带回
+        response_data_for_debug = {}
+        
         try:
             async with self.session.get(trucky_url, timeout=5) as response:
                 
-                if response.status == 200:
+                status = response.status
+                
+                if status == 200:
                     data = await response.json()
-                    
-                    # 假设 V3 接口在玩家在线时返回包含数据的字典/对象
-                    # 强行判断：如果存在 'location' 或 'server' 字段，则视作在线。
-                    # 如果返回的 JSON 为空或只包含错误信息，则视作离线。
-                    
+                    response_data_for_debug = data # 捕获原始数据
+
                     # 检查是否有关键字段来判断是否在线
-                    is_online = bool(data and (data.get('server') or data.get('location') or data.get('game') or data.get('online')))
+                    # V3 接口在在线时会返回实际的玩家信息，离线时返回空或只包含 playerID 的对象。
+                    is_online = bool(data and (data.get('server') or data.get('location') or data.get('game')))
                     
                     if is_online:
-                        # 假设字段名称与 V2 或常见 TMP API 类似
                         game_mode_code = data.get('game', 0)
                         
                         return {
                             'online': True, # 确保存在布尔型 online 字段
                             'serverName': data.get('server', '未知服务器 (V3)'),
                             'game': game_mode_code, 
-                            # 'location' 可能是城市名称或坐标
                             'city': {'name': data.get('location', '未知位置 (V3)')}, 
-                            # 调试信息
-                            'debug_response': f"Trucky V3 原始数据:\n{json.dumps(data, ensure_ascii=False, indent=2)}",
+                            # 返回原始响应，用于调试
+                            'debug_response': f"Trucky V3 原始数据:\n{json.dumps(response_data_for_debug, ensure_ascii=False, indent=2)}",
                         }
                     
-                    # 如果 is_online 为 False，且响应数据不为空（例如返回了玩家ID但没有位置信息），则返回离线。
-                    return {'online': False}
+                    # 如果 is_online 为 False，返回离线，但带上调试数据
+                    return {
+                        'online': False,
+                        'debug_error': 'Trucky V3 API 响应判断为离线。',
+                        'debug_response': f"Trucky V3 原始数据:\n{json.dumps(response_data_for_debug, ensure_ascii=False, indent=2)}",
+                    }
                 
-                elif response.status == 404:
-                    return {'online': False, 'debug_error': 'Trucky V3 API 404，玩家状态未找到。'}
-
                 else:
-                    return {'online': False, 'debug_error': f"Trucky V3 API 返回非 200 状态码: {response.status}"}
+                    try:
+                        # 尝试读取非 200 响应的 JSON 内容，以便调试
+                        response_data_for_debug = await response.json()
+                    except:
+                        # 无法解析为 JSON，可能是文本错误或空白
+                        response_data_for_debug = {"status_code": status, "error_text": await response.text()}
+                        
+                    return {
+                        'online': False, 
+                        'debug_error': f"Trucky V3 API 返回非 200 状态码: {status}",
+                        'debug_response': f"Trucky V3 原始数据:\n{json.dumps(response_data_for_debug, ensure_ascii=False, indent=2)}",
+                    }
 
         except asyncio.TimeoutError:
             logger.error(f"Trucky V3 API 请求超时: {tmp_id}")
@@ -274,8 +287,8 @@ class TmpBotPlugin(Star):
             logger.error(f"Trucky V3 API 网络错误: {e.__class__.__name__}")
             return {'online': False, 'debug_error': f'Trucky V3 API 网络错误: {e.__class__.__name__}。'}
         except Exception as e:
-            logger.error(f"Trucky V3 API 解析失败: {e.__class__.__name__}")
-            return {'online': False, 'debug_error': f'Trucky V3 API 解析失败: {e.__class__.__name__}。'}
+            logger.error(f"Trucky V3 API 解析失败: {e.__class__.__name__}", exc_info=True)
+            return {'online': False, 'debug_error': f'Trucky V3 API 发生意外错误: {e.__class__.__name__}。'}
     # --- 在线状态查询方法结束 ---
 
 
@@ -413,15 +426,15 @@ class TmpBotPlugin(Star):
             message += f"所在位置: {city} ({game_mode})\n"
         else:
             message += f"在线状态: 离线\n"
-            if 'debug_error' in online_status:
-                 message += f"\n--- 调试错误 ---\n"
-                 message += online_status['debug_error']
-                 message += f"\n----------------\n"
 
-
-        # --- DEBUG 区域：在 '查询' 命令中也添加调试信息
-        if online_status and 'debug_response' in online_status:
-             message += f"\n--- 在线 API 调试数据 ---\n"
+        # --- DEBUG 区域：添加调试信息
+        if 'debug_error' in online_status:
+             message += f"\n--- 在线 API 调试错误 ---\n"
+             message += online_status['debug_error']
+             message += f"\n--------------------------\n"
+        
+        if 'debug_response' in online_status:
+             message += f"\n--- 在线 API 原始数据 ---\n"
              message += online_status['debug_response']
              message += f"\n--------------------------\n"
         # --- DEBUG 区域结束
@@ -562,20 +575,20 @@ class TmpBotPlugin(Star):
             message += f"在线状态: 在线\n"
             message += f"所在服务器: {server_name}\n"
             message += f"所在位置: {city} ({game_mode})\n"
-            
-            # **DEBUG: 如果在线，强制返回原始 API 响应**
-            if 'debug_response' in online_status:
-                message += f"\n--- 在线 API 调试数据 ---\n"
-                message += online_status['debug_response']
-                message += f"\n--------------------------\n"
-                
         else:
             message += f"在线状态: 离线\n"
-            # **DEBUG: 如果离线，但有错误信息，也返回**
-            if 'debug_error' in online_status:
-                 message += f"\n--- 调试错误 ---\n"
-                 message += online_status['debug_error']
-                 message += f"\n----------------\n"
+
+        # --- DEBUG 区域：添加调试信息
+        if 'debug_error' in online_status:
+             message += f"\n--- 在线 API 调试错误 ---\n"
+             message += online_status['debug_error']
+             message += f"\n--------------------------\n"
+        
+        if 'debug_response' in online_status:
+             message += f"\n--- 在线 API 原始数据 ---\n"
+             message += online_status['debug_response']
+             message += f"\n--------------------------\n"
+        # --- DEBUG 区域结束
 
         yield event.plain_result(message)
 
