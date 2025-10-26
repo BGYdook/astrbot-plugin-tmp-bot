@@ -3,9 +3,7 @@
 
 """
 AstrBot-plugin-tmp-bot
-欧卡2TMP查询插件 - AstrBot版本 (版本 1.2.9：强制在聊天中返回API原始数据用于调试，并修复代码截断问题)
-
-注意：已将 _get_online_status 方法修改为优先使用 TruckersMP 官方 v1 实时状态接口，并在返回在线状态时，将原始数据封装在 debug_response 字段中。
+欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.3：修复 _get_online_status 方法以适应API变化)
 """
 
 import re
@@ -62,7 +60,7 @@ except ImportError:
     logger = _Logger()
 
 
-# 自定义异常类 (保持不变)
+# 自定义异常类 
 class TmpApiException(Exception):
     """TMP 相关异常的基类"""
     pass
@@ -83,8 +81,8 @@ class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
 
-# 版本号更新为 1.3.2
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.2", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
+# 版本号更新为 1.3.3 (修复在线状态)
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.3", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -96,7 +94,7 @@ class TmpBotPlugin(Star):
 
     async def initialize(self):
         self.session = aiohttp.ClientSession(
-            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.3.2'}, 
+            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.3.3'}, 
             timeout=aiohttp.ClientTimeout(total=10)
         )
         logger.info("TMP Bot 插件HTTP会话已创建")
@@ -217,48 +215,16 @@ class TmpBotPlugin(Star):
         except Exception:
             return []
 
-    # --- 最终版在线状态查询方法（双API尝试，强制返回调试数据） ---
+    # --- 修复后的在线状态查询方法（双API尝试，强制返回调试数据） ---
     async def _get_online_status(self, tmp_id: str) -> Dict:
         """
-        优先使用 TruckersMP 官方 v1 接口查询实时状态，失败则回退至 TruckyApp v2 接口。
-        **如果发现玩家在线，将原始数据封装在 debug_response 字段中。**
+        优先使用 TruckyApp V2 接口查询实时状态，失败则回退至 TruckersMP 官方 V2 接口（可能延迟）。
+        如果发现玩家在线，将原始数据封装在 debug_response 字段中。
         """
         if not self.session: 
             return {'online': False, 'debug_error': 'HTTP会话不可用。'}
 
-        # 尝试 1: TruckersMP 官方 V1 实时状态 API
-        try:
-            tmp_url = f"https://api.truckersmp.com/v1/player/{tmp_id}/online"
-            
-            async with self.session.get(tmp_url, timeout=5) as response:
-                
-                if response.status == 200:
-                    data = await response.json()
-                    
-                    response_data = data.get('response', {})
-                    is_online = response_data.get('online', False)
-                    
-                    if is_online:
-                        game_mode = 0
-                        if response_data.get('game') == 'ETS2': game_mode = 1
-                        elif response_data.get('game') == 'ATS': game_mode = 2
-
-                        return {
-                            'online': True,
-                            'serverName': response_data.get('server_name', '未知服务器'),
-                            'game': game_mode, 
-                            'city': {'name': response_data.get('city', '未知位置')},
-                            # 调试信息
-                            'debug_response': f"TMP V1 原始数据:\n{json.dumps(data, ensure_ascii=False, indent=2)}",
-                        }
-                    # 官方API明确返回离线，返回通用离线字典
-                    return {'online': False}
-                
-        except Exception:
-            # 请求失败，继续尝试 TruckyApp 接口
-            pass 
-
-        # 尝试 2: TruckyApp V2 Player Status API (回退)
+        # 尝试 1: TruckyApp V2 Player Status API (更可靠的实时状态)
         try:
             trucky_url = f"https://api.truckyapp.com/v2/truckersmp/player/status/{tmp_id}"
             
@@ -273,18 +239,45 @@ class TmpBotPlugin(Star):
                         is_online = status_data.get('game', 0) > 0 
                         
                         if is_online:
+                            # TruckyApp V2 接口只提供 server_name, game
                             return {
                                 'online': True,
                                 'serverName': status_data.get('server_name', '未知服务器'),
                                 'game': status_data.get('game', 0), 
-                                'city': {'name': '未知位置'},
+                                'city': {'name': status_data.get('city', '未知位置')}, 
                                 # 调试信息
                                 'debug_response': f"Trucky V2 原始数据:\n{json.dumps(data, ensure_ascii=False, indent=2)}",
                             }
-                
-                # Trucky API 失败或返回离线
-                return {'online': False}
+                        
+                        # Trucky API 明确返回离线
+                        return {'online': False}
+        
+        except Exception:
+            # 请求失败，继续尝试 TruckersMP 官方 V2 接口
+            pass 
 
+        # 尝试 2: TruckersMP 官方 V2 玩家信息 API (回退，状态信息可能延迟)
+        try:
+            # V2 接口主要用于获取玩家信息，其中的 'online' 字段可能不那么实时。
+            player_info = await self._get_player_info(tmp_id) 
+            is_online = player_info.get('online', False)
+            
+            if is_online:
+                # TruckersMP V2 接口信息有限
+                return {
+                    'online': True,
+                    'serverName': player_info.get('serverName', '未知服务器'), # V2 接口没有实时 serverName
+                    'game': 0, # V2 接口没有实时 game mode
+                    'city': {'name': '未知位置'},
+                    'debug_error': 'TMP V2 API 缺乏实时在线细节。'
+                }
+            
+            # 官方 V2 明确返回离线
+            return {'online': False}
+
+        except PlayerNotFoundException:
+            # 玩家不存在
+            raise # 传递给上层处理，保持原有逻辑
         except Exception:
             # 两个API都失败了
             return {'online': False, 'debug_error': '两个在线API都无法连接或返回有效数据。'}
@@ -424,6 +417,11 @@ class TmpBotPlugin(Star):
             message += f"所在位置: {city} ({game_mode})\n"
         else:
             message += f"在线状态: 离线\n"
+            if 'debug_error' in online_status:
+                 message += f"\n--- 调试错误 ---\n"
+                 message += online_status['debug_error']
+                 message += f"\n----------------\n"
+
 
         # --- DEBUG 区域：在 '查询' 命令中也添加调试信息
         if online_status and 'debug_response' in online_status:
@@ -437,7 +435,6 @@ class TmpBotPlugin(Star):
     @filter.command("绑定")
     async def tmpbind(self, event: AstrMessageEvent):
         """[命令: 绑定] 绑定您的聊天账号与TMP ID。支持输入 TMP ID 或 Steam ID。"""
-        # ... (与之前保持一致) ...
         message_str = event.message_str.strip()
         user_id = event.get_sender_id()
         
@@ -488,7 +485,6 @@ class TmpBotPlugin(Star):
     @filter.command("解绑")
     async def tmpunbind(self, event: AstrMessageEvent):
         """[命令: 解绑] 解除当前用户的TruckersMP ID绑定。"""
-        # ... (与之前保持一致) ...
         user_id = event.get_sender_id()
         user_binding = self._load_bindings().get(user_id, {})
         tmp_id = user_binding.get('tmp_id')
@@ -589,7 +585,6 @@ class TmpBotPlugin(Star):
     @filter.command("服务器")
     async def tmpserver(self, event: AstrMessageEvent):
         """[命令: 服务器] 查询TruckersMP官方服务器的实时状态。"""
-        # ... (与之前保持一致) ...
         if not self.session: 
             yield event.plain_result("插件初始化中，请稍后重试")
             return
@@ -632,7 +627,6 @@ class TmpBotPlugin(Star):
     @filter.command("help")
     async def tmphelp(self, event: AstrMessageEvent):
         """[命令: help] 显示本插件的命令使用说明。"""
-        # ... (与之前保持一致) ...
         help_text = """TMP查询插件使用说明 (无前缀命令)
 
 可用命令:
