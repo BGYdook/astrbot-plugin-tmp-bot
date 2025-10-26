@@ -3,7 +3,7 @@
 
 """
 AstrBot-plugin-tmp-bot
-欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.17：加入上次在线时间查询)
+欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.18：加入 DLC 查询功能)
 """
 
 import re
@@ -83,6 +83,35 @@ def _format_timestamp_to_readable(timestamp_str: Optional[str]) -> str:
         return timestamp_str.split('T')[0] if 'T' in timestamp_str else timestamp_str
 # -----------------------------
 
+# --- 辅助函数：获取 DLC 列表 ---
+def _get_dlc_info(player_info: Dict) -> Dict[str, List[str]]:
+    """从玩家信息中提取并分组 DLC 列表。"""
+    dlc_list = player_info.get('dlc', [])
+    
+    # 预定义的已知 DLC 映射 (可能需要根据实际 API 响应调整)
+    ets2_dlc = []
+    ats_dlc = []
+
+    if isinstance(dlc_list, list):
+        # 假设 DLC 名称中包含游戏名称缩写 (ETS2/ATS)
+        for dlc in dlc_list:
+            dlc_name = dlc.get('name', '')
+            if 'euro truck simulator 2' in dlc_name.lower() or 'ets2' in dlc_name.lower():
+                ets2_dlc.append(dlc_name)
+            elif 'american truck simulator' in dlc_name.lower() or 'ats' in dlc_name.lower():
+                ats_dlc.append(dlc_name)
+            # 对于无法分类的，我们暂时忽略，因为用户通常只关心地图 DLC
+    
+    # DLC 信息在 TMP V2 API 中返回的格式可能是一个列表，列表项包含 name 和 shortname。
+    # 我们只返回 DLC 的名称列表。
+    
+    return {
+        'ets2': ets2_dlc,
+        'ats': ats_dlc,
+        'all': [d.get('name', '未知DLC') for d in dlc_list if isinstance(d, dict)]
+    }
+# -----------------------------
+
 
 # 自定义异常类 
 class TmpApiException(Exception):
@@ -105,8 +134,8 @@ class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
 
-# 版本号更新为 1.3.17
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.17", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
+# 版本号更新为 1.3.18
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.18", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -119,7 +148,7 @@ class TmpBotPlugin(Star):
     async def initialize(self):
         # 统一 User-Agent，并更新版本号
         self.session = aiohttp.ClientSession(
-            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.3.17'}, 
+            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.3.18'}, 
             timeout=aiohttp.ClientTimeout(total=10)
         )
         logger.info("TMP Bot 插件HTTP会话已创建")
@@ -208,7 +237,7 @@ class TmpBotPlugin(Star):
             raise NetworkException("插件未初始化，HTTP会话不可用")
         
         try:
-            # TMP 官方 V2 接口 (用于基本信息、封禁、上次在线查询)
+            # TMP 官方 V2 接口 (用于基本信息、封禁、上次在线、DLC 查询)
             url = f"https://api.truckersmp.com/v2/player/{tmp_id}"
             async with self.session.get(url, timeout=10) as response:
                 if response.status == 200:
@@ -259,11 +288,9 @@ class TmpBotPlugin(Star):
                     data = await response.json()
                     response_data = data.get('response', {})
                     
-                    # 里程数据通常在 'total' 和 'daily' 字段下，单位为米 (m)
                     total_m = response_data.get('total', 0)
                     daily_m = response_data.get('daily', 0)
                     
-                    # 转换为公里 (km) 并取整数
                     total_km = int(total_m / 1000)
                     daily_km = int(daily_m / 1000)
 
@@ -435,7 +462,7 @@ class TmpBotPlugin(Star):
             
         message += f"玩家名称: {player_info.get('name', '未知')}\n"
         
-        # --- 新增：上次在线时间 ---
+        # --- 上次在线时间 ---
         message += f"上次在线: {last_online_formatted}\n"
         
         # 权限/分组信息
@@ -460,9 +487,8 @@ class TmpBotPlugin(Star):
         total_km = stats_info.get('total_km', 0)
         daily_km = stats_info.get('daily_km', 0)
         
-        # 注意：这里使用 : , 格式化数字，并将逗号替换为空格以适应中文数字分隔习惯
-        message += f"历史里程: {total_km:,} km\n".replace(',', ' ')
-        message += f"今日里程: {daily_km:,} km\n".replace(',', ' ')
+        message += f"🚩历史里程: {total_km:,} km\n".replace(',', ' ')
+        message += f"🚩今日里程: {daily_km:,} km\n".replace(',', ' ')
         
         # --- 封禁信息 ---
         message += f"是否封禁: {'是' if is_banned else '否'}\n"
@@ -510,6 +536,72 @@ class TmpBotPlugin(Star):
             message += f"在线状态: 离线\n"
 
         yield event.plain_result(message)
+    
+    # --- 新增 DLC 命令处理器 ---
+    @filter.command("DLC") 
+    async def tmpdlc(self, event: AstrMessageEvent):
+        """[命令: DLC] 查询玩家拥有的地图 DLC 列表。支持输入 TMP ID 或 Steam ID。"""
+        message_str = event.message_str.strip()
+        user_id = event.get_sender_id()
+        
+        match = re.search(r'DLC\s*(\d+)', message_str) 
+        input_id = match.group(1) if match else None
+        
+        tmp_id = None
+        
+        if input_id:
+            if len(input_id) == 17 and input_id.startswith('7'):
+                try:
+                    tmp_id = await self._get_tmp_id_from_steam_id(input_id)
+                except SteamIdNotFoundException as e:
+                    yield event.plain_result(str(e))
+                    return
+                except NetworkException as e:
+                    yield event.plain_result(f"查询失败: {str(e)}")
+                    return
+            else:
+                tmp_id = input_id
+        else:
+            tmp_id = self._get_bound_tmp_id(user_id)
+        
+        if not tmp_id:
+            yield event.plain_result("请输入正确的玩家编号（TMP ID 或 Steam ID）")
+            return
+
+        try:
+            player_info = await self._get_player_info(tmp_id)
+        except PlayerNotFoundException as e:
+            yield event.plain_result(str(e))
+            return
+        except Exception as e:
+            yield event.plain_result(f"查询失败: {str(e)}")
+            return
+            
+        player_name = player_info.get('name', '未知')
+        dlc_data = _get_dlc_info(player_info)
+        
+        message = f"📦 玩家 {player_name} (ID: {tmp_id}) 的 DLC 列表\n"
+        message += "=" * 25 + "\n"
+        
+        ets2_dlc = dlc_data.get('ets2', [])
+        ats_dlc = dlc_data.get('ats', [])
+
+        message += f"🚛 Euro Truck Simulator 2 (数量: {len(ets2_dlc)}):\n"
+        if ets2_dlc:
+            message += "  " + "\n  ".join(ets2_dlc) + "\n"
+        else:
+            message += "  无 ETS2 DLC 记录\n"
+            
+        message += f"🇺🇸 American Truck Simulator (数量: {len(ats_dlc)}):\n"
+        if ats_dlc:
+            message += "  " + "\n  ".join(ats_dlc) + "\n"
+        else:
+            message += "  无 ATS DLC 记录\n"
+
+        message += "\n提示：此列表为 TruckersMP 官方 API 提供的记录。"
+
+        yield event.plain_result(message)
+    # --- DLC 命令处理器结束 ---
 
     @filter.command("绑定")
     async def tmpbind(self, event: AstrMessageEvent):
@@ -700,12 +792,13 @@ class TmpBotPlugin(Star):
 可用命令:
 1. 查询 [ID] - 查询玩家的完整信息（支持 TMP ID 或 Steam ID）。
 2. 状态 [ID]- 查询玩家的实时在线状态（支持 TMP ID 或 Steam ID）。 
-3. 绑定 [ID] - 绑定您的聊天账号与 TMP ID（支持输入 Steam ID 转换）。
-4. 解绑 - 解除账号绑定。
-5. 服务器 - 查看主要TMP服务器的实时状态和在线人数。
-6. help - 显示此帮助信息。
+3. DLC [ID] - 查询玩家拥有的地图 DLC 列表（支持 TMP ID 或 Steam ID）。 **【新增】**
+4. 绑定 [ID] - 绑定您的聊天账号与 TMP ID（支持输入 Steam ID 转换）。
+5. 解绑 - 解除账号绑定。
+6. 服务器 - 查看主要TMP服务器的实时状态和在线人数。
+7. help - 显示此帮助信息。
 
-使用提示: 绑定后可直接发送 查询 或 状态 (无需ID参数)
+使用提示: 绑定后可直接发送 查询/状态/DLC (无需ID参数)
 """
         yield event.plain_result(help_text)
 
