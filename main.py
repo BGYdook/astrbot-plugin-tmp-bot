@@ -30,7 +30,7 @@ except ImportError:
         def __init__(self, message_str: str = "", sender_id: str = "0", match=None):
             self.message_str = message_str
             self._sender_id = sender_id
-            self._match = match  # 使用内部变量避免冲突
+            self._match = match
         def get_sender_id(self) -> str:
             return self._sender_id
         async def plain_result(self, msg):
@@ -327,7 +327,7 @@ class TmpBotPlugin(Star):
             player_info_raw, bans_info, online_status = await asyncio.gather(
                 self._get_player_info(tmp_id), 
                 self._get_player_bans(tmp_id), 
-                self._get_online_status(tmp_id) # 使用新的在线状态查询方法
+                self._get_online_status(tmp_id) # 使用 VTCM API 的在线状态查询方法
             )
             player_info = player_info_raw 
         except PlayerNotFoundException as e:
@@ -529,7 +529,7 @@ class TmpBotPlugin(Star):
         try:
             # 使用 asyncio.gather 并行查询状态和玩家信息
             online_status, player_info = await asyncio.gather(
-                self._get_online_status(tmp_id), 
+                self._get_online_status(tmp_id), # 使用 VTCM API 的在线状态查询方法
                 self._get_player_info(tmp_id)
             )
 
