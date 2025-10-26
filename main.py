@@ -3,7 +3,7 @@
 
 """
 AstrBot-plugin-tmp-bot
-欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.12：强制使用 TruckyApp V3 接口，并修复其解析和 online 判断逻辑)
+欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.13：强制使用 TruckyApp V3 接口，并修复其解析和 online 判断逻辑，优化位置输出为 "国家 城市")
 """
 
 import re
@@ -81,8 +81,8 @@ class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
 
-# 版本号更新为 1.3.12
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.12", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
+# 版本号更新为 1.3.13
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.13", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -95,7 +95,7 @@ class TmpBotPlugin(Star):
     async def initialize(self):
         # 统一 User-Agent，并更新版本号
         self.session = aiohttp.ClientSession(
-            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.3.12'}, 
+            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.3.13'}, 
             timeout=aiohttp.ClientTimeout(total=10)
         )
         logger.info("TMP Bot 插件HTTP会话已创建")
@@ -218,11 +218,11 @@ class TmpBotPlugin(Star):
         except Exception:
             return []
 
-    # --- 采用 TruckyApp V3 官方 API 的在线状态查询方法 (版本 1.3.12 强制 V3 修复) ---
+    # --- 采用 TruckyApp V3 官方 API 的在线状态查询方法 (版本 1.3.13 优化位置显示) ---
     async def _get_online_status(self, tmp_id: str) -> Dict:
         """
         仅使用 TruckyApp V3 地图实时接口查询状态。
-        此版本旨在修复 V3 接口在玩家在线时的特殊响应结构和错误判断。
+        此版本旨在修复 V3 接口在玩家在线时的特殊响应结构和错误判断，并优化位置显示。
         """
         if not self.session: 
             return {'online': False, 'debug_error': 'HTTP会话不可用。'}
@@ -242,7 +242,6 @@ class TmpBotPlugin(Star):
                     data = await response.json()
                     response_data_for_debug = data # 捕获原始数据
                     
-                    # V3 API 可能会返回 {"response": { ... }} 或 { ... }
                     online_data = data.get('response') if 'response' in data else data
                     
                     # === 关键修复点：如果存在 online: true 并且没有 error: true，则判断为在线 ===
@@ -253,20 +252,34 @@ class TmpBotPlugin(Star):
                     )
                     
                     if is_online:
-                        # 成功获取到实时位置数据
                         server_details = online_data.get('serverDetails', {})
                         server_name = server_details.get('name', f"未知服务器 ({online_data.get('server')})")
+                        
+                        # === 关键修改点：优化位置信息的显示 ===
+                        location_data = online_data.get('location', {})
+                        # Trucky V3 接口中，country 和 realName 是 location 字典下的键
+                        country = location_data.get('country')
+                        real_name = location_data.get('realName')
+
+                        formatted_location = '未知位置 (V3)'
+                        if country and real_name:
+                            # 优先组合：国家 城市 (例如：德国 杜塞尔多夫)
+                            formatted_location = f"{country} {real_name}"
+                        elif real_name:
+                            formatted_location = real_name
+                        elif country:
+                            formatted_location = country
+                        # ==================================
                         
                         return {
                             'online': True,
                             'serverName': server_name,
                             'game': 1 if server_details.get('game') == 'ETS2' else 2 if server_details.get('game') == 'ATS' else 0,
-                            'city': {'name': online_data.get('location', '未知位置 (V3)')}, 
+                            'city': {'name': formatted_location}, # 使用格式化后的位置
                             'debug_response': f"Trucky V3 原始数据:\n{json.dumps(response_data_for_debug, ensure_ascii=False, indent=2)}",
                             'debug_error': 'Trucky V3 判断在线，并获取到实时数据。'
                         }
                     
-                    # 玩家离线，或者 V3 API 返回了 {"error": true, "online": false} 的延迟/错误状态
                     debug_msg = 'Trucky V3 API 响应判断为离线。'
                     if online_data and online_data.get('error') is True:
                          debug_msg = 'Trucky V3 API 返回错误/延迟状态 (error: true)。'
