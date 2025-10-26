@@ -3,7 +3,7 @@
 
 """
 AstrBot-plugin-tmp-bot
-欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.3：修复 _get_online_status 方法以适应API变化)
+欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.4：再次修复 _get_online_status 方法的API逻辑)
 """
 
 import re
@@ -30,7 +30,7 @@ except ImportError:
         def __init__(self, message_str: str = "", sender_id: str = "0", match=None):
             self.message_str = message_str
             self._sender_id = sender_id
-            self.match = match
+            self._match = match  # 使用内部变量避免冲突
         def get_sender_id(self) -> str:
             return self._sender_id
         async def plain_result(self, msg):
@@ -81,8 +81,8 @@ class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
 
-# 版本号更新为 1.3.3 (修复在线状态)
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.3", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
+# 版本号更新为 1.3.4
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.4", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -94,7 +94,7 @@ class TmpBotPlugin(Star):
 
     async def initialize(self):
         self.session = aiohttp.ClientSession(
-            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.3.3'}, 
+            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.3.4'}, 
             timeout=aiohttp.ClientTimeout(total=10)
         )
         logger.info("TMP Bot 插件HTTP会话已创建")
@@ -218,7 +218,7 @@ class TmpBotPlugin(Star):
     # --- 修复后的在线状态查询方法（双API尝试，强制返回调试数据） ---
     async def _get_online_status(self, tmp_id: str) -> Dict:
         """
-        优先使用 TruckyApp V2 接口查询实时状态，失败则回退至 TruckersMP 官方 V2 接口（可能延迟）。
+        优先使用 TruckyApp V2 接口查询实时状态，失败则回退至 TruckersMP 官方 V2 接口。
         如果发现玩家在线，将原始数据封装在 debug_response 字段中。
         """
         if not self.session: 
@@ -227,6 +227,7 @@ class TmpBotPlugin(Star):
         # 尝试 1: TruckyApp V2 Player Status API (更可靠的实时状态)
         try:
             trucky_url = f"https://api.truckyapp.com/v2/truckersmp/player/status/{tmp_id}"
+            logger.info(f"尝试 Trucky V2 API: {trucky_url}")
             
             async with self.session.get(trucky_url, timeout=5) as response:
                 
@@ -236,40 +237,46 @@ class TmpBotPlugin(Star):
                     
                     if status_data:
                         # 'game' 字段: 0=离线, 1=ETS2, 2=ATS
-                        is_online = status_data.get('game', 0) > 0 
+                        game_mode_code = status_data.get('game', 0)
+                        is_online = game_mode_code > 0 
                         
                         if is_online:
-                            # TruckyApp V2 接口只提供 server_name, game
+                            # TruckyApp V2 接口提供的在线信息
                             return {
                                 'online': True,
                                 'serverName': status_data.get('server_name', '未知服务器'),
-                                'game': status_data.get('game', 0), 
-                                'city': {'name': status_data.get('city', '未知位置')}, 
+                                'game': game_mode_code, 
+                                'city': {'name': status_data.get('city', status_data.get('location', '未知位置'))}, # 尝试获取 city 或 location
                                 # 调试信息
                                 'debug_response': f"Trucky V2 原始数据:\n{json.dumps(data, ensure_ascii=False, indent=2)}",
                             }
                         
                         # Trucky API 明确返回离线
                         return {'online': False}
+                    else:
+                        logger.info(f"Trucky V2 API response data is empty for {tmp_id}. Status 200 but no response content.")
+                        
+        except asyncio.TimeoutError:
+            logger.error(f"Trucky V2 API 请求超时: {tmp_id}")
+        except aiohttp.ClientError as e:
+            logger.error(f"Trucky V2 API 网络错误: {e.__class__.__name__}")
+        except Exception as e:
+            logger.error(f"Trucky V2 API 解析失败: {e.__class__.__name__}")
         
-        except Exception:
-            # 请求失败，继续尝试 TruckersMP 官方 V2 接口
-            pass 
-
+        
         # 尝试 2: TruckersMP 官方 V2 玩家信息 API (回退，状态信息可能延迟)
         try:
-            # V2 接口主要用于获取玩家信息，其中的 'online' 字段可能不那么实时。
-            player_info = await self._get_player_info(tmp_id) 
+            player_info = await self._get_player_info(tmp_id) # 调用 https://api.truckersmp.com/v2/player/{tmp_id}
             is_online = player_info.get('online', False)
             
             if is_online:
-                # TruckersMP V2 接口信息有限
+                # V2 接口的在线信息非常有限且可能不实时
                 return {
                     'online': True,
-                    'serverName': player_info.get('serverName', '未知服务器'), # V2 接口没有实时 serverName
-                    'game': 0, # V2 接口没有实时 game mode
-                    'city': {'name': '未知位置'},
-                    'debug_error': 'TMP V2 API 缺乏实时在线细节。'
+                    'serverName': player_info.get('serverName', '未知服务器'),
+                    'game': 0, # V2 接口没有实时的 game mode
+                    'city': {'name': '未知位置 (TMP V2)'},
+                    'debug_error': 'Trucky API失败，已回退到 TMP V2 API。状态信息有限且可能延迟。'
                 }
             
             # 官方 V2 明确返回离线
@@ -277,10 +284,10 @@ class TmpBotPlugin(Star):
 
         except PlayerNotFoundException:
             # 玩家不存在
-            raise # 传递给上层处理，保持原有逻辑
-        except Exception:
+            raise # 传递给上层处理
+        except Exception as e:
             # 两个API都失败了
-            return {'online': False, 'debug_error': '两个在线API都无法连接或返回有效数据。'}
+            return {'online': False, 'debug_error': f'两个在线API都无法连接或返回有效数据。最终错误: {e.__class__.__name__}'}
     # --- 在线状态查询方法结束 ---
 
 
@@ -294,7 +301,7 @@ class TmpBotPlugin(Star):
 
 
     # ******************************************************
-    # 命令处理器 (修改 tmpquery 和 tmpstatus 以显示调试信息)
+    # 命令处理器 
     # ******************************************************
     
     @filter.command("查询") 
