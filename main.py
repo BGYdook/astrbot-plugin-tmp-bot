@@ -3,7 +3,7 @@
 
 """
 AstrBot-plugin-tmp-bot
-欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.9：切换到 TruckyApp V3 地图实时状态 API + 增强调试)
+欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.10：修复 TruckyApp V3 响应结构解析，优化在线判断)
 """
 
 import re
@@ -81,8 +81,8 @@ class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
 
-# 版本号更新为 1.3.9
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.9", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
+# 版本号更新为 1.3.10
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.10", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -95,7 +95,7 @@ class TmpBotPlugin(Star):
     async def initialize(self):
         # 统一 User-Agent，并更新版本号
         self.session = aiohttp.ClientSession(
-            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.3.9'}, 
+            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.3.10'}, 
             timeout=aiohttp.ClientTimeout(total=10)
         )
         logger.info("TMP Bot 插件HTTP会话已创建")
@@ -218,7 +218,7 @@ class TmpBotPlugin(Star):
         except Exception:
             return []
 
-    # --- 采用 TruckyApp V3 官方 API 的在线状态查询方法 (版本 1.3.9 增强调试) ---
+    # --- 采用 TruckyApp V3 官方 API 的在线状态查询方法 (版本 1.3.10 最终修复) ---
     async def _get_online_status(self, tmp_id: str) -> Dict:
         """
         使用 TruckyApp V3 地图实时接口查询状态。
@@ -242,20 +242,26 @@ class TmpBotPlugin(Star):
                 if status == 200:
                     data = await response.json()
                     response_data_for_debug = data # 捕获原始数据
-
-                    # 检查是否有关键字段来判断是否在线
-                    # V3 接口在在线时会返回实际的玩家信息，离线时返回空或只包含 playerID 的对象。
-                    is_online = bool(data and (data.get('server') or data.get('location') or data.get('game')))
+                    
+                    # === 关键修复点：从 'response' 键下获取实际数据 ===
+                    online_data = data.get('response') 
+                    
+                    # 检查 'response' 键下是否有数据，并且 'online' 字段是否为 True
+                    is_online = bool(online_data and online_data.get('online') is True)
                     
                     if is_online:
-                        game_mode_code = data.get('game', 0)
+                        # 从 serverDetails 中获取服务器名
+                        server_details = online_data.get('serverDetails', {})
+                        server_name = server_details.get('name', f"未知服务器 ({online_data.get('server')})")
+                        
+                        game_mode_code = online_data.get('game', 0)
                         
                         return {
-                            'online': True, # 确保存在布尔型 online 字段
-                            'serverName': data.get('server', '未知服务器 (V3)'),
-                            'game': game_mode_code, 
-                            'city': {'name': data.get('location', '未知位置 (V3)')}, 
-                            # 返回原始响应，用于调试
+                            'online': True,
+                            'serverName': server_name,
+                            # 尝试将 Trucky 的游戏字符串 'ETS2'/'ATS' 转换为数字代码 1/2
+                            'game': 1 if server_details.get('game') == 'ETS2' else 2 if server_details.get('game') == 'ATS' else 0,
+                            'city': {'name': online_data.get('location', '未知位置 (V3)')}, 
                             'debug_response': f"Trucky V3 原始数据:\n{json.dumps(response_data_for_debug, ensure_ascii=False, indent=2)}",
                         }
                     
@@ -268,7 +274,6 @@ class TmpBotPlugin(Star):
                 
                 else:
                     try:
-                        # 尝试读取非 200 响应的 JSON 内容，以便调试
                         response_data_for_debug = await response.json()
                     except:
                         # 无法解析为 JSON，可能是文本错误或空白
