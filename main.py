@@ -3,7 +3,7 @@
 
 """
 AstrBot-plugin-tmp-bot
-欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.13：强制使用 TruckyApp V3 接口，并修复其解析和 online 判断逻辑，优化位置输出为 "国家 城市")
+欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.14：修正 tmpquery 和 tmpstatus 中位置信息的获取逻辑)
 """
 
 import re
@@ -81,8 +81,8 @@ class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
 
-# 版本号更新为 1.3.13
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.13", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
+# 版本号更新为 1.3.14
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.14", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -95,7 +95,7 @@ class TmpBotPlugin(Star):
     async def initialize(self):
         # 统一 User-Agent，并更新版本号
         self.session = aiohttp.ClientSession(
-            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.3.13'}, 
+            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.3.14'}, 
             timeout=aiohttp.ClientTimeout(total=10)
         )
         logger.info("TMP Bot 插件HTTP会话已创建")
@@ -441,6 +441,7 @@ class TmpBotPlugin(Star):
             server_name = online_status.get('serverName', '未知服务器')
             game_mode_code = online_status.get('game', 0)
             game_mode = "欧卡2" if game_mode_code == 1 else "美卡" if game_mode_code == 2 else "未知游戏"
+            # 关键修正：确保能获取到 _get_online_status 中 city 字典下的 name
             city = online_status.get('city', {}).get('name', '未知城市') 
             
             message += f"在线状态: 在线\n"
@@ -592,6 +593,7 @@ class TmpBotPlugin(Star):
             server_name = online_status.get('serverName', '未知服务器')
             game_mode_code = online_status.get('game', 0)
             game_mode = "欧卡2" if game_mode_code == 1 else "美卡2" if game_mode_code == 2 else "未知游戏"
+            # 关键修正：确保能获取到 _get_online_status 中 city 字典下的 name
             city = online_status.get('city', {}).get('name', '未知城市')
             
             message += f"在线状态: 在线\n"
