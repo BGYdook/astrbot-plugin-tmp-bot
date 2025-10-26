@@ -4,6 +4,8 @@
 """
 AstrBot-plugin-tmp-bot
 欧卡2TMP查询插件 - AstrBot版本 (版本 1.2.9：恢复标准命令匹配模式，依赖框架处理群聊前缀)
+
+注意：已根据API变动修复了 _get_online_status 方法，改用 TruckyApp 的 /v2/truckersmp/player/status/:id 接口。
 """
 
 import re
@@ -228,21 +230,56 @@ class TmpBotPlugin(Star):
         except Exception:
             return []
 
+    # --- 修复后的在线状态查询方法 ---
     async def _get_online_status(self, tmp_id: str) -> Dict:
-        if not self.session: return {'online': False}
+        """
+        根据 TMP ID 查询玩家的实时在线状态和位置信息。
+        改用 TruckyApp 的 /v2/truckersmp/player/status/:id 接口。
+        """
+        if not self.session: 
+            return {'online': False}
 
         try:
-            url = f"https://api.truckyapp.com/v3/map/online?playerID={tmp_id}"
+            # 更改为 TruckyApp 的 /v2/truckersmp/player/status/:id 接口
+            url = f"https://api.truckyapp.com/v2/truckersmp/player/status/{tmp_id}"
+            
             async with self.session.get(url, timeout=10) as response:
                 if response.status == 200:
                     data = await response.json()
-                    response_data = data.get('response', {})
-                    if isinstance(response_data, list) and response_data:
-                        return response_data[0]
-                    return {'online': False}
+                    status_data = data.get('response', {})
+                    
+                    if status_data:
+                        # 'game' 字段: 0=离线, 1=ETS2, 2=ATS
+                        is_online = status_data.get('game', 0) > 0 and status_data.get('server_name') is not None
+                        
+                        # 构建与原逻辑兼容的返回字典结构
+                        return {
+                            'online': is_online,
+                            'serverName': status_data.get('server_name', '未知服务器'),
+                            # 'game' 字段
+                            'game': status_data.get('game', 0), 
+                            # 此接口不提供城市信息，用默认值兼容原代码的 message 构造
+                            'city': {'name': '未知位置'} 
+                        }
+                    
+                    # API 成功返回，但响应数据为空或不包含有效信息
+                    return {'online': False} 
+                
+                # 404 或其他错误状态码，视为离线或查询失败
+                logger.error(f"查询 TMP ID {tmp_id} 在线状态API返回错误: {response.status}")
                 return {'online': False}
-        except Exception:
+                
+        except aiohttp.ClientError as e:
+            logger.error(f"查询 TMP ID {tmp_id} 在线状态网络请求失败: {e}")
             return {'online': False}
+        except asyncio.TimeoutError:
+            logger.error(f"查询 TMP ID {tmp_id} 在线状态超时")
+            return {'online': False}
+        except Exception as e:
+            logger.error(f"查询 TMP ID {tmp_id} 在线状态未知错误: {e}")
+            return {'online': False}
+    # --- 修复后的在线状态查询方法结束 ---
+
 
     def _format_ban_info(self, bans_info: List[Dict]) -> Tuple[int, List[Dict]]:
         """只返回历史封禁次数和最新的封禁记录（按时间倒序）"""
@@ -371,8 +408,11 @@ class TmpBotPlugin(Star):
         
         if online_status and online_status.get('online'):
             server_name = online_status.get('serverName', '未知服务器')
-            game_mode = "欧卡2" if online_status.get('game', 0) == 1 else "美卡" if online_status.get('game', 0) == 2 else "未知游戏"
-            city = online_status.get('city', {}).get('name', '未知城市')
+            # 兼容修改后的 _get_online_status 方法的返回
+            game_mode_code = online_status.get('game', 0)
+            game_mode = "欧卡2" if game_mode_code == 1 else "美卡" if game_mode_code == 2 else "未知游戏"
+            city = online_status.get('city', {}).get('name', '未知城市') # 城市信息现在可能为“未知城市”
+            
             message += f"在线状态: 在线\n"
             message += f"所在服务器: {server_name}\n"
             message += f"所在位置: {city} ({game_mode})\n"
@@ -391,7 +431,7 @@ class TmpBotPlugin(Star):
         input_id = match.group(1) if match else None
 
         if not input_id:
-            yield event.plain_result("请输入正确的玩家编号，格式：绑定 [TMP ID]")
+            yield event.plain_result("请输入正确的玩家编号，格式：绑定 [TMP ID] 或 绑定 [Steam ID]")
             return
 
         tmp_id = input_id
@@ -481,6 +521,7 @@ class TmpBotPlugin(Star):
             return
 
         try:
+            # 使用 asyncio.gather 并行查询状态和玩家信息
             online_status, player_info = await asyncio.gather(
                 self._get_online_status(tmp_id), 
                 self._get_player_info(tmp_id)
@@ -505,8 +546,11 @@ class TmpBotPlugin(Star):
         
         if online_status and online_status.get('online'):
             server_name = online_status.get('serverName', '未知服务器')
-            game_mode = "欧卡2" if online_status.get('game', 0) == 1 else "美卡2" if online_status.get('game', 0) == 2 else "未知游戏"
-            city = online_status.get('city', {}).get('name', '未知城市')
+            # 兼容修改后的 _get_online_status 方法的返回
+            game_mode_code = online_status.get('game', 0)
+            game_mode = "欧卡2" if game_mode_code == 1 else "美卡2" if game_mode_code == 2 else "未知游戏"
+            city = online_status.get('city', {}).get('name', '未知城市') # 城市信息现在可能为“未知城市”
+            
             message += f"在线状态: 在线\n"
             message += f"所在服务器: {server_name}\n"
             message += f"所在位置: {city} ({game_mode})\n"
@@ -570,7 +614,7 @@ class TmpBotPlugin(Star):
 5. 服务器 - 查看主要TMP服务器的实时状态和在线人数。
 6. help - 显示此帮助信息。
 
-使用提示: 绑定后可直接发送 查询 或 定位 (无需ID参数)
+使用提示: 绑定后可直接发送 查询 或 状态 (无需ID参数)
 """
         yield event.plain_result(help_text)
 
