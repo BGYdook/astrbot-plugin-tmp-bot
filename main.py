@@ -3,7 +3,7 @@
 
 """
 AstrBot-plugin-tmp-bot
-欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.18：加入 DLC 查询功能)
+欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.19：优化 DLC 查询逻辑，聚焦地图扩展包)
 """
 
 import re
@@ -69,12 +69,8 @@ def _format_timestamp_to_readable(timestamp_str: Optional[str]) -> str:
     
     try:
         # TruckersMP V2 返回 ISO 8601 (e.g., "2024-05-28T14:30:00.000Z")
-        # 清理字符串，去除毫秒和时区指示符，以便简单解析
         clean_str = timestamp_str.replace('T', ' ').split('.')[0].replace('Z', '')
-        
-        # 解析为 UTC datetime 对象
         dt_utc = datetime.strptime(clean_str, '%Y-%m-%d %H:%M:%S')
-
         # 直接显示 UTC 时间，并标注时区
         return dt_utc.strftime('%Y-%m-%d %H:%M:%S') + " (UTC)"
         
@@ -83,32 +79,54 @@ def _format_timestamp_to_readable(timestamp_str: Optional[str]) -> str:
         return timestamp_str.split('T')[0] if 'T' in timestamp_str else timestamp_str
 # -----------------------------
 
-# --- 辅助函数：获取 DLC 列表 ---
+# --- 辅助函数：获取 DLC 列表 (优化后) ---
 def _get_dlc_info(player_info: Dict) -> Dict[str, List[str]]:
-    """从玩家信息中提取并分组 DLC 列表。"""
+    """从玩家信息中提取并分组主要的地图 DLC 列表。"""
     dlc_list = player_info.get('dlc', [])
     
-    # 预定义的已知 DLC 映射 (可能需要根据实际 API 响应调整)
-    ets2_dlc = []
-    ats_dlc = []
+    ets2_dlc: List[str] = []
+    ats_dlc: List[str] = []
+
+    # 包含所有地图扩展包名称的集合（基于官方 API 响应的前缀）
+    ETS2_MAP_PREFIX = "Euro Truck Simulator 2 - "
+    ATS_MAP_PREFIX = "American Truck Simulator - "
+    
+    # 已知地图扩展包的后缀关键词（排除无关的涂装、货物等）
+    MAP_KEYWORDS = [
+        "Going East!", "Scandinavia", "Vive la France !", "Italia", "Beyond the Baltic Sea", 
+        "Road to the Black Sea", "Iberia", "West Balkans", "Heart of Russia", 
+        "New Mexico", "Oregon", "Washington", "Utah", "Idaho", "Colorado", 
+        "Wyoming", "Montana", "Texas", "Oklahoma", "Kansas", "Nebraska"
+    ]
 
     if isinstance(dlc_list, list):
-        # 假设 DLC 名称中包含游戏名称缩写 (ETS2/ATS)
         for dlc in dlc_list:
-            dlc_name = dlc.get('name', '')
-            if 'euro truck simulator 2' in dlc_name.lower() or 'ets2' in dlc_name.lower():
-                ets2_dlc.append(dlc_name)
-            elif 'american truck simulator' in dlc_name.lower() or 'ats' in dlc_name.lower():
-                ats_dlc.append(dlc_name)
-            # 对于无法分类的，我们暂时忽略，因为用户通常只关心地图 DLC
-    
-    # DLC 信息在 TMP V2 API 中返回的格式可能是一个列表，列表项包含 name 和 shortname。
-    # 我们只返回 DLC 的名称列表。
-    
+            dlc_name_full = dlc.get('name', '').strip()
+            
+            # 1. ETS2 DLC
+            if dlc_name_full.startswith(ETS2_MAP_PREFIX):
+                name = dlc_name_full[len(ETS2_MAP_PREFIX):].strip()
+                if name in MAP_KEYWORDS:
+                    ets2_dlc.append(name)
+                # 特殊处理：免费 DLC
+                elif name == "Going East!": # Going East! 是第一个，但仍是地图扩展
+                     ets2_dlc.append(name)
+                elif "Germany Rework" in name:
+                     ets2_dlc.append("Germany Rework")
+                     
+            # 2. ATS DLC
+            elif dlc_name_full.startswith(ATS_MAP_PREFIX):
+                name = dlc_name_full[len(ATS_MAP_PREFIX):].strip()
+                # 排除免费的 Arizona 和 Nevada
+                if name not in ["Arizona", "Nevada"] and name in MAP_KEYWORDS: 
+                    ats_dlc.append(name)
+                elif name in ["Arizona", "Nevada"]: # 明确标注免费 DLC
+                    ats_dlc.append(f"{name} (基础地图)")
+
+
     return {
-        'ets2': ets2_dlc,
-        'ats': ats_dlc,
-        'all': [d.get('name', '未知DLC') for d in dlc_list if isinstance(d, dict)]
+        'ets2': sorted(list(set(ets2_dlc))), # 去重并排序
+        'ats': sorted(list(set(ats_dlc)))
     }
 # -----------------------------
 
@@ -134,8 +152,8 @@ class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
 
-# 版本号更新为 1.3.18
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.18", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
+# 版本号更新为 1.3.19
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.19", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -148,7 +166,7 @@ class TmpBotPlugin(Star):
     async def initialize(self):
         # 统一 User-Agent，并更新版本号
         self.session = aiohttp.ClientSession(
-            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.3.18'}, 
+            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.3.19'}, 
             timeout=aiohttp.ClientTimeout(total=10)
         )
         logger.info("TMP Bot 插件HTTP会话已创建")
@@ -487,6 +505,7 @@ class TmpBotPlugin(Star):
         total_km = stats_info.get('total_km', 0)
         daily_km = stats_info.get('daily_km', 0)
         
+        # 注意：这里使用 : , 格式化数字，并将逗号替换为空格以适应中文数字分隔习惯
         message += f"🚩历史里程: {total_km:,} km\n".replace(',', ' ')
         message += f"🚩今日里程: {daily_km:,} km\n".replace(',', ' ')
         
@@ -580,25 +599,31 @@ class TmpBotPlugin(Star):
         player_name = player_info.get('name', '未知')
         dlc_data = _get_dlc_info(player_info)
         
-        message = f"📦 玩家 {player_name} (ID: {tmp_id}) 的 DLC 列表\n"
-        message += "=" * 25 + "\n"
+        message = f"📦 玩家 {player_name} (ID: {tmp_id}) 的主要地图 DLC 列表\n"
+        message += "=" * 30 + "\n"
         
         ets2_dlc = dlc_data.get('ets2', [])
         ats_dlc = dlc_data.get('ats', [])
 
         message += f"🚛 Euro Truck Simulator 2 (数量: {len(ets2_dlc)}):\n"
         if ets2_dlc:
-            message += "  " + "\n  ".join(ets2_dlc) + "\n"
+            # 每行最多显示 3 个 DLC
+            chunks = [ets2_dlc[i:i + 3] for i in range(0, len(ets2_dlc), 3)]
+            for chunk in chunks:
+                 message += "  " + " | ".join(chunk) + "\n"
         else:
-            message += "  无 ETS2 DLC 记录\n"
+            message += "  无 ETS2 地图 DLC 记录\n"
             
-        message += f"🇺🇸 American Truck Simulator (数量: {len(ats_dlc)}):\n"
+        message += f"\n🇺🇸 American Truck Simulator (数量: {len(ats_dlc)}):\n"
         if ats_dlc:
-            message += "  " + "\n  ".join(ats_dlc) + "\n"
+            # 每行最多显示 3 个 DLC
+            chunks = [ats_dlc[i:i + 3] for i in range(0, len(ats_dlc), 3)]
+            for chunk in chunks:
+                 message += "  " + " | ".join(chunk) + "\n"
         else:
-            message += "  无 ATS DLC 记录\n"
+            message += "  无 ATS 地图 DLC 记录\n"
 
-        message += "\n提示：此列表为 TruckersMP 官方 API 提供的记录。"
+        message += "\n(此列表仅展示主要地图扩展包)"
 
         yield event.plain_result(message)
     # --- DLC 命令处理器结束 ---
@@ -792,7 +817,7 @@ class TmpBotPlugin(Star):
 可用命令:
 1. 查询 [ID] - 查询玩家的完整信息（支持 TMP ID 或 Steam ID）。
 2. 状态 [ID]- 查询玩家的实时在线状态（支持 TMP ID 或 Steam ID）。 
-3. DLC [ID] - 查询玩家拥有的地图 DLC 列表（支持 TMP ID 或 Steam ID）。 **【新增】**
+3. DLC [ID] - 查询玩家拥有的主要地图 DLC 列表（支持 TMP ID 或 Steam ID）。
 4. 绑定 [ID] - 绑定您的聊天账号与 TMP ID（支持输入 Steam ID 转换）。
 5. 解绑 - 解除账号绑定。
 6. 服务器 - 查看主要TMP服务器的实时状态和在线人数。
