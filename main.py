@@ -3,7 +3,7 @@
 
 """
 AstrBot-plugin-tmp-bot
-欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.5：切换到 da.vtcm.link/player/info API)
+欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.6：切换到 TMP 官方 V2 API 查询在线状态)
 """
 
 import re
@@ -30,7 +30,7 @@ except ImportError:
         def __init__(self, message_str: str = "", sender_id: str = "0", match=None):
             self.message_str = message_str
             self._sender_id = sender_id
-            self._match = match
+            self._match = match  # 使用内部变量避免冲突
         def get_sender_id(self) -> str:
             return self._sender_id
         async def plain_result(self, msg):
@@ -81,8 +81,8 @@ class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
 
-# 版本号更新为 1.3.5
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.5", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
+# 版本号更新为 1.3.6
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.6", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -94,7 +94,7 @@ class TmpBotPlugin(Star):
 
     async def initialize(self):
         self.session = aiohttp.ClientSession(
-            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.3.5'}, 
+            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.3.6'}, 
             timeout=aiohttp.ClientTimeout(total=10)
         )
         logger.info("TMP Bot 插件HTTP会话已创建")
@@ -215,67 +215,64 @@ class TmpBotPlugin(Star):
         except Exception:
             return []
 
-    # --- 采用 da.vtcm.link API 的在线状态查询方法 ---
+    # --- 采用 TruckersMP V2 官方 API 的在线状态查询方法 (新逻辑) ---
     async def _get_online_status(self, tmp_id: str) -> Dict:
         """
-        使用 da.vtcm.link/player/info 接口查询实时状态。
-        注意：此API为第三方，结构未经验证，解析基于合理推测。
+        使用 TruckersMP V2 官方接口 (api.truckersmp.com/v2/player/{id}) 查询在线状态。
+        注意：该接口的在线状态信息可能存在延迟或不准确，且实时详情有限。
         """
         if not self.session: 
             return {'online': False, 'debug_error': 'HTTP会话不可用。'}
         
-        # 假设 API 接受 TMP ID 作为查询参数
-        vtcm_url = f"https://da.vtcm.link/player/info?id={tmp_id}"
-        logger.info(f"尝试 VTCM API: {vtcm_url}")
+        tmp_url = f"https://api.truckersmp.com/v2/player/{tmp_id}"
+        logger.info(f"尝试 TMP 官方 V2 API: {tmp_url}")
 
         try:
-            async with self.session.get(vtcm_url, timeout=5) as response:
+            async with self.session.get(tmp_url, timeout=5) as response:
                 
                 if response.status == 200:
                     data = await response.json()
+                    status_data = data.get('response', {})
                     
-                    # === 以下是基于常见 TMP 辅助 API 结构的推测解析 ===
-                    
-                    if not data:
-                        return {'online': False, 'debug_error': 'VTCM API 返回空数据或非标准响应。'}
+                    if not status_data:
+                        return {'online': False, 'debug_error': 'TMP V2 API 返回空数据。'}
 
-                    # 尝试获取在线状态字段 (通常是 'online' 或 'is_online'，或通过游戏模式判断)
-                    is_online = data.get('online', False) or data.get('is_online', False)
+                    # 官方 V2 接口的在线状态字段
+                    is_online = status_data.get('online', False)
                     
                     if is_online:
-                        # 解析在线详情
-                        game_mode_code = data.get('game', 0) # 假设 game = 1/2 代表 ETS2/ATS
-                        
+                        # V2 接口的在线信息非常有限
                         return {
                             'online': True,
-                            # 尝试获取 serverName，或退回到 server/server_name
-                            'serverName': data.get('serverName', data.get('server', '未知服务器')), 
-                            'game': game_mode_code, 
-                            # 尝试获取 city，或退回到 location/current_location
-                            'city': {'name': data.get('city', data.get('location', '未知位置'))}, 
+                            # TMP V2 接口通常只返回 serverName
+                            'serverName': status_data.get('serverName', '未知服务器'), 
+                            'game': 0, # V2 接口无法区分 ETS2/ATS 或提供 game code
+                            'city': {'name': '未知位置 (TMP V2)'}, 
                             # 调试信息
-                            'debug_response': f"VTCM API 原始数据:\n{json.dumps(data, ensure_ascii=False, indent=2)}",
+                            'debug_response': f"TMP V2 原始数据:\n{json.dumps(data, ensure_ascii=False, indent=2)}",
+                            'debug_error': '注意：此状态由 TMP 官方 V2 API 提供，可能存在延迟。'
                         }
                     
                     # 明确返回离线
                     return {'online': False}
 
                 elif response.status == 404:
-                    raise PlayerNotFoundException(f"玩家 {tmp_id} 不存在或 VTCM API 未找到该玩家。")
+                    # 404 意味着玩家不存在，但为了避免重复调用，我们利用此处异常
+                    raise PlayerNotFoundException(f"玩家 {tmp_id} 不存在。")
                 else:
-                    return {'online': False, 'debug_error': f"VTCM API 返回非 200 状态码: {response.status}"}
+                    return {'online': False, 'debug_error': f"TMP V2 API 返回非 200 状态码: {response.status}"}
 
         except PlayerNotFoundException:
-            raise # 玩家不存在，向上层抛出
+            raise # 玩家不存在，向上层抛出，避免双重处理
         except asyncio.TimeoutError:
-            logger.error(f"VTCM API 请求超时: {tmp_id}")
-            return {'online': False, 'debug_error': 'VTCM API 请求超时。'}
+            logger.error(f"TMP V2 API 请求超时: {tmp_id}")
+            return {'online': False, 'debug_error': 'TMP V2 API 请求超时。'}
         except aiohttp.ClientError as e:
-            logger.error(f"VTCM API 网络错误: {e.__class__.__name__}")
-            return {'online': False, 'debug_error': f'VTCM API 网络错误: {e.__class__.__name__}。'}
+            logger.error(f"TMP V2 API 网络错误: {e.__class__.__name__}")
+            return {'online': False, 'debug_error': f'TMP V2 API 网络错误: {e.__class__.__name__}。'}
         except Exception as e:
-            logger.error(f"VTCM API 解析失败: {e.__class__.__name__}")
-            return {'online': False, 'debug_error': f'VTCM API 解析失败: {e.__class__.__name__}。'}
+            logger.error(f"TMP V2 API 解析失败: {e.__class__.__name__}")
+            return {'online': False, 'debug_error': f'TMP V2 API 解析失败: {e.__class__.__name__}。'}
     # --- 在线状态查询方法结束 ---
 
 
@@ -323,11 +320,11 @@ class TmpBotPlugin(Star):
             return
         
         try:
-            # TMP官方信息和封禁信息保持不变
+            # 注意：_get_player_info 和 _get_online_status 现在都使用了同一个 API。
             player_info_raw, bans_info, online_status = await asyncio.gather(
                 self._get_player_info(tmp_id), 
                 self._get_player_bans(tmp_id), 
-                self._get_online_status(tmp_id) # 使用 VTCM API 的在线状态查询方法
+                self._get_online_status(tmp_id) 
             )
             player_info = player_info_raw 
         except PlayerNotFoundException as e:
@@ -527,9 +524,9 @@ class TmpBotPlugin(Star):
             return
 
         try:
-            # 使用 asyncio.gather 并行查询状态和玩家信息
+            # 注意：_get_player_info 和 _get_online_status 现在都使用了同一个 API。
             online_status, player_info = await asyncio.gather(
-                self._get_online_status(tmp_id), # 使用 VTCM API 的在线状态查询方法
+                self._get_online_status(tmp_id), 
                 self._get_player_info(tmp_id)
             )
 
