@@ -3,7 +3,7 @@
 
 """
 AstrBot-plugin-tmp-bot
-欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.21：里程数据源切换为 da.vtcm.link)
+欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.23：服务器列表按 API 原始顺序显示)
 """
 
 import re
@@ -146,8 +146,8 @@ class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
 
-# 版本号更新为 1.3.21
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.21", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
+# 版本号更新为 1.3.23
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.23", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -160,7 +160,7 @@ class TmpBotPlugin(Star):
     async def initialize(self):
         # 统一 User-Agent，并更新版本号
         self.session = aiohttp.ClientSession(
-            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.3.21'}, 
+            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.3.23'}, 
             timeout=aiohttp.ClientTimeout(total=10)
         )
         logger.info("TMP Bot 插件HTTP会话已创建")
@@ -900,25 +900,56 @@ class TmpBotPlugin(Star):
                     servers = data.get('response', [])
                     
                     if servers and isinstance(servers, list):
-                        message = "TMP服务器状态\n"
-                        message += "=" * 25 + "\n"
                         
-                        online_servers = sorted(
-                            [s for s in servers if s.get('online')],
-                            key=lambda s: s.get('players', 0),
-                            reverse=True
-                        )[:6]
+                        # 筛选所有在线服务器，不进行排序，保持 API 原始顺序
+                        online_servers = [s for s in servers if s.get('online')]
                         
-                        for server in online_servers:
-                            name, players, max_players, queue = server.get('name', '未知'), server.get('players', 0), server.get('maxplayers', 0), server.get('queue', 0)
-                            status_str = '[在线]' if players > 0 else '[空闲]'
+                        total_players = sum(s.get('players', 0) for s in online_servers)
+
+                        message = f"TMP服务器状态 (总在线数: {len(online_servers)}个)\n"
+                        message += "=" * 30 + "\n"
+                        message += f"**[当前总玩家数: {total_players:,}]**\n\n".replace(',', ' ')
+                        
+                        if online_servers:
                             
-                            message += f"{status_str} {name}\n"
-                            message += f"  在线人数: {players}/{max_players}"
-                            if queue > 0: message += f" (排队: {queue})"
-                            message += "\n"
+                            for server in online_servers:
+                                name = server.get('name', '未知')
+                                players = server.get('players', 0)
+                                max_players = server.get('maxplayers', 0)
+                                queue = server.get('queue', 0)
+                                
+                                # 使用绿色圆点表示在线
+                                status_str = '🟢' 
+                                
+                                # 服务器特性/游戏模式提示
+                                feature_str = ""
+                                if server.get('speedLimiter') is False:
+                                    feature_str += " | 无限速"
+                                if server.get('collisions') is False:
+                                    feature_str += " | 无碰撞"
+
+                                message += f"服务器: {status_str} {name}\n"
+                                
+                                players_str = f"玩家人数: {players:,}/{max_players:,}".replace(',', ' ')
+                                
+                                if queue > 0: 
+                                    message += f"  {players_str} (排队: {queue})"
+                                else:
+                                    message += f"  {players_str}"
+                                
+                                # 如果有显著特性，则显示
+                                if feature_str:
+                                    # 提取 "碰撞" 关键字并使用💥符号
+                                    if server.get('collisions') is False:
+                                        message += "\n  特性: 💥无碰撞"
+                                    else:
+                                        message += "\n  特性: 💥碰撞"
+                                    
+                                message += "\n"
                         
                         if not online_servers: message += "暂无在线服务器"
+                        
+                        message += "=" * 30 
                         yield event.plain_result(message)
                     else:
                         yield event.plain_result("查询服务器状态失败，API数据异常。")
@@ -939,7 +970,7 @@ class TmpBotPlugin(Star):
 4. 排行 - 查询 TruckersMP 总里程排行榜前10名。
 5. 绑定 [ID] - 绑定您的聊天账号与 TMP ID（支持输入 Steam ID 转换）。
 6. 解绑 - 解除账号绑定。
-7. 服务器 - 查看主要TMP服务器的实时状态和在线人数。
+7. 服务器 - 查看所有在线的TMP服务器的实时状态和在线人数。
 8. help - 显示此帮助信息。
 
 使用提示: 绑定后可直接发送 查询/状态/DLC (无需ID参数)
