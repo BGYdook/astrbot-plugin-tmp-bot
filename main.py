@@ -3,7 +3,7 @@
 
 """
 AstrBot-plugin-tmp-bot
-欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.24：服务器列表按游戏类型分组显示)
+欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.26：修复在线状态误判问题)
 """
 
 import re
@@ -146,8 +146,8 @@ class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
 
-# 版本号更新为 1.3.24
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.24", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
+# 版本号更新为 1.3.26
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.26", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -160,7 +160,7 @@ class TmpBotPlugin(Star):
     async def initialize(self):
         # 统一 User-Agent，并更新版本号
         self.session = aiohttp.ClientSession(
-            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.3.24'}, 
+            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.3.26'}, 
             timeout=aiohttp.ClientTimeout(total=10)
         )
         logger.info("TMP Bot 插件HTTP会话已创建")
@@ -364,6 +364,7 @@ class TmpBotPlugin(Star):
     async def _get_online_status(self, tmp_id: str) -> Dict:
         """
         仅使用 TruckyApp V3 地图实时接口查询状态。
+        【版本 1.3.26 优化：修复即使 online:true 仍判断为离线的问题】
         """
         if not self.session: 
             return {'online': False, 'debug_error': 'HTTP会话不可用。'}
@@ -376,17 +377,22 @@ class TmpBotPlugin(Star):
             async with self.session.get(trucky_url, timeout=5) as response:
                 
                 status = response.status
+                raw_data = await response.json()
                 
                 if status == 200:
-                    data = await response.json()
-                    online_data = data.get('response') if 'response' in data else data
+                    online_data = raw_data.get('response') if 'response' in raw_data else raw_data
                     
+                    # 关键修复点：只要 'online' 字段为 True，就认为在线，
+                    # 忽略 'error' 字段可能存在的干扰 (Trucky API 在同步延迟时可能同时返回 online:true 和 error:true)
                     is_online = bool(
                         online_data and 
                         online_data.get('online') is True and 
-                        online_data.get('error') is not True
+                        online_data.get('server') # 确保有服务器ID，防止空数据
                     )
                     
+                    debug_msg = f"Trucky V3 原始数据:\n{json.dumps(raw_data, indent=2)}"
+
+
                     if is_online:
                         server_details = online_data.get('serverDetails', {})
                         server_name = server_details.get('name', f"未知服务器 ({online_data.get('server')})")
@@ -415,22 +421,22 @@ class TmpBotPlugin(Star):
                             'serverName': server_name,
                             'game': 1 if server_details.get('game') == 'ETS2' else 2 if server_details.get('game') == 'ATS' else 0,
                             'city': {'name': formatted_location}, 
-                            'debug_error': 'Trucky V3 判断在线，并获取到实时数据。'
+                            'debug_error': 'Trucky V3 判断在线，并获取到实时数据。',
+                            'raw_data': debug_msg
                         }
                     
-                    debug_msg = 'Trucky V3 API 响应判断为离线。'
-                    if online_data and online_data.get('error') is True:
-                         debug_msg = 'Trucky V3 API 返回错误/延迟状态 (error: true)。'
-                         
+                    
                     return {
                         'online': False,
-                        'debug_error': debug_msg,
+                        'debug_error': 'Trucky V3 API 响应判断为离线。',
+                        'raw_data': debug_msg
                     }
                 
                 else:
                     return {
                         'online': False, 
                         'debug_error': f"Trucky V3 API 返回非 200 状态码: {status}",
+                        'raw_data': f"Trucky V3 原始数据:\n{json.dumps(raw_data, indent=2)}"
                     }
 
         except Exception as e:
@@ -625,6 +631,12 @@ class TmpBotPlugin(Star):
             message += f"所在位置: {city} ({game_mode})\n"
         else:
             message += f"在线状态: 离线\n"
+        
+        # --- 添加调试信息 ---
+        message += "\n--- 在线 API 调试错误 ---\n"
+        message += online_status.get('debug_error', '无') + "\n"
+        message += "\n--- 在线 API 原始数据 ---\n"
+        message += online_status.get('raw_data', '无')
 
         yield event.plain_result(message)
     
@@ -833,6 +845,13 @@ class TmpBotPlugin(Star):
             message += f"所在位置: {city} ({game_mode})\n"
         else:
             message += f"在线状态: 离线\n"
+        
+        # --- 添加调试信息 ---
+        message += "\n--- 在线 API 调试错误 ---\n"
+        message += online_status.get('debug_error', '无') + "\n"
+        message += "\n--- 在线 API 原始数据 ---\n"
+        message += online_status.get('raw_data', '无')
+
 
         yield event.plain_result(message)
     
@@ -904,32 +923,32 @@ class TmpBotPlugin(Star):
                         ets2_servers = []
                         ats_servers = []
                         
-                        # 根据服务器名称中的关键词进行分类 (API V2 没有 gameType 字段)
+                        # 优化服务器分组逻辑 (1.3.25/1.3.26)
                         for s in servers:
                             name = s.get('name', '').lower()
                             if s.get('online'):
-                                # 欧卡2服务器判断：不含ATS或American Truck Simulator
-                                if 'american truck simulator' not in name and 'ats' not in name:
-                                    ets2_servers.append(s)
-                                # 美卡服务器判断：包含 ATS 或 American Truck Simulator
-                                elif 'american truck simulator' in name or 'ats' in name:
+                                # ATS 服务器的常见标记: [US] 或 American Truck Simulator/ATS
+                                if '[us]' in name or 'american truck simulator' in name or 'ats' in name:
                                     ats_servers.append(s)
-                                    
-                        # 保持 API 原始顺序，但先展示 ETS2，后展示 ATS
-                        online_servers = ets2_servers + ats_servers
-                        total_players = sum(s.get('players', 0) for s in online_servers)
+                                # ETS2 服务器的常见标记: 默认(Simulation 1/2, Arcade, ProMods等) 或包含[EU]/[Asia]
+                                else:
+                                    ets2_servers.append(s)
 
-                        message = f"TMP服务器状态 (总在线数: {len(online_servers)}个)\n"
+                        # ATS/ETS2总玩家数计算
+                        total_players = sum(s.get('players', 0) for s in (ets2_servers + ats_servers))
+
+                        message = f"TMP服务器状态 (总在线数: {len(ets2_servers) + len(ats_servers)}个)\n"
                         message += "=" * 30 + "\n"
                         message += f"**[当前总玩家数: {total_players:,}]**\n\n".replace(',', ' ')
                         
-                        if online_servers:
+                        if ets2_servers or ats_servers:
                             
-                            def _format_server_list(server_list: List[Dict], title: str) -> str:
-                                output = f"**{title} ({len(server_list)}个在线)**\n"
+                            def _format_server_list(server_list: List[Dict], title: str, game_icon: str) -> str:
+                                output = f"**{game_icon} {title} ({len(server_list)}个在线)**\n"
                                 if not server_list:
-                                    return output + "  (暂无)\n"
+                                    return output + "  (暂无)\n\n"
                                 
+                                # 保持 API 返回的顺序（即 Simulation 1/2 靠前）
                                 for server in server_list:
                                     name = server.get('name', '未知')
                                     players = server.get('players', 0)
@@ -939,13 +958,8 @@ class TmpBotPlugin(Star):
                                     status_str = '🟢' 
                                     
                                     # 服务器特性提示
-                                    feature_str = ""
-                                    if server.get('collisions') is False:
-                                        feature_str += "💥无碰撞"
-                                    else:
-                                        feature_str += "💥碰撞" # 默认有碰撞
-                                    if server.get('speedLimiter') is False:
-                                        feature_str += " | 🚀无限速"
+                                    collision_str = "💥碰撞" if server.get('collisions') else "💥无碰撞"
+                                    speed_str = "🚀无限速" if server.get('speedLimiter') is False else ""
                                     
                                     output += f"服务器: {status_str} {name}\n"
                                     
@@ -956,13 +970,15 @@ class TmpBotPlugin(Star):
                                     else:
                                         output += f"{players_str}\n"
                                     
-                                    output += f"  特性: {feature_str}\n"
+                                    output += f"  特性: {collision_str}"
+                                    if speed_str:
+                                        output += f" | {speed_str}"
+                                    output += "\n"
                                     
-                                return output
+                                return output + "\n"
 
-                            message += _format_server_list(ets2_servers, "🚛 Euro Truck Simulator 2 服务器")
-                            message += "\n"
-                            message += _format_server_list(ats_servers, "🇺🇸 American Truck Simulator 服务器")
+                            message += _format_server_list(ets2_servers, "Euro Truck Simulator 2 服务器", "🚛")
+                            message += _format_server_list(ats_servers, "American Truck Simulator 服务器", "🇺🇸")
 
                         else: 
                             message += "暂无在线服务器"
