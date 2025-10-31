@@ -3,7 +3,7 @@
 
 """
 AstrBot-plugin-tmp-bot
-欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.20：加入玩家里程排行榜查询)
+欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.21：里程数据源切换为 da.vtcm.link)
 """
 
 import re
@@ -146,8 +146,8 @@ class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
 
-# 版本号更新为 1.3.20
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.20", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
+# 版本号更新为 1.3.21
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.21", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -160,7 +160,7 @@ class TmpBotPlugin(Star):
     async def initialize(self):
         # 统一 User-Agent，并更新版本号
         self.session = aiohttp.ClientSession(
-            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.3.20'}, 
+            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.3.21'}, 
             timeout=aiohttp.ClientTimeout(total=10)
         )
         logger.info("TMP Bot 插件HTTP会话已创建")
@@ -285,14 +285,56 @@ class TmpBotPlugin(Star):
             
     async def _get_player_stats(self, tmp_id: str) -> Dict[str, int]:
         """
-        通过 TruckyApp V3 API 获取玩家的总里程和今日里程 (以米为单位)。
+        通过 da.vtcm.link API 获取玩家的总里程和今日里程 (推测 API 返回公里数)。
         返回: {'total_km': 0, 'daily_km': 0}
         """
         if not self.session: 
             return {'total_km': 0, 'daily_km': 0, 'debug_error': 'HTTP会话不可用。'}
 
+        # 使用用户提供的 API 基础 URL
+        vtcm_stats_url = f"https://da.vtcm.link/player/info?tmpId={tmp_id}"
+        logger.info(f"尝试 VTCM 里程 API: {vtcm_stats_url}")
+        
+        try:
+            async with self.session.get(vtcm_stats_url, timeout=5) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    response_data = data.get('data', {}) # 推测数据在 'data' 字段下
+                    
+                    # 关键字段推测（根据 API 命名约定和用户提供的 Apifox 文档）
+                    total_km = int(response_data.get('totalDistance', 0))
+                    daily_km = int(response_data.get('todayDistance', 0))
+                    
+                    # 检查API是否返回成功状态
+                    if data.get('code') != 200 or not response_data:
+                        raise ApiResponseException(f"VTCM 里程 API 返回非成功代码或空数据: {data.get('msg', 'N/A')}")
+
+
+                    return {
+                        'total_km': total_km, 
+                        'daily_km': daily_km,
+                        'debug_error': 'VTCM 里程数据获取成功。'
+                    }
+                else:
+                    return {'total_km': 0, 'daily_km': 0, 'debug_error': f'VTCM 里程 API 返回状态码: {response.status}'}
+
+        except aiohttp.ClientError:
+             # 如果连接超时或失败，使用 Trucky App 作为备用 API
+            return await self._get_player_stats_fallback(tmp_id)
+        except Exception as e:
+            logger.error(f"获取玩家统计数据失败 (VTCM): {e.__class__.__name__}")
+            # 如果解析失败，使用 Trucky App 作为备用 API
+            return await self._get_player_stats_fallback(tmp_id)
+
+    async def _get_player_stats_fallback(self, tmp_id: str) -> Dict[str, int]:
+        """
+        作为 VTCM API 失败时的备用方案：使用 TruckyApp V3 API 获取玩家里程 (以米为单位)。
+        """
+        if not self.session: 
+            return {'total_km': 0, 'daily_km': 0, 'debug_error': 'Fallback: HTTP会话不可用。'}
+
         trucky_stats_url = f"https://api.truckyapp.com/v3/player/{tmp_id}/stats"
-        logger.info(f"尝试 Trucky V3 API (玩家统计): {trucky_stats_url}")
+        logger.info(f"尝试 Trucky V3 API (备用里程): {trucky_stats_url}")
         
         try:
             async with self.session.get(trucky_stats_url, timeout=5) as response:
@@ -309,14 +351,15 @@ class TmpBotPlugin(Star):
                     return {
                         'total_km': total_km, 
                         'daily_km': daily_km,
-                        'debug_error': '里程数据获取成功。'
+                        'debug_error': 'Fallback: 里程数据获取成功 (Trucky)。'
                     }
                 else:
-                    return {'total_km': 0, 'daily_km': 0, 'debug_error': f'里程 API 返回状态码: {response.status}'}
+                    return {'total_km': 0, 'daily_km': 0, 'debug_error': f'Fallback: 里程 API 返回状态码: {response.status}'}
 
         except Exception as e:
-            logger.error(f"获取玩家统计数据失败: {e.__class__.__name__}")
-            return {'total_km': 0, 'daily_km': 0, 'debug_error': f'获取里程失败: {e.__class__.__name__}'}
+            logger.error(f"Fallback 获取玩家统计数据失败: {e.__class__.__name__}")
+            return {'total_km': 0, 'daily_km': 0, 'debug_error': f'Fallback: 获取里程失败: {e.__class__.__name__}。'}
+
 
     async def _get_online_status(self, tmp_id: str) -> Dict:
         """
@@ -892,8 +935,8 @@ class TmpBotPlugin(Star):
 可用命令:
 1. 查询 [ID] - 查询玩家的完整信息（支持 TMP ID 或 Steam ID）。
 2. 状态 [ID]- 查询玩家的实时在线状态（支持 TMP ID 或 Steam ID）。 
-3. DLC [ID] - 查询玩家拥有的主要地图 DLC 列表（修复中）。
-4. 排行 - 查询 TruckersMP 总里程排行榜前10名。 **【新增】**
+3. DLC [ID] - 查询玩家拥有的主要地图 DLC 列表（支持 TMP ID 或 Steam ID）。
+4. 排行 - 查询 TruckersMP 总里程排行榜前10名。
 5. 绑定 [ID] - 绑定您的聊天账号与 TMP ID（支持输入 Steam ID 转换）。
 6. 解绑 - 解除账号绑定。
 7. 服务器 - 查看主要TMP服务器的实时状态和在线人数。
