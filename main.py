@@ -3,7 +3,7 @@
 
 """
 AstrBot-plugin-tmp-bot
-欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.26：修复在线状态误判问题)
+欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.27：增加赞助状态显示)
 """
 
 import re
@@ -108,8 +108,8 @@ def _get_dlc_info(player_info: Dict) -> Dict[str, List[str]]:
                 if name in MAP_KEYWORDS:
                     ets2_dlc.append(name)
                 elif "Germany Rework" in name:
-                     ets2_dlc.append("Germany Rework")
-                     
+                    ets2_dlc.append("Germany Rework")
+                        
             # 2. ATS DLC
             elif dlc_name_full.startswith(ATS_MAP_PREFIX):
                 name = dlc_name_full[len(ATS_MAP_PREFIX):].strip()
@@ -146,8 +146,8 @@ class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
 
-# 版本号更新为 1.3.26
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.26", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
+# 版本号更新为 1.3.27 (增加赞助功能)
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.27", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -160,7 +160,7 @@ class TmpBotPlugin(Star):
     async def initialize(self):
         # 统一 User-Agent，并更新版本号
         self.session = aiohttp.ClientSession(
-            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.3.26'}, 
+            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.3.27'}, 
             timeout=aiohttp.ClientTimeout(total=10)
         )
         logger.info("TMP Bot 插件HTTP会话已创建")
@@ -256,7 +256,7 @@ class TmpBotPlugin(Star):
                     data = await response.json()
                     response_data = data.get('response')
                     if response_data and isinstance(response_data, dict):
-                         return response_data
+                        return response_data
                     raise PlayerNotFoundException(f"玩家 {tmp_id} 不存在") 
                 elif response.status == 404:
                     raise PlayerNotFoundException(f"玩家 {tmp_id} 不存在")
@@ -319,7 +319,7 @@ class TmpBotPlugin(Star):
                     return {'total_km': 0, 'daily_km': 0, 'debug_error': f'VTCM 里程 API 返回状态码: {response.status}'}
 
         except aiohttp.ClientError:
-             # 如果连接超时或失败，使用 Trucky App 作为备用 API
+            # 如果连接超时或失败，使用 Trucky App 作为备用 API
             return await self._get_player_stats_fallback(tmp_id)
         except Exception as e:
             logger.error(f"获取玩家统计数据失败 (VTCM): {e.__class__.__name__}")
@@ -463,7 +463,7 @@ class TmpBotPlugin(Star):
                     response_data = data.get('response', [])
                     
                     if isinstance(response_data, list):
-                         return response_data
+                        return response_data
                     else:
                         raise ApiResponseException("排行榜 API 数据结构异常")
 
@@ -578,8 +578,24 @@ class TmpBotPlugin(Star):
         vtc_role = player_info.get('vtc', {}).get('role')
         message += f"所属车队: {vtc_name if vtc_name else '无'}\n"
         if vtc_role:
-             message += f"车队角色: {vtc_role}\n"
+                message += f"车队角色: {vtc_role}\n"
         
+        # --- 【新增】赞助信息 (Patron) ---
+        patron_info = player_info.get('patron', {})
+        is_patron = patron_info.get('active', False)
+        message += f"是否赞助: {'是' if is_patron else '否'}\n"
+        if is_patron:
+            donation_info = player_info.get('donation', {})
+            tier = donation_info.get('tier', '未知等级')
+            amount = donation_info.get('amount', 0)
+            currency = donation_info.get('currency', 'USD')
+            # 简单格式化
+            if amount > 0:
+                message += f"赞助金额: {tier} ({amount} {currency})\n"
+            else:
+                message += f"赞助等级: {tier}\n"
+        # --- 赞助信息结束 ---
+
         # --- 里程信息输出 ---
         total_km = stats_info.get('total_km', 0)
         daily_km = stats_info.get('daily_km', 0)
@@ -692,7 +708,7 @@ class TmpBotPlugin(Star):
         if ets2_dlc:
             chunks = [ets2_dlc[i:i + 3] for i in range(0, len(ets2_dlc), 3)]
             for chunk in chunks:
-                 message += "  " + " | ".join(chunk) + "\n"
+                message += "  " + " | ".join(chunk) + "\n"
         else:
             message += "  无 ETS2 地图 DLC 记录\n"
             
@@ -700,7 +716,7 @@ class TmpBotPlugin(Star):
         if ats_dlc:
             chunks = [ats_dlc[i:i + 3] for i in range(0, len(ats_dlc), 3)]
             for chunk in chunks:
-                 message += "  " + " | ".join(chunk) + "\n"
+                message += "  " + " | ".join(chunk) + "\n"
         else:
             message += "  无 ATS 地图 DLC 记录\n"
 
@@ -831,13 +847,33 @@ class TmpBotPlugin(Star):
         message += "=" * 15 + "\n"
         message += f"玩家名称: {player_name}\n"
         message += f"TMP编号: {tmp_id}\n"
+
         if steam_id_to_display:
             message += f"Steam编号: {steam_id_to_display}\n"
         
+        # --- 【新增】赞助信息 (Patron) ---
+        patron_info = player_info.get('patron', {})
+        is_patron = patron_info.get('active', False)
+        message += f"是否赞助: {'是' if is_patron else '否'}\n"
+        if is_patron:
+            donation_info = player_info.get('donation', {})
+            tier = donation_info.get('tier', '未知等级')
+            amount = donation_info.get('amount', 0)
+            currency = donation_info.get('currency', 'USD')
+            # 简单格式化
+            if amount > 0:
+                message += f"赞助金额: {tier} ({amount} {currency})\n"
+            else:
+                message += f"赞助等级: {tier}\n"
+        # --- 赞助信息结束 ---
+
         if online_status and online_status.get('online'):
             server_name = online_status.get('serverName', '未知服务器')
             game_mode_code = online_status.get('game', 0)
-            game_mode = "欧卡2" if game_mode_code == 1 else "美卡2" if game_mode_code == 2 else "未知游戏"
+            
+            # --- 【修正】将 "美卡2" 改为 "美卡" ---
+            game_mode = "欧卡2" if game_mode_code == 1 else "美卡" if game_mode_code == 2 else "未知游戏"
+            
             city = online_status.get('city', {}).get('name', '未知位置')
             
             message += f"在线状态: 在线\n"
@@ -985,10 +1021,8 @@ class TmpBotPlugin(Star):
                         
                         message += "=" * 30 
                         yield event.plain_result(message)
-                    else:
-                        yield event.plain_result("查询服务器状态失败，API数据异常。")
                 else:
-                    yield event.plain_result(f"查询服务器状态失败，HTTP状态码: {response.status}")
+                    yield event.plain_result("查询服务器状态失败，API数据异常。")
         except Exception:
             yield event.plain_result("网络请求失败，请检查网络或稍后重试。")
 
@@ -1007,7 +1041,7 @@ class TmpBotPlugin(Star):
 7. 服务器 - 查看所有在线的TMP服务器的实时状态和在线人数。 **【已更新】**
 8. help - 显示此帮助信息。
 
-使用提示: 绑定后可直接发送 查询/状态/DLC (无需ID参数)
+使用提示: 绑定后可可直接发送 查询/状态/DLC (无需ID参数)
 """
         yield event.plain_result(help_text)
 
