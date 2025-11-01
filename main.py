@@ -3,7 +3,7 @@
 
 """
 AstrBot-plugin-tmp-bot
-欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.27：增加赞助状态显示)
+欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.29：添加查询别名：查, cx)
 """
 
 import re
@@ -146,8 +146,8 @@ class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
 
-# 版本号更新为 1.3.27 (增加赞助功能)
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.27", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
+# 版本号更新为 1.3.29
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.29", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -160,7 +160,7 @@ class TmpBotPlugin(Star):
     async def initialize(self):
         # 统一 User-Agent，并更新版本号
         self.session = aiohttp.ClientSession(
-            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.3.27'}, 
+            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.3.29'}, 
             timeout=aiohttp.ClientTimeout(total=10)
         )
         logger.info("TMP Bot 插件HTTP会话已创建")
@@ -364,7 +364,6 @@ class TmpBotPlugin(Star):
     async def _get_online_status(self, tmp_id: str) -> Dict:
         """
         仅使用 TruckyApp V3 地图实时接口查询状态。
-        【版本 1.3.26 优化：修复即使 online:true 仍判断为离线的问题】
         """
         if not self.session: 
             return {'online': False, 'debug_error': 'HTTP会话不可用。'}
@@ -382,17 +381,12 @@ class TmpBotPlugin(Star):
                 if status == 200:
                     online_data = raw_data.get('response') if 'response' in raw_data else raw_data
                     
-                    # 关键修复点：只要 'online' 字段为 True，就认为在线，
-                    # 忽略 'error' 字段可能存在的干扰 (Trucky API 在同步延迟时可能同时返回 online:true 和 error:true)
                     is_online = bool(
                         online_data and 
                         online_data.get('online') is True and 
-                        online_data.get('server') # 确保有服务器ID，防止空数据
+                        online_data.get('server') 
                     )
                     
-                    debug_msg = f"Trucky V3 原始数据:\n{json.dumps(raw_data, indent=2)}"
-
-
                     if is_online:
                         server_details = online_data.get('serverDetails', {})
                         server_name = server_details.get('name', f"未知服务器 ({online_data.get('server')})")
@@ -422,21 +416,21 @@ class TmpBotPlugin(Star):
                             'game': 1 if server_details.get('game') == 'ETS2' else 2 if server_details.get('game') == 'ATS' else 0,
                             'city': {'name': formatted_location}, 
                             'debug_error': 'Trucky V3 判断在线，并获取到实时数据。',
-                            'raw_data': debug_msg
+                            'raw_data': '' 
                         }
                     
                     
                     return {
                         'online': False,
                         'debug_error': 'Trucky V3 API 响应判断为离线。',
-                        'raw_data': debug_msg
+                        'raw_data': '' 
                     }
                 
                 else:
                     return {
                         'online': False, 
                         'debug_error': f"Trucky V3 API 返回非 200 状态码: {status}",
-                        'raw_data': f"Trucky V3 原始数据:\n{json.dumps(raw_data, indent=2)}"
+                        'raw_data': '' 
                     }
 
         except Exception as e:
@@ -494,14 +488,16 @@ class TmpBotPlugin(Star):
     # 命令处理器 
     # ******************************************************
     
-    @filter.command("查询") 
+    @filter.command(r"(查询|查|cx)") 
     async def tmpquery(self, event: AstrMessageEvent):
-        """[命令: 查询] TMP玩家完整信息查询。支持输入 TMP ID 或 Steam ID。"""
+        """[命令: 查询/查/cx] TMP玩家完整信息查询。支持输入 TMP ID 或 Steam ID。"""
         message_str = event.message_str.strip()
         user_id = event.get_sender_id()
         
-        match = re.search(r'查询\s*(\d+)', message_str) 
-        input_id = match.group(1) if match else None
+        # 匹配 "查询" 或 "查" 或 "cx" 后面的数字ID
+        match = re.search(r'(查询|查|cx)\s*(\d+)', message_str) 
+        # 注意: 如果匹配成功，ID在第2个捕获组
+        input_id = match.group(2) if match else None
         
         tmp_id = None
         
@@ -648,12 +644,6 @@ class TmpBotPlugin(Star):
         else:
             message += f"在线状态: 离线\n"
         
-        # --- 添加调试信息 ---
-        message += "\n--- 在线 API 调试错误 ---\n"
-        message += online_status.get('debug_error', '无') + "\n"
-        message += "\n--- 在线 API 原始数据 ---\n"
-        message += online_status.get('raw_data', '无')
-
         yield event.plain_result(message)
     
     @filter.command("DLC") 
@@ -881,13 +871,6 @@ class TmpBotPlugin(Star):
             message += f"所在位置: {city} ({game_mode})\n"
         else:
             message += f"在线状态: 离线\n"
-        
-        # --- 添加调试信息 ---
-        message += "\n--- 在线 API 调试错误 ---\n"
-        message += online_status.get('debug_error', '无') + "\n"
-        message += "\n--- 在线 API 原始数据 ---\n"
-        message += online_status.get('raw_data', '无')
-
 
         yield event.plain_result(message)
     
@@ -1032,7 +1015,7 @@ class TmpBotPlugin(Star):
         help_text = """TMP查询插件使用说明 (无前缀命令)
 
 可用命令:
-1. 查询 [ID] - 查询玩家的完整信息（支持 TMP ID 或 Steam ID）。
+1. 查询/查/cx [ID] - 查询玩家的完整信息（支持 TMP ID 或 Steam ID）。
 2. 状态 [ID]- 查询玩家的实时在线状态（支持 TMP ID 或 Steam ID）。 
 3. DLC [ID] - 查询玩家拥有的主要地图 DLC 列表（支持 TMP ID 或 Steam ID）。
 4. 排行 - 查询 TruckersMP 总里程排行榜前10名。
@@ -1041,7 +1024,7 @@ class TmpBotPlugin(Star):
 7. 服务器 - 查看所有在线的TMP服务器的实时状态和在线人数。 **【已更新】**
 8. help - 显示此帮助信息。
 
-使用提示: 绑定后可可直接发送 查询/状态/DLC (无需ID参数)
+使用提示: 绑定后可直接发送 查询/状态/DLC (无需ID参数)
 """
         yield event.plain_result(help_text)
 
