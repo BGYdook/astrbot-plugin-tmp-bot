@@ -3,7 +3,7 @@
 
 """
 AstrBot-plugin-tmp-bot
-欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.31：V1 API 主赞助状态，删除查询别名)
+欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.32：V1 优先赞助状态 + 新增 定位 命令)
 """
 
 import re
@@ -145,8 +145,8 @@ class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
 
-# 版本号更新为 1.3.31
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.31", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
+# 版本号更新为 1.3.32
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.32", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -159,7 +159,7 @@ class TmpBotPlugin(Star):
     async def initialize(self):
         # 统一 User-Agent，并更新版本号
         self.session = aiohttp.ClientSession(
-            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.3.31'}, 
+            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.3.32'}, 
             timeout=aiohttp.ClientTimeout(total=10)
         )
         logger.info("TMP Bot 插件HTTP会话已创建")
@@ -209,7 +209,7 @@ class TmpBotPlugin(Star):
 
     # --- API请求方法 ---
 
-    # 【新增】V1 API 查询方法，用于获取 isPatreon 字段 (V1 主)
+    # V1 API 查询方法，用于获取 isPatreon 字段 (V1 主)
     async def _get_v1_player_info(self, tmp_id: str) -> Optional[Dict]:
         """尝试使用 V1 API 获取玩家信息，主要为 isPatreon 字段。"""
         if not self.session:
@@ -229,7 +229,6 @@ class TmpBotPlugin(Star):
         except Exception:
             logger.error(f"V1 API 查询失败或超时")
             return None
-    # 【新增】V1 API 查询方法结束
 
     async def _get_tmp_id_from_steam_id(self, steam_id: str) -> str:
         if not self.session:
@@ -271,7 +270,7 @@ class TmpBotPlugin(Star):
             raise NetworkException("插件未初始化，HTTP会话不可用")
         
         try:
-            # TMP 官方 V2 接口 (用于基本信息、封禁、上次在线、DLC 查询)
+            # TMP 官方 V2 接口
             url = f"https://api.truckersmp.com/v2/player/{tmp_id}"
             async with self.session.get(url, timeout=10) as response:
                 if response.status == 200:
@@ -306,14 +305,10 @@ class TmpBotPlugin(Star):
             return []
             
     async def _get_player_stats(self, tmp_id: str) -> Dict[str, int]:
-        """
-        通过 da.vtcm.link API 获取玩家的总里程和今日里程。
-        返回: {'total_km': 0, 'daily_km': 0}
-        """
+        """通过 da.vtcm.link API 获取玩家的总里程和今日里程。"""
         if not self.session: 
             return {'total_km': 0, 'daily_km': 0, 'debug_error': 'HTTP会话不可用。'}
 
-        # 使用用户提供的 API 基础 URL
         vtcm_stats_url = f"https://da.vtcm.link/player/info?tmpId={tmp_id}"
         logger.info(f"尝试 VTCM 里程 API: {vtcm_stats_url}")
         
@@ -488,19 +483,17 @@ class TmpBotPlugin(Star):
     # 命令处理器 
     # ******************************************************
     
-    @filter.command("查询") # 仅保留 "查询" 命令
+    @filter.command("查询") 
     async def tmpquery(self, event: AstrMessageEvent):
         """[命令: 查询] TMP玩家完整信息查询。支持输入 TMP ID 或 Steam ID。"""
         message_str = event.message_str.strip()
         user_id = event.get_sender_id()
         
-        # 仅匹配 "查询" 后面的数字ID
         match = re.search(r'查询\s*(\d+)', message_str) 
         input_id = match.group(1) if match else None
         
         tmp_id = None
         
-        # ... (获取 tmp_id 逻辑不变) ...
         if input_id:
             if len(input_id) == 17 and input_id.startswith('7'):
                 try:
@@ -837,11 +830,11 @@ class TmpBotPlugin(Star):
             return
 
         try:
-            # 在线状态使用 TruckyApp V3，玩家基本信息使用 TMP 官方 V2
+            # V2 API (获取全量数据) 和 V1 API (获取 isPatreon) 并行查询
             online_status, player_info, v1_info = await asyncio.gather(
                 self._get_online_status(tmp_id), 
-                self._get_player_info(tmp_id),
-                self._get_v1_player_info(tmp_id) # V1 API
+                self._get_player_info(tmp_id), # V2
+                self._get_v1_player_info(tmp_id) # V1
             )
 
         except PlayerNotFoundException as e:
@@ -864,7 +857,7 @@ class TmpBotPlugin(Star):
         if steam_id_to_display:
             message += f"Steam编号: {steam_id_to_display}\n"
         
-        # --- 赞助信息 (Patron) ---
+        # --- 【核心逻辑】赞助信息 (Patron) ---
         is_patron = False
         tier = '未知等级'
         amount = 0
@@ -919,6 +912,79 @@ class TmpBotPlugin(Star):
 
         yield event.plain_result(message)
     
+    # --- 【新功能】定位命令 ---
+    @filter.command("定位")
+    async def tmplocate(self, event: AstrMessageEvent):
+        """[命令:定位] 查询玩家的实时位置。支持输入 TMP ID 或 Steam ID。"""
+        message_str = event.message_str.strip()
+        user_id = event.get_sender_id()
+        
+        match = re.search(r'(定位)\s*(\d+)', message_str) 
+        input_id = match.group(2) if match else None
+        
+        tmp_id = None
+        
+        # --- ID 解析逻辑 ---
+        if input_id:
+            if len(input_id) == 17 and input_id.startswith('7'):
+                try:
+                    tmp_id = await self._get_tmp_id_from_steam_id(input_id)
+                except SteamIdNotFoundException as e:
+                    yield event.plain_result(str(e))
+                    return
+                except NetworkException as e:
+                    yield event.plain_result(f"查询失败: {str(e)}")
+                    return
+            else:
+                tmp_id = input_id
+        else:
+            tmp_id = self._get_bound_tmp_id(user_id)
+        
+        if not tmp_id:
+            yield event.plain_result("请输入正确的玩家编号（TMP ID 或 Steam ID），或先使用 绑定 [TMP ID] 绑定您的账号。")
+            return
+
+        try:
+            # 只需要在线状态 (位置) 和 玩家信息 (名字)
+            online_status, player_info = await asyncio.gather(
+                self._get_online_status(tmp_id), 
+                self._get_player_info(tmp_id)
+            )
+
+        except PlayerNotFoundException as e:
+            yield event.plain_result(str(e))
+            return
+        except Exception as e:
+            yield event.plain_result(f"查询失败: {str(e)}")
+            return
+        
+        player_name = player_info.get('name', '未知')
+        
+        # --- 定位回复构造 ---
+        message = f"📍 玩家实时定位\n"
+        message += "=" * 15 + "\n"
+        message += f"玩家名称: {player_name}\n"
+        message += f"TMP编号: {tmp_id}\n"
+
+        if online_status and online_status.get('online'):
+            server_name = online_status.get('serverName', '未知服务器')
+            game_mode_code = online_status.get('game', 0)
+            game_mode = "欧卡2" if game_mode_code == 1 else "美卡" if game_mode_code == 2 else "未知游戏"
+            city = online_status.get('city', {}).get('name', '未知位置')
+            
+            message += f"🚦 在线状态: 在线\n"
+            message += f"🌐 所在服务器: {server_name}\n"
+            message += f"🗺️ 所在位置: {city} ({game_mode})\n"
+        else:
+            # 如果离线
+            last_online_formatted = _format_timestamp_to_readable(player_info.get('lastOnline'))
+            message += f"🚦 在线状态: 离线\n"
+            message += f"⌚ 上次在线: {last_online_formatted}\n"
+
+        yield event.plain_result(message)
+    # --- 定位命令结束 ---
+    
+
     # --- 里程排行榜命令处理器 ---
     @filter.command("排行") 
     async def tmprank(self, event: AstrMessageEvent):
@@ -930,103 +996,130 @@ class TmpBotPlugin(Star):
         except NetworkException as e:
             yield event.plain_result(f"查询排行榜失败: {str(e)}")
             return
-        except ApiResponseException:
+        except ApiResponseException as e:
             yield event.plain_result(f"查询排行榜失败: API返回数据异常。")
             return
-
-        message = "🏆 TruckersMP 总里程排行榜 (前10)\n"
-        message += "=" * 25 + "\n"
-        
-        if not rank_list:
-            message += "当前无数据或查询失败。"
-        else:
-            for i, player in enumerate(rank_list):
-                name = player.get('name', '未知')
-                distance = player.get('totalDistance', 0)
-                
-                # 假设 distance 以米为单位，转换为公里
-                distance_km = int(distance / 1000)
-                
-                # 格式化数字并确保空格不会被消除
-                distance_str = f"{distance_km:,} km".replace(',', ' ')
-                
-                rank = i + 1
-                
-                # 确保格式对齐
-                rank_str = f"{rank: <2}"
-                name_str = f"{name: <15}" # 假设最长15个字符
-                
-                message += f"#{rank_str} {name_str}: {distance_str}\n"
-
-        yield event.plain_result(message)
-        
-    # --- 服务器状态命令处理器 ---
-    @filter.command("服务器") 
-    async def tmpservers(self, event: AstrMessageEvent):
-        """[命令: 服务器] 查看所有在线的TMP服务器的实时状态和在线人数。"""
-        if not self.session:
-            yield event.plain_result("插件未初始化，HTTP会话不可用")
+        except Exception:
+            yield event.plain_result("查询排行榜时发生未知错误。")
             return
 
-        url = "https://api.truckersmp.com/v2/servers"
+        if not rank_list:
+            yield event.plain_result("当前无法获取排行榜数据或排行榜为空。")
+            return
+            
+        message = "🏆 TruckersMP 玩家总里程排行榜 (前10名)\n"
+        message += "=" * 35 + "\n"
         
+        for idx, player in enumerate(rank_list):
+            rank = player.get('rank', idx + 1)
+            name = player.get('playerName', player.get('name', '未知玩家'))
+            distance_m = player.get('totalDistance', player.get('distance', 0))
+            
+            # 转换为公里并格式化
+            distance_km = int(distance_m / 1000)
+            distance_str = f"{distance_km:,}".replace(',', ' ')
+            
+            # 格式化输出：[排名] 玩家名 (ID: TMP ID) - 里程
+            tmp_id = player.get('id', 'N/A')
+            
+            line = f"No.{rank:<2} | {name} (ID:{tmp_id})\n"
+            line += f"       {distance_str} km\n"
+            
+            message += line
+
+        message += "=" * 35 + "\n"
+        message += "数据来源: Trucky App V3 API"
+
+        yield event.plain_result(message)
+    # --- 里程排行榜命令处理器结束 ---
+
+
+    @filter.command("服务器")
+    async def tmpserver(self, event: AstrMessageEvent):
+        """[命令: 服务器] 查询TruckersMP官方服务器的实时状态。"""
+        if not self.session: 
+            yield event.plain_result("插件初始化中，请稍后重试")
+            return
+            
         try:
+            url = "https://api.truckersmp.com/v2/servers"
             async with self.session.get(url, timeout=10) as response:
                 if response.status == 200:
                     data = await response.json()
                     servers = data.get('response', [])
                     
-                    if not servers:
-                        yield event.plain_result("未获取到服务器列表或当前无服务器在线。")
-                        return
-
-                    message = "🎮 TruckersMP 服务器状态\n"
-                    message += "=" * 30 + "\n"
-                    
-                    # 过滤只在线的服务器，并计算总人数
-                    online_servers = [s for s in servers if s.get('online')]
-                    total_players = sum(s.get('players', 0) for s in online_servers)
-                    
-                    message += f"🌐 总在线人数: {total_players}\n"
-                    message += "-" * 30 + "\n"
-
-                    for s in online_servers:
-                        name = s.get('name', '未知服务器')
-                        players = s.get('players', 0)
-                        max_players = s.get('maxplayers', 0)
+                    if servers and isinstance(servers, list):
                         
-                        # 判断服务器类型
-                        if s.get('game') == 'ETS2':
-                            game_tag = "[欧卡2]"
-                        elif s.get('game') == 'ATS':
-                            game_tag = "[美卡]"
-                        else:
-                            game_tag = "[未知]"
-
-                        # 判断服务器类型（如 Simulation, Arcade, ProMods）
-                        server_type = s.get('display_name', '')
-                        if "Promods" in server_type:
-                            type_tag = "[ProMods]"
-                        elif "Simulation" in server_type:
-                            type_tag = "[模拟]"
-                        elif "Arcade" in server_type:
-                            type_tag = "[休闲]"
-                        else:
-                            type_tag = ""
-
-                        # 格式化输出
-                        message += f"{game_tag}{type_tag} {name}: {players}/{max_players}\n"
+                        ets2_servers = []
+                        ats_servers = []
                         
-                    message += "-" * 30 + "\n"
-                    message += "数据来自 TruckersMP V2 API"
-                    
-                    yield event.plain_result(message)
+                        # 优化服务器分组逻辑 (1.3.25/1.3.26)
+                        for s in servers:
+                            name = s.get('name', '').lower()
+                            if s.get('online'):
+                                # ATS 服务器的常见标记: [US] 或 American Truck Simulator/ATS
+                                if '[us]' in name or 'american truck simulator' in name or 'ats' in name:
+                                    ats_servers.append(s)
+                                # ETS2 服务器的常见标记: 默认(Simulation 1/2, Arcade, ProMods等) 或包含[EU]/[Asia]
+                                else:
+                                    ets2_servers.append(s)
+
+                        # ATS/ETS2总玩家数计算
+                        total_players = sum(s.get('players', 0) for s in (ets2_servers + ats_servers))
+
+                        message = f"TMP服务器状态 (总在线数: {len(ets2_servers) + len(ats_servers)}个)\n"
+                        message += "=" * 30 + "\n"
+                        message += f"**[当前总玩家数: {total_players:,}]**\n\n".replace(',', ' ')
+                        
+                        if ets2_servers or ats_servers:
+                            
+                            def _format_server_list(server_list: List[Dict], title: str, game_icon: str) -> str:
+                                output = f"**{game_icon} {title} ({len(server_list)}个在线)**\n"
+                                if not server_list:
+                                    return output + "  (暂无)\n\n"
+                                
+                                # 保持 API 返回的顺序（即 Simulation 1/2 靠前）
+                                for server in server_list:
+                                    name = server.get('name', '未知')
+                                    players = server.get('players', 0)
+                                    max_players = server.get('maxplayers', 0)
+                                    queue = server.get('queue', 0)
+                                    
+                                    status_str = '🟢' 
+                                    
+                                    # 服务器特性提示
+                                    collision_str = "💥碰撞" if server.get('collisions') else "💥无碰撞"
+                                    speed_str = "🚀无限速" if server.get('speedLimiter') is False else ""
+                                    
+                                    output += f"服务器: {status_str} {name}\n"
+                                    
+                                    players_str = f"  玩家人数: {players:,}/{max_players:,}".replace(',', ' ')
+                                    
+                                    if queue > 0: 
+                                        output += f"{players_str} (排队: {queue})\n"
+                                    else:
+                                        output += f"{players_str}\n"
+                                    
+                                    output += f"  特性: {collision_str}"
+                                    if speed_str:
+                                        output += f" | {speed_str}"
+                                    output += "\n"
+                                    
+                                return output + "\n"
+
+                            message += _format_server_list(ets2_servers, "Euro Truck Simulator 2 服务器", "🚛")
+                            message += _format_server_list(ats_servers, "American Truck Simulator 服务器", "🇺🇸")
+
+                        else: 
+                            message += "暂无在线服务器"
+                        
+                        message += "=" * 30 
+                        yield event.plain_result(message)
                 else:
                     yield event.plain_result(f"查询服务器状态失败，API返回错误状态码: {response.status}")
+        except Exception:
+            yield event.plain_result("网络请求失败，请检查网络或稍后重试。")
 
-        except Exception as e:
-            yield event.plain_result(f"查询服务器状态失败: {e.__class__.__name__}")
-        
     @filter.command("菜单")
     async def tmphelp(self, event: AstrMessageEvent):
         """[命令: 菜单] 显示本插件的命令使用说明。"""
@@ -1035,14 +1128,15 @@ class TmpBotPlugin(Star):
 可用命令:
 1. 查询 [ID] - 查询玩家的完整信息（支持 TMP ID 或 Steam ID）。
 2. 状态 [ID]- 查询玩家的实时在线状态（支持 TMP ID 或 Steam ID）。 
-3. DLC [ID] - 查询玩家拥有的主要地图 DLC 列表（支持 TMP ID 或 Steam ID）。
-4. 排行 - 查询 TruckersMP 总里程排行榜前10名。
-5. 绑定 [ID] - 绑定您的聊天账号与 TMP ID（支持输入 Steam ID 转换）。
-6. 解绑 - 解除账号绑定。
-7. 服务器 - 查看所有在线的TMP服务器的实时状态和在线人数。
-8. 菜单 - 显示此帮助信息。
+3. 定位 [ID] - 【新】查询玩家的实时服务器和位置。
+4. DLC [ID] - 查询玩家拥有的主要地图 DLC 列表（支持 TMP ID 或 Steam ID）。
+5. 排行 - 查询 TruckersMP 总里程排行榜前10名。
+6. 绑定 [ID] - 绑定您的聊天账号与 TMP ID（支持输入 Steam ID 转换）。
+7. 解绑 - 解除账号绑定。
+8. 服务器 - 查看所有在线的TMP服务器的实时状态和在线人数。
+9. 菜单 - 显示此帮助信息。
 
-使用提示: 绑定后可直接发送 查询/状态/DLC (无需ID参数)
+使用提示: 绑定后可直接发送 查询/状态/DLC/定位 (无需ID参数)
 """
         yield event.plain_result(help_text)
         
