@@ -14,7 +14,7 @@ setup(
     description="欧卡2TMP查询插件",
     author="BGYdook",
     author_email="",
-    url="https://github.com/BGYdook/AstrBot-plugin-tmp-bot",
+    url="https://github.com/BGYdook/astrBot-plugin-tmp-bot",
     packages=find_packages(),
     install_requires=[
         "aiohttp>=3.8.0",
