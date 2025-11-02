@@ -1027,9 +1027,9 @@ class TmpBotPlugin(Star):
         except Exception as e:
             yield event.plain_result(f"查询服务器状态失败: {e.__class__.__name__}")
         
-    @filter.command("help")
+    @filter.command("菜单")
     async def tmphelp(self, event: AstrMessageEvent):
-        """[命令: help] 显示本插件的命令使用说明。"""
+        """[命令: 菜单] 显示本插件的命令使用说明。"""
         help_text = """TMP查询插件使用说明 (无前缀命令)
 
 可用命令:
