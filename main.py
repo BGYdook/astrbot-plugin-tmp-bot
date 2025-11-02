@@ -1027,10 +1027,10 @@ class TmpBotPlugin(Star):
         except Exception as e:
             yield event.plain_result(f"查询服务器状态失败: {e.__class__.__name__}")
         
-    @filter.command("help")
+    @filter.command("菜单")
     async def tmphelp(self, event: AstrMessageEvent):
-        """[命令: help] 显示本插件的命令使用说明。"""
-        help_text = """TMP查询插件使用说明 (无前缀命令)
+        """[命令: 菜单] 显示本插件的命令使用说明。"""
+        help_text = """TMP查询插件使用说明
 
 可用命令:
 1. 查询 [ID] - 查询玩家的完整信息（支持 TMP ID 或 Steam ID）。
@@ -1040,7 +1040,7 @@ class TmpBotPlugin(Star):
 5. 绑定 [ID] - 绑定您的聊天账号与 TMP ID（支持输入 Steam ID 转换）。
 6. 解绑 - 解除账号绑定。
 7. 服务器 - 查看所有在线的TMP服务器的实时状态和在线人数。
-8. help - 显示此帮助信息。
+8. 菜单 - 显示此帮助信息。
 
 使用提示: 绑定后可直接发送 查询/状态/DLC (无需ID参数)
 """
