@@ -764,44 +764,84 @@ class TmpBotPlugin(Star):
         if vtc_role:
                 body += f"车队角色: {vtc_role}\n"
         
-        # --- 【核心逻辑】赞助信息 (Patron) ---
-        is_patron = False
-        tier = '未知等级'
-        amount = 0
-        currency = 'USD'
-        data_source = "V2 API" # 默认为 V2
+        # --- 【核心逻辑】赞助信息 (基于 V2 player 接口字段) ---
+        # 规则：
+        # - isPatron: 是否赞助过（true 为赞助过，false 为未赞助过）
+        # - 仅当 isPatron 为 true 时，才读取 active/currentPledge/lifetimePledge；否则 active=否，金额均为 0
+        # - active: 当前赞助是否有效
+        # - currentPledge: 当前赞助金额（需除以 100）；为 0 则视为“当前未赞助”
+        # - lifetimePledge: 历史赞助金额（需除以 100）
+        # 兼容字段位置：尝试从顶层、patron、donation 三处获取，避免结构差异导致解析失败。
+        def _get_nested(d: Dict, *keys):
+            cur = d
+            for k in keys:
+                if not isinstance(cur, dict):
+                    return None
+                cur = cur.get(k)
+            return cur
 
-        # 1. V1 API 是主：检查 isPatreon
-        if v1_info and v1_info.get('isPatreon') is not None:
-            is_patron = v1_info.get('isPatreon', False)
-            data_source = "V1 API"
-        
-        # 2. 如果 V1 或 V2 认为玩家赞助，则从 V2 获取详细信息
-        if is_patron or (v1_info is None and player_info.get('patron', {}).get('active')):
-            
-            # V2 API 是备用/详细信息来源
-            if data_source == "V2 API":
-                 is_patron = player_info.get('patron', {}).get('active', False)
-            
-            if is_patron:
-                patron_info = player_info.get('patron', {})
-                donation_info = player_info.get('donation', {})
-                # 从 V2 获取等级/金额
-                tier = donation_info.get('tier', '赞助者')
-                amount = donation_info.get('amount', 0)
-                currency = donation_info.get('currency', 'USD')
-        
-        # --- 最终输出 ---
-        sponsor_note = f"（状态来自 {data_source}）" if data_source == "V1 API" and is_patron else ""
+        # 兼容 isPatron / isPatreon，兼容容器 patreon / patron
+        is_patron = any([
+            bool(player_info.get('isPatron')),
+            bool(player_info.get('isPatreon')),
+            bool(_get_nested(player_info, 'patreon', 'isPatron')),
+            bool(_get_nested(player_info, 'patreon', 'isPatreon')),
+            bool(_get_nested(player_info, 'patron', 'isPatron')),
+            bool(_get_nested(player_info, 'patron', 'isPatreon')),
+        ])
 
-        body += f"是否赞助: {'是' if is_patron else '否'}{sponsor_note}\n"
-        
+        # 兼容 active 位于顶层 / patreon / patron / donation
+        active = any([
+            bool(player_info.get('active')),
+            bool(_get_nested(player_info, 'patreon', 'active')),
+            bool(_get_nested(player_info, 'patron', 'active')),
+            bool(_get_nested(player_info, 'donation', 'active')),
+        ]) if is_patron else False
+
+        def _to_int(val, default=0):
+            try:
+                if val is None:
+                    return default
+                if isinstance(val, (int,)):
+                    return val
+                if isinstance(val, float):
+                    return int(val)
+                s = str(val).strip()
+                if s == "":
+                    return default
+                return int(float(s))
+            except Exception:
+                return default
+
+        # 优先 patreon 容器，其次顶层，再次 patron/donation 容器
+        current_pledge_raw = (
+            _get_nested(player_info, 'patreon', 'currentPledge') or 
+            player_info.get('currentPledge') or 
+            _get_nested(player_info, 'patron', 'currentPledge') or 
+            _get_nested(player_info, 'donation', 'currentPledge') or 0
+        )
+        lifetime_pledge_raw = (
+            _get_nested(player_info, 'patreon', 'lifetimePledge') or 
+            player_info.get('lifetimePledge') or 
+            _get_nested(player_info, 'patron', 'lifetimePledge') or 
+            _get_nested(player_info, 'donation', 'lifetimePledge') or 0
+        )
+
+        # 以“美元”为单位展示，去除小数（整美元）。API金额为分，使用整除 100。
+        current_pledge = (_to_int(current_pledge_raw) // 100) if is_patron else 0
+        lifetime_pledge = (_to_int(lifetime_pledge_raw) // 100) if is_patron else 0
+
+        body += f"是否赞助: {'是' if is_patron else '否'}\n"
+        body += f"赞助是否有效: {'是' if active else '否'}\n"
         if is_patron:
-            if amount > 0:
-                body += f"赞助金额: {tier} ({amount} {currency})\n"
+            if current_pledge > 0:
+                body += f"当前赞助金额: {current_pledge} 美元\n"
             else:
-                body += f"赞助等级: {tier}\n"
-        # ---------------------------------------------
+                body += f"当前赞助金额: 0 美元（当前未赞助）\n"
+            body += f"历史赞助金额: {lifetime_pledge} 美元\n"
+        else:
+            body += f"当前赞助金额: 0 美元\n"
+            body += f"历史赞助金额: 0 美元\n"
         # --- 赞助信息结束 ---
 
         # --- 里程信息输出 (不变) ---
