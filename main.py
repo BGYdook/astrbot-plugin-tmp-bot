@@ -11,14 +11,17 @@ import asyncio
 import aiohttp
 import json
 import os
+import base64
+import socket
 from typing import Optional, List, Dict, Tuple, Any
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # 引入 AstrBot 核心 API
 try:
     from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
     from astrbot.api.star import Context, Star, register, StarTools
     from astrbot.api import logger
+    from astrbot.api.message_components import Image, Plain
 except ImportError:
     # 最小化兼容回退 
     class _DummyFilter:
@@ -36,6 +39,8 @@ except ImportError:
             return self._sender_id
         async def plain_result(self, msg):
             return msg
+        async def chain_result(self, components):
+            return components
     MessageEventResult = Any 
     class Context: pass
     class Star:
@@ -59,6 +64,17 @@ except ImportError:
                 import traceback
                 traceback.print_exc()
     logger = _Logger()
+    # 兼容运行环境缺失时的占位 Image 类
+    class Image:
+        @staticmethod
+        def fromBytes(b: bytes):
+            return b
+        @staticmethod
+        def fromURL(url: str):
+            return url
+    class Plain:
+        def __init__(self, text: str):
+            self.text = text
 
 
 # --- 辅助函数：格式化时间戳 ---
@@ -78,6 +94,30 @@ def _format_timestamp_to_readable(timestamp_str: Optional[str]) -> str:
         # 兼容性回退
         return timestamp_str.split('T')[0] if 'T' in timestamp_str else timestamp_str
 # -----------------------------
+
+def _format_timestamp_to_beijing(timestamp_str: Optional[str]) -> str:
+    """将 UTC 时间戳转换为北京时间 (UTC+8)。兼容 ISO 8601 和简单格式。"""
+    if not timestamp_str:
+        return "未知"
+
+    s = str(timestamp_str).strip()
+    if s.lower().startswith('never'):
+        return "永久封禁"
+
+    try:
+        clean_str = s.replace('T', ' ').split('.')[0].replace('Z', '')
+        dt_utc = datetime.strptime(clean_str, '%Y-%m-%d %H:%M:%S')
+        dt_bj = dt_utc + timedelta(hours=8)
+        return dt_bj.strftime('%Y-%m-%d %H:%M:%S') + " (UTC+8)"
+    except Exception:
+        try:
+            # ISO 8601 with timezone offset, e.g. 2025-12-01T07:55:00+00:00
+            iso = s.replace('Z', '+00:00')
+            dt = datetime.fromisoformat(iso)
+            dt_bj = dt + timedelta(hours=8)
+            return dt_bj.strftime('%Y-%m-%d %H:%M:%S') + " (UTC+8)"
+        except Exception:
+            return s
 
 # --- 辅助函数：获取 DLC 列表 (优化后) ---
 def _get_dlc_info(player_info: Dict) -> Dict[str, List[str]]:
@@ -148,21 +188,142 @@ class ApiResponseException(TmpApiException):
 # 版本号更新为 1.3.32
 @register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.32", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
-    def __init__(self, context: Context):
+    def __init__(self, context: Context, config: Optional[Dict[str, Any]] = None):
         super().__init__(context)
+        self.config: Dict[str, Any] = config or {}
         self.session: Optional[aiohttp.ClientSession] = None 
         self.data_dir = StarTools.get_data_dir("tmp-bot")
         self.bind_file = os.path.join(self.data_dir, "tmp_bindings.json")
         os.makedirs(self.data_dir, exist_ok=True)
         logger.info("TMP Bot 插件已加载")
 
+    # --- 配置读取辅助 ---
+    def _cfg_bool(self, key: str, default: bool) -> bool:
+        v = self.config.get(key, default)
+        return bool(v) if isinstance(v, (bool, int, str)) else default
+
+    def _cfg_int(self, key: str, default: int) -> int:
+        try:
+            v = self.config.get(key, default)
+            return int(v)
+        except Exception:
+            return default
+
     async def initialize(self):
         # 统一 User-Agent，并更新版本号
+        timeout_sec = self._cfg_int('api_timeout_seconds', 10)
+        # 使用 IPv4 优先的连接器，并允许读取环境代理设置（与浏览器/系统行为更一致）
+        connector = aiohttp.TCPConnector(family=socket.AF_INET)
         self.session = aiohttp.ClientSession(
             headers={'User-Agent': 'AstrBot-TMP-Plugin/1.3.32'}, 
-            timeout=aiohttp.ClientTimeout(total=10)
+            timeout=aiohttp.ClientTimeout(total=timeout_sec),
+            connector=connector,
+            trust_env=True
         )
-        logger.info("TMP Bot 插件HTTP会话已创建")
+        logger.info(f"TMP Bot 插件HTTP会话已创建，超时 {timeout_sec}s")
+
+    # --- 工具：头像处理 ---
+    def _normalize_avatar_url(self, url: Optional[str]) -> Optional[str]:
+        if not url:
+            return None
+        # 去除日志可能引入的反引号、括号、引号，以及误传入的 CQ 片段前缀
+        u = str(url).strip()
+        # 清理包装字符
+        for ch in ('`', '"', "'", '(', ')'):
+            u = u.strip(ch)
+        # 如果误传了完整片段，剥离前缀
+        if u.startswith('[CQ:image,file='):
+            u = u[len('[CQ:image,file='):]
+        # 去掉结尾的右括号
+        if u.endswith(']'):
+            u = u[:-1]
+        u = u.strip()
+        return u or None
+
+    async def _get_avatar_base64(self, url: str) -> Optional[str]:
+        if not self.session:
+            return None
+        try:
+            timeout_sec = self._cfg_int('api_timeout_seconds', 10)
+            async with self.session.get(url, timeout=timeout_sec) as resp:
+                if resp.status == 200:
+                    content = await resp.read()
+                    if content:
+                        return base64.b64encode(content).decode('ascii')
+                return None
+        except Exception:
+            return None
+
+    async def _get_avatar_bytes(self, url: str) -> Optional[bytes]:
+        if not self.session:
+            return None
+        try:
+            timeout_sec = self._cfg_int('api_timeout_seconds', 10)
+            async with self.session.get(url, timeout=timeout_sec, allow_redirects=True) as resp:
+                if resp.status == 200:
+                    content = await resp.read()
+                    if content:
+                        return content
+                    else:
+                        logger.info(f"头像下载失败: 空内容 status=200 url={url}")
+                        return None
+                else:
+                    logger.info(f"头像下载失败: status={resp.status} url={url}")
+                    return None
+        except Exception as e:
+            logger.error(f"头像下载异常: url={url} err={e}", exc_info=False)
+            return None
+
+    async def _get_avatar_bytes_with_fallback(self, url: str, tmp_id: Optional[str]) -> Optional[bytes]:
+        """尝试多种 TruckersMP 头像URL变体，尽可能获取头像字节。"""
+        base = self._normalize_avatar_url(url)
+        candidates: List[str] = []
+        if base:
+            candidates.append(base)
+            # 切换 jpg/png
+            if base.lower().endswith('.jpg'):
+                candidates.append(base[:-4] + '.png')
+            elif base.lower().endswith('.png'):
+                candidates.append(base[:-4] + '.jpg')
+            # 解析 avatarsN/{id}.{stamp}.{ext} -> 生成多种组合
+            import re as _re
+            m = _re.search(r"https?://static\.truckersmp\.com/(avatarsN|avatars)/(\d+)(?:\.\d+)?\.(jpg|png)", base, _re.IGNORECASE)
+            if m:
+                folder = m.group(1)
+                pid = m.group(2)
+                ext = m.group(3).lower()
+                alt_ext = 'png' if ext == 'jpg' else 'jpg'
+                # 去掉时间戳
+                candidates.append(f"https://static.truckersmp.com/{folder}/{pid}.{ext}")
+                candidates.append(f"https://static.truckersmp.com/{folder}/{pid}.{alt_ext}")
+                # 切到另一个目录
+                other_folder = 'avatars' if folder.lower() == 'avatarsn' else 'avatarsN'
+                candidates.append(f"https://static.truckersmp.com/{other_folder}/{pid}.{ext}")
+                candidates.append(f"https://static.truckersmp.com/{other_folder}/{pid}.{alt_ext}")
+
+        # 根据 tmp_id 追加常见直连地址
+        if tmp_id:
+            for ext in ('jpg', 'png'):
+                candidates.append(f"https://static.truckersmp.com/avatars/{tmp_id}.{ext}")
+                candidates.append(f"https://static.truckersmp.com/avatarsN/{tmp_id}.{ext}")
+
+        # 去重保持顺序
+        seen = set()
+        uniq: List[str] = []
+        for c in candidates:
+            if not c:
+                continue
+            if c in seen:
+                continue
+            seen.add(c)
+            uniq.append(c)
+
+        for c in uniq:
+            b = await self._get_avatar_bytes(c)
+            logger.info(f"头像下载尝试: url={c} -> {'成功' if b else '失败'}")
+            if b:
+                return b
+        return None
 
     # --- 内部工具方法 (保持不变) ---
     def _load_bindings(self) -> Dict[str, Any]:
@@ -208,27 +369,6 @@ class TmpBotPlugin(Star):
         return False
 
     # --- API请求方法 ---
-
-    # V1 API 查询方法，用于获取 isPatreon 字段 (V1 主)
-    async def _get_v1_player_info(self, tmp_id: str) -> Optional[Dict]:
-        """尝试使用 V1 API 获取玩家信息，主要为 isPatreon 字段。"""
-        if not self.session:
-            return None
-        
-        # TruckersMP 官方 V1 接口
-        url = f"https://api.truckersmp.com/v1/player/{tmp_id}"
-        
-        try:
-            async with self.session.get(url, timeout=5) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    # V1 API 的响应结构是 {"error": false, "response": {...}}
-                    return data.get('response') 
-                logger.info(f"V1 API 查询玩家 {tmp_id} 失败，状态码: {response.status}")
-                return None
-        except Exception:
-            logger.error(f"V1 API 查询失败或超时")
-            return None
 
     async def _get_tmp_id_from_steam_id(self, steam_id: str) -> str:
         if not self.session:
@@ -304,70 +444,79 @@ class TmpBotPlugin(Star):
         except Exception:
             return []
             
-    async def _get_player_stats(self, tmp_id: str) -> Dict[str, int]:
-        """通过 da.vtcm.link API 获取玩家的总里程和今日里程。"""
+    async def _get_player_stats(self, tmp_id: str) -> Dict[str, Any]:
+        """通过 da.vtcm.link API 获取玩家的总里程、今日里程和头像。
+        字段调整：历史里程使用 mileage，今日里程使用 todayMileage。
+        输出调整：将从 API 获取的数值除以 1000（米→公里），保留两位小数。
+        不再兼容旧字段 totalDistance/todayDistance，并对数值进行稳健转换。
+        """
         if not self.session: 
-            return {'total_km': 0, 'daily_km': 0, 'debug_error': 'HTTP会话不可用。'}
+            return {'total_km': 0, 'daily_km': 0, 'avatar_url': '', 'debug_error': 'HTTP会话不可用。'}
 
         vtcm_stats_url = f"https://da.vtcm.link/player/info?tmpId={tmp_id}"
         logger.info(f"尝试 VTCM 里程 API: {vtcm_stats_url}")
         
         try:
-            async with self.session.get(vtcm_stats_url, timeout=5) as response:
+            # 指定 ssl=False（仅此请求）避免特定环境下证书或 TLS 握手导致的 ClientError，同时允许重定向
+            async with self.session.get(
+                vtcm_stats_url,
+                timeout=self._cfg_int('api_timeout_seconds', 10),
+                ssl=False,
+                allow_redirects=True
+            ) as response:
                 if response.status == 200:
                     data = await response.json()
                     response_data = data.get('data', {}) 
+                    logger.info(f"VTCM 里程响应: status=200, code={data.get('code')}, has_data={bool(response_data)}")
                     
-                    total_km = int(response_data.get('totalDistance', 0))
-                    daily_km = int(response_data.get('todayDistance', 0))
+                    # 使用新字段：mileage / todayMileage（单位：米），转换为公里并保留两位小数
+                    def _to_km_2f(val, default=0.0):
+                        try:
+                            if val is None:
+                                return default
+                            if isinstance(val, (int, float)):
+                                return round(float(val) / 1000.0, 2)
+                            s = str(val).strip()
+                            if s == "":
+                                return default
+                            return round(float(s) / 1000.0, 2)
+                        except Exception:
+                            return default
+
+                    total_raw = response_data.get('mileage')
+                    daily_raw = response_data.get('todayMileage')
+
+                    total_km = _to_km_2f(total_raw, 0.0)
+                    daily_km = _to_km_2f(daily_raw, 0.0)
+                    avatar_url = response_data.get('avatarUrl', '')
+                    logger.info(f"VTCM 里程解析: total_km={total_km:.2f}, today_km={daily_km:.2f}, avatar={avatar_url}")
                     
                     if data.get('code') != 200 or not response_data:
+                        logger.info(f"VTCM 里程数据校验失败: code={data.get('code')}, has_data={bool(response_data)}")
                         raise ApiResponseException(f"VTCM 里程 API 返回非成功代码或空数据: {data.get('msg', 'N/A')}")
 
                     return {
                         'total_km': total_km, 
                         'daily_km': daily_km,
+                        'avatar_url': avatar_url,
                         'debug_error': 'VTCM 里程数据获取成功。'
                     }
                 else:
-                    return {'total_km': 0, 'daily_km': 0, 'debug_error': f'VTCM 里程 API 返回状态码: {response.status}'}
+                    logger.info(f"VTCM 里程 API 返回非 200 状态: status={response.status}")
+                    return {'total_km': 0, 'daily_km': 0, 'avatar_url': '', 'debug_error': f'VTCM 里程 API 返回状态码: {response.status}'}
 
-        except aiohttp.ClientError:
-            return await self._get_player_stats_fallback(tmp_id)
-        except Exception:
-            return await self._get_player_stats_fallback(tmp_id)
-
-    async def _get_player_stats_fallback(self, tmp_id: str) -> Dict[str, int]:
-        """备用方案：使用 TruckyApp V3 API 获取玩家里程 (以米为单位)。"""
-        if not self.session: 
-            return {'total_km': 0, 'daily_km': 0, 'debug_error': 'Fallback: HTTP会话不可用。'}
-
-        trucky_stats_url = f"https://api.truckyapp.com/v3/player/{tmp_id}/stats"
-        logger.info(f"尝试 Trucky V3 API (备用里程): {trucky_stats_url}")
-        
-        try:
-            async with self.session.get(trucky_stats_url, timeout=5) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    response_data = data.get('response', {})
-                    
-                    total_m = response_data.get('total', 0)
-                    daily_m = response_data.get('daily', 0)
-                    
-                    total_km = int(total_m / 1000)
-                    daily_km = int(daily_m / 1000)
-
-                    return {
-                        'total_km': total_km, 
-                        'daily_km': daily_km,
-                        'debug_error': 'Fallback: 里程数据获取成功 (Trucky)。'
-                    }
-                else:
-                    return {'total_km': 0, 'daily_km': 0, 'debug_error': f'Fallback: 里程 API 返回状态码: {response.status}'}
-
+        except aiohttp.ClientError as e:
+            logger.error(f"VTCM 里程 API 网络异常: {e.__class__.__name__}: {str(e)}")
+            return {
+                'total_km': 0, 
+                'daily_km': 0, 
+                'avatar_url': '', 
+                'debug_error': f'VTCM 里程 API 请求失败（网络错误: {e.__class__.__name__}: {str(e)}）。'
+            }
         except Exception as e:
-            logger.error(f"Fallback 获取玩家统计数据失败: {e.__class__.__name__}")
-            return {'total_km': 0, 'daily_km': 0, 'debug_error': f'Fallback: 获取里程失败: {e.__class__.__name__}。'}
+            logger.error(f"VTCM 里程 API 异常: {e.__class__.__name__}")
+            return {'total_km': 0, 'daily_km': 0, 'avatar_url': '', 'debug_error': f'VTCM 里程 API 异常: {e.__class__.__name__}'}
+
 
 
     async def _get_online_status(self, tmp_id: str) -> Dict:
@@ -478,6 +627,45 @@ class TmpBotPlugin(Star):
         sorted_bans = sorted(bans_info, key=lambda x: x.get('timeAdded', ''), reverse=True)
         return len(bans_info), sorted_bans
 
+    def _translate_ban_reason(self, reason: Optional[str]) -> str:
+        """将封禁原因中的所有片段（§X.X - 英文）翻译为中文，保留后续说明/链接。
+
+        支持多段原因，例如：
+        输入："§2.2 - Collisions, §2.5 - Reckless Driving - https://youtu.be/xxx // 30 days due to history (§2.8)"
+        输出："§2.2 - 碰撞, §2.5 - 鲁莽驾驶 - https://youtu.be/xxx // 30天（§2.8历史）"（保留原样的链接与说明）
+        """
+        if not reason or not isinstance(reason, str):
+            return reason or ""
+
+        zh_map = {
+            "2.1": "黑客攻击/错误/功能滥用",
+            "2.2": "碰撞",
+            "2.3": "堵塞",
+            "2.4": "不正确的方式/不适当的超车",
+            "2.5": "鲁莽驾驶",
+            "2.6": "不适当的车队管理/滥用汽车",
+            "2.7": "特色区域和事件服务器",
+        }
+
+        # 找出所有 "§x.x - title" 片段（title 截止到逗号或连字符）
+        matches = list(re.finditer(r"§\s*(?P<code>\d+\.\d+)\s*-\s*(?P<title>[^,\-]+)", reason))
+        if not matches:
+            return reason
+
+        parts = []
+        for m in matches:
+            code = m.group("code").strip()
+            title = m.group("title").strip()
+            zh_title = zh_map.get(code)
+            if zh_title:
+                parts.append(f"§{code} - {zh_title}")
+            else:
+                parts.append(f"§{code} - {title}")
+
+        # 保留最后一个匹配之后的所有内容（通常包含链接与说明）
+        remainder = reason[matches[-1].end():]
+        return ", ".join(parts) + remainder
+
 
     # ******************************************************
     # 命令处理器 
@@ -514,15 +702,14 @@ class TmpBotPlugin(Star):
             return
         
         try:
-            # V2 API (获取全量数据) 和 V1 API (获取 isPatreon) 并行查询
-            player_info_raw, bans_info, online_status, stats_info, v1_info = await asyncio.gather(
-                self._get_player_info(tmp_id), # V2 API 
-                self._get_player_bans(tmp_id), 
+            # 并行查询：仅使用 V2 和相关接口（移除已失效的 V1）
+            player_info_raw, bans_info, online_status, stats_info = await asyncio.gather(
+                self._get_player_info(tmp_id),
+                self._get_player_bans(tmp_id),
                 self._get_online_status(tmp_id),
-                self._get_player_stats(tmp_id),
-                self._get_v1_player_info(tmp_id) # V1 API 
+                self._get_player_stats(tmp_id)
             )
-            player_info = player_info_raw 
+            player_info = player_info_raw
         except PlayerNotFoundException as e:
             yield event.plain_result(str(e))
             return
@@ -539,15 +726,15 @@ class TmpBotPlugin(Star):
         last_online_raw = player_info.get('lastOnline')
         last_online_formatted = _format_timestamp_to_readable(last_online_raw)
         
-        # 完整的回复消息构建 (纯文本输出)
-        message = "TMP玩家详细信息\n"
-        message += "=" * 20 + "\n"
-        message += f"ID TMP编号: {tmp_id}\n"
+        # 完整的回复消息构建：标题与正文分离，便于控制发送顺序
+        header = "TMP玩家详细信息\r\n" + "=" * 20 + "\r\n"
+        body = ""
+        body += f"ID TMP编号: {tmp_id}\n"
         if steam_id_to_display:
-            message += f"ID Steam编号: {steam_id_to_display}\n" 
+            body += f"ID Steam编号: {steam_id_to_display}\n" 
             
-        message += f"玩家名称: {player_info.get('name', '未知')}\n"
-        message += f"上次在线: {last_online_formatted}\n"
+        body += f"玩家名称: {player_info.get('name', '未知')}\n"
+        body += f"上次在线: {last_online_formatted}\n"
         
         # 权限/分组信息
         perms_str = "玩家"
@@ -559,66 +746,108 @@ class TmpBotPlugin(Star):
                     perms_str = ', '.join(groups)
             elif isinstance(perms, list) and perms:
                 perms_str = ', '.join(perms)
-        message += f"所属分组: {perms_str}\n"
+        body += f"所属分组: {perms_str}\n"
 
         vtc_name = player_info.get('vtc', {}).get('name')
         vtc_role = player_info.get('vtc', {}).get('role')
-        message += f"所属车队: {vtc_name if vtc_name else '无'}\n"
+        body += f"所属车队: {vtc_name if vtc_name else '无'}\n"
         if vtc_role:
-                message += f"车队角色: {vtc_role}\n"
+                body += f"车队角色: {vtc_role}\n"
         
-        # --- 【核心逻辑】赞助信息 (Patron) ---
-        is_patron = False
-        tier = '未知等级'
-        amount = 0
-        currency = 'USD'
-        data_source = "V2 API" # 默认为 V2
+        # --- 【核心逻辑】赞助信息 (基于 V2 player 接口字段) ---
+        # 规则：
+        # - isPatron: 是否赞助过（true 为赞助过，false 为未赞助过）
+        # - 仅当 isPatron 为 true 时，才读取 active/currentPledge/lifetimePledge；否则 active=否，金额均为 0
+        # - active: 当前赞助是否有效
+        # - currentPledge: 当前赞助金额（需除以 100）；为 0 则视为“当前未赞助”
+        # - lifetimePledge: 历史赞助金额（需除以 100）
+        # 兼容字段位置：尝试从顶层、patron、donation 三处获取，避免结构差异导致解析失败。
+        def _get_nested(d: Dict, *keys):
+            cur = d
+            for k in keys:
+                if not isinstance(cur, dict):
+                    return None
+                cur = cur.get(k)
+            return cur
 
-        # 1. V1 API 是主：检查 isPatreon
-        if v1_info and v1_info.get('isPatreon') is not None:
-            is_patron = v1_info.get('isPatreon', False)
-            data_source = "V1 API"
-        
-        # 2. 如果 V1 或 V2 认为玩家赞助，则从 V2 获取详细信息
-        if is_patron or (v1_info is None and player_info.get('patron', {}).get('active')):
-            
-            # V2 API 是备用/详细信息来源
-            if data_source == "V2 API":
-                 is_patron = player_info.get('patron', {}).get('active', False)
-            
-            if is_patron:
-                patron_info = player_info.get('patron', {})
-                donation_info = player_info.get('donation', {})
-                # 从 V2 获取等级/金额
-                tier = donation_info.get('tier', '赞助者')
-                amount = donation_info.get('amount', 0)
-                currency = donation_info.get('currency', 'USD')
-        
-        # --- 最终输出 ---
-        sponsor_note = f"（状态来自 {data_source}）" if data_source == "V1 API" and is_patron else ""
+        # 兼容 isPatron / isPatreon，兼容容器 patreon / patron
+        is_patron = any([
+            bool(player_info.get('isPatron')),
+            bool(player_info.get('isPatreon')),
+            bool(_get_nested(player_info, 'patreon', 'isPatron')),
+            bool(_get_nested(player_info, 'patreon', 'isPatreon')),
+            bool(_get_nested(player_info, 'patron', 'isPatron')),
+            bool(_get_nested(player_info, 'patron', 'isPatreon')),
+        ])
 
-        message += f"是否赞助: {'是' if is_patron else '否'}{sponsor_note}\n"
-        
+        # 兼容 active 位于顶层 / patreon / patron / donation
+        active = any([
+            bool(player_info.get('active')),
+            bool(_get_nested(player_info, 'patreon', 'active')),
+            bool(_get_nested(player_info, 'patron', 'active')),
+            bool(_get_nested(player_info, 'donation', 'active')),
+        ]) if is_patron else False
+
+        def _to_int(val, default=0):
+            try:
+                if val is None:
+                    return default
+                if isinstance(val, (int,)):
+                    return val
+                if isinstance(val, float):
+                    return int(val)
+                s = str(val).strip()
+                if s == "":
+                    return default
+                return int(float(s))
+            except Exception:
+                return default
+
+        # 优先 patreon 容器，其次顶层，再次 patron/donation 容器
+        current_pledge_raw = (
+            _get_nested(player_info, 'patreon', 'currentPledge') or 
+            player_info.get('currentPledge') or 
+            _get_nested(player_info, 'patron', 'currentPledge') or 
+            _get_nested(player_info, 'donation', 'currentPledge') or 0
+        )
+        lifetime_pledge_raw = (
+            _get_nested(player_info, 'patreon', 'lifetimePledge') or 
+            player_info.get('lifetimePledge') or 
+            _get_nested(player_info, 'patron', 'lifetimePledge') or 
+            _get_nested(player_info, 'donation', 'lifetimePledge') or 0
+        )
+
+        # 以“美元”为单位展示，去除小数（整美元）。API金额为分，使用整除 100。
+        current_pledge = (_to_int(current_pledge_raw) // 100) if is_patron else 0
+        lifetime_pledge = (_to_int(lifetime_pledge_raw) // 100) if is_patron else 0
+
+        body += f"是否赞助: {'是' if is_patron else '否'}\n"
+        body += f"赞助是否有效: {'是' if active else '否'}\n"
         if is_patron:
-            if amount > 0:
-                message += f"赞助金额: {tier} ({amount} {currency})\n"
+            if current_pledge > 0:
+                body += f"当前赞助金额: {current_pledge}美元\n"
             else:
-                message += f"赞助等级: {tier}\n"
-        # ---------------------------------------------
+                body += f"当前赞助金额: 0美元（当前未赞助）\n"
+            body += f"历史赞助金额: {lifetime_pledge}美元\n"
+        else:
+            body += f"当前赞助金额: 0美元\n"
+            body += f"历史赞助金额: 0美元\n"
         # --- 赞助信息结束 ---
 
         # --- 里程信息输出 (不变) ---
-        total_km = stats_info.get('total_km', 0)
-        daily_km = stats_info.get('daily_km', 0)
+        logger.info(f"查询详情: 里程字典 keys={list(stats_info.keys())}, debug={stats_info.get('debug_error')}")
+        total_km = stats_info.get('total_km', 0.0)
+        daily_km = stats_info.get('daily_km', 0.0)
+        logger.info(f"查询详情: 里程输出值 total_km={total_km:.2f}, daily_km={daily_km:.2f}")
         
-        message += f"🚩历史里程: {total_km:,} km\n".replace(',', ' ')
-        message += f"🚩今日里程: {daily_km:,} km\n".replace(',', ' ')
+        body += f"🚩历史里程: {total_km:.2f}公里/km\n"
+        body += f"🚩今日里程: {daily_km:.2f}公里/km\n"
         
         # --- 封禁信息 (不变) ---
-        message += f"是否封禁: {'是' if is_banned else '否'}\n"
+        body += f"是否封禁: {'是' if is_banned else '否'}\n"
         
         if ban_count > 0:
-            message += f"历史封禁: {ban_count}次\n"
+            body += f"历史封禁: {ban_count}次\n"
 
         if is_banned:
             
@@ -629,22 +858,23 @@ class TmpBotPlugin(Star):
                     current_ban = sorted_bans[0]
                     
             if current_ban:
-                ban_reason = current_ban.get('reason', '未知封禁原因 (API V2)')
+                ban_reason_raw = current_ban.get('reason', '未知封禁原因 (API V2)')
+                ban_reason = self._translate_ban_reason(ban_reason_raw)
                 ban_expiration = current_ban.get('expiration', banned_until_main) 
                 
-                message += f"当前封禁原因: {ban_reason}\n"
+                body += f"当前封禁原因: {ban_reason}\n"
                 
-                if ban_expiration and ban_expiration.lower().startswith('never'):
-                    message += f"封禁截止: 永久封禁\n"
+                if ban_expiration and isinstance(ban_expiration, str) and ban_expiration.lower().startswith('never'):
+                    body += f"封禁截止: 永久封禁\n"
                 else:
-                    message += f"封禁截止: {ban_expiration}\n"
+                    body += f"封禁截止: {_format_timestamp_to_beijing(ban_expiration)}\n"
                     
             else:
-                message += f"当前封禁原因: API详细记录缺失。可能原因：封禁信息被隐藏或数据同步延迟。\n"
-                if banned_until_main and banned_until_main.lower().startswith('never'):
-                    message += f"封禁截止: 永久封禁\n"
+                body += f"当前封禁原因: API详细记录缺失。可能原因：封禁信息被隐藏或数据同步延迟。\n"
+                if banned_until_main and isinstance(banned_until_main, str) and banned_until_main.lower().startswith('never'):
+                    body += f"封禁截止: 永久封禁\n"
                 else:
-                    message += f"封禁截止: {banned_until_main}\n"
+                    body += f"封禁截止: {_format_timestamp_to_beijing(banned_until_main)}\n"
         
         
         if online_status and online_status.get('online'):
@@ -653,13 +883,37 @@ class TmpBotPlugin(Star):
             game_mode = "欧卡2" if game_mode_code == 1 else "美卡" if game_mode_code == 2 else "未知游戏"
             city = online_status.get('city', {}).get('name', '未知位置') 
             
-            message += f"在线状态: 在线\n"
-            message += f"所在服务器: {server_name}\n"
-            message += f"所在位置: {city} ({game_mode})\n"
+            body += f"在线状态: 在线\n"
+            body += f"所在服务器: {server_name}\n"
+            body += f"所在位置: {city} ({game_mode})\n"
         else:
-            message += f"在线状态: 离线\n"
+            body += f"在线状态: 离线\n"
         
-        yield event.plain_result(message)
+        # 头像（强制按组件发送）
+        show_avatar_cfg = self._cfg_bool('query_show_avatar_enable', True)
+        logger.info(f"查询详情: 头像开关={'ON' if show_avatar_cfg else 'OFF'}，将组合 Image+Plain 统一发送。")
+        avatar_url = self._normalize_avatar_url(player_info.get('avatar') or stats_info.get('avatar_url'))
+        logger.info(f"查询详情: 规范化后URL={avatar_url}")
+        components = []
+        # 发送顺序控制：当头像关闭时，将标题与正文合并为一个文本组件以保证换行在同一组件内生效
+        if not show_avatar_cfg:
+            logger.info("查询详情: 头像开关为OFF，合并标题与正文为单个文本组件")
+            components.append(Plain(header + "\r\n" + body))
+        else:
+            # 头像开启：标题 -> 头像 -> 空行 -> 正文
+            components.append(Plain(header))
+            if avatar_url:
+                try:
+                    logger.info("查询详情: 组合消息链添加 Image(URL) 组件")
+                    components.append(Image.fromURL(avatar_url))
+                except Exception:
+                    logger.error("查询详情: 生成 Image(URL) 组件失败，跳过头像", exc_info=True)
+            else:
+                logger.info("查询详情: 无可用头像URL，跳过头像组件")
+            # 确保正文从新的一行开始（适配不同适配器的换行处理）
+            components.append(Plain("\r\n"))
+            components.append(Plain(body))
+        yield event.chain_result(components)
     
     @filter.command("DLC") 
     async def tmpdlc(self, event: AstrMessageEvent):
@@ -830,11 +1084,10 @@ class TmpBotPlugin(Star):
             return
 
         try:
-            # V2 API (获取全量数据) 和 V1 API (获取 isPatreon) 并行查询
-            online_status, player_info, v1_info = await asyncio.gather(
-                self._get_online_status(tmp_id), 
-                self._get_player_info(tmp_id), # V2
-                self._get_v1_player_info(tmp_id) # V1
+            # 并行查询：仅使用 V2 接口（移除已失效的 V1）
+            online_status, player_info = await asyncio.gather(
+                self._get_online_status(tmp_id),
+                self._get_player_info(tmp_id)
             )
 
         except PlayerNotFoundException as e:
@@ -857,41 +1110,73 @@ class TmpBotPlugin(Star):
         if steam_id_to_display:
             message += f"Steam编号: {steam_id_to_display}\n"
         
-        # --- 【核心逻辑】赞助信息 (Patron) ---
-        is_patron = False
-        tier = '未知等级'
-        amount = 0
+        # --- 【核心逻辑】赞助信息 (仅基于 V2 player 接口字段) ---
+        def _get_nested(d: Dict, *keys):
+            cur = d
+            for k in keys:
+                if not isinstance(cur, dict):
+                    return None
+                cur = cur.get(k)
+            return cur
+
+        def _to_int(val, default=0):
+            try:
+                if val is None:
+                    return default
+                if isinstance(val, int):
+                    return val
+                if isinstance(val, float):
+                    return int(round(val))
+                s = str(val).strip()
+                if s == "":
+                    return default
+                # 允许像 "123.0" 的字符串
+                return int(float(s))
+            except Exception:
+                return default
+
+        # 兼容 isPatron / isPatreon，兼容容器 patreon / patron
+        is_patron = any([
+            bool(player_info.get('isPatron')),
+            bool(player_info.get('isPatreon')),
+            bool(_get_nested(player_info, 'patreon', 'isPatron')),
+            bool(_get_nested(player_info, 'patreon', 'isPatreon')),
+            bool(_get_nested(player_info, 'patron', 'isPatron')),
+            bool(_get_nested(player_info, 'patron', 'isPatreon')),
+        ])
+
+        # 兼容 active 位于顶层 / patreon / patron / donation
+        active = any([
+            bool(player_info.get('active')),
+            bool(_get_nested(player_info, 'patreon', 'active')),
+            bool(_get_nested(player_info, 'patron', 'active')),
+            bool(_get_nested(player_info, 'donation', 'active')),
+        ]) if is_patron else False
+
+        tier = '赞助者'
         currency = 'USD'
-        data_source = "V2 API" # 默认为 V2
+        amount = 0
+        donation_info = player_info.get('donation', {}) if isinstance(player_info.get('donation'), dict) else {}
+        tier = donation_info.get('tier', tier)
+        currency = donation_info.get('currency', currency)
+        if is_patron:
+            amount = _to_int(donation_info.get('amount'), 0)
+            if amount <= 0:
+                # 兼容 currentPledge 以分为单位，需要除以 100
+                cp = _to_int(
+                    _get_nested(player_info, 'currentPledge')
+                    or _get_nested(player_info, 'donation', 'currentPledge')
+                    or _get_nested(player_info, 'patron', 'currentPledge')
+                    or _get_nested(player_info, 'patreon', 'currentPledge'),
+                    0
+                )
+                if cp > 0:
+                    amount = cp // 100
 
-        # 1. V1 API 是主：检查 isPatreon
-        if v1_info and v1_info.get('isPatreon') is not None:
-            is_patron = v1_info.get('isPatreon', False)
-            data_source = "V1 API"
-        
-        # 2. 如果 V1 或 V2 认为玩家赞助，则从 V2 获取详细信息
-        if is_patron or (v1_info is None and player_info.get('patron', {}).get('active')):
-            
-            # V2 API 是备用/详细信息来源
-            if data_source == "V2 API":
-                 is_patron = player_info.get('patron', {}).get('active', False)
-            
-            if is_patron:
-                patron_info = player_info.get('patron', {})
-                donation_info = player_info.get('donation', {})
-                # 从 V2 获取等级/金额
-                tier = donation_info.get('tier', '赞助者')
-                amount = donation_info.get('amount', 0)
-                currency = donation_info.get('currency', 'USD')
-        
-        # --- 最终输出 ---
-        sponsor_note = f"（状态来自 {data_source}）" if data_source == "V1 API" and is_patron else ""
-
-        message += f"是否赞助: {'是' if is_patron else '否'}{sponsor_note}\n"
-        
+        message += f"是否赞助: {'是' if is_patron else '否'}\n"
         if is_patron:
             if amount > 0:
-                message += f"赞助金额: {tier} ({amount} {currency})\n"
+                message += f"赞助金额: {tier} ({amount}{currency})\n"
             else:
                 message += f"赞助等级: {tier}\n"
         # -------------------
@@ -910,7 +1195,32 @@ class TmpBotPlugin(Star):
         else:
             message += f"在线状态: 离线\n"
 
-        yield event.plain_result(message)
+        # 头像（强制按组件发送，组合链）
+        show_avatar_cfg = self._cfg_bool('query_show_avatar_enable', True)
+        logger.info(f"玩家状态: 头像开关={'ON' if show_avatar_cfg else 'OFF'}，将组合 Image+Plain 统一发送。")
+        # 优先使用 TruckersMP V2 的头像字段，其次 VTCM 查询
+        avatar_url = self._normalize_avatar_url(player_info.get('avatar'))
+        if not avatar_url:
+            try:
+                stats_info = await self._get_player_stats(tmp_id)
+                avatar_url = self._normalize_avatar_url(stats_info.get('avatar_url'))
+            except Exception:
+                avatar_url = None
+        logger.info(f"玩家状态: 规范化后URL={avatar_url}")
+        components = []
+        if show_avatar_cfg and avatar_url:
+            try:
+                logger.info("玩家状态: 组合消息链添加 Image(URL) 组件")
+                components.append(Image.fromURL(avatar_url))
+            except Exception:
+                logger.error("玩家状态: 生成 Image(URL) 组件失败，跳过头像", exc_info=True)
+        else:
+            if not show_avatar_cfg:
+                logger.info("玩家状态: 头像开关为OFF，跳过头像组件")
+            elif not avatar_url:
+                logger.info("玩家状态: 无可用头像URL，跳过头像组件")
+        components.append(Plain(message))
+        yield event.chain_result(components)
     
     # --- 【新功能】定位命令 ---
     @filter.command("定位")

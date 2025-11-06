@@ -1,0 +1,50 @@
+{
+  "query_show_avatar_enable": {
+    "type": "bool",
+    "default": true,
+    "title": "查询结果显示头像",
+    "description": "在文本回复中附带玩家头像图片。"
+  },
+  "baidu_translate_enable": {
+    "type": "bool",
+    "default": false,
+    "title": "是否启用百度翻译",
+    "description": "启用后，插件将调用百度翻译进行文本翻译。"
+  },
+  "baidu_translate_app_id": {
+    "type": "string",
+    "default": "",
+    "title": "百度翻译AppID",
+    "description": "用于百度翻译的应用ID。"
+  },
+  "baidu_translate_key": {
+    "type": "string",
+    "default": "",
+    "title": "百度翻译密钥",
+    "description": "用于百度翻译的密钥。"
+  },
+  "baidu_translate_cache_enable": {
+    "type": "bool",
+    "default": false,
+    "title": "是否启用百度翻译缓存",
+    "description": "启用后，翻译结果将进行缓存以提高性能。"
+  },
+  "api_timeout_seconds": {
+    "type": "int",
+    "default": 10,
+    "title": "API 请求超时秒数",
+    "description": "TruckersMP/Trucky/VTCM 接口的请求超时时间。"
+  },
+  "prefer_vtcm_mileage": {
+    "type": "bool",
+    "default": true,
+    "title": "优先使用 VTCM 里程",
+    "description": "优先从 da.vtcm.link 获取里程，失败时回退 Trucky。"
+  },
+  "enable_bind_feature": {
+    "type": "bool",
+    "default": true,
+    "title": "启用绑定功能",
+    "description": "允许用户绑定 TMPID 用于快捷查询。"
+  }
+}
