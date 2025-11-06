@@ -12,6 +12,7 @@ import aiohttp
 import json
 import os
 import base64
+import socket
 from typing import Optional, List, Dict, Tuple, Any
 from datetime import datetime, timedelta
 
@@ -211,9 +212,13 @@ class TmpBotPlugin(Star):
     async def initialize(self):
         # 统一 User-Agent，并更新版本号
         timeout_sec = self._cfg_int('api_timeout_seconds', 10)
+        # 使用 IPv4 优先的连接器，并允许读取环境代理设置（与浏览器/系统行为更一致）
+        connector = aiohttp.TCPConnector(family=socket.AF_INET)
         self.session = aiohttp.ClientSession(
             headers={'User-Agent': 'AstrBot-TMP-Plugin/1.3.32'}, 
-            timeout=aiohttp.ClientTimeout(total=timeout_sec)
+            timeout=aiohttp.ClientTimeout(total=timeout_sec),
+            connector=connector,
+            trust_env=True
         )
         logger.info(f"TMP Bot 插件HTTP会话已创建，超时 {timeout_sec}s")
 
@@ -461,7 +466,10 @@ class TmpBotPlugin(Star):
             return []
             
     async def _get_player_stats(self, tmp_id: str) -> Dict[str, Any]:
-        """通过 da.vtcm.link API 获取玩家的总里程、今日里程和头像。"""
+        """通过 da.vtcm.link API 获取玩家的总里程、今日里程和头像。
+        字段调整：历史里程使用 mileage，今日里程使用 todayMileage。
+        不再兼容旧字段 totalDistance/todayDistance，并对数值进行稳健转换。
+        """
         if not self.session: 
             return {'total_km': 0, 'daily_km': 0, 'avatar_url': '', 'debug_error': 'HTTP会话不可用。'}
 
@@ -469,16 +477,44 @@ class TmpBotPlugin(Star):
         logger.info(f"尝试 VTCM 里程 API: {vtcm_stats_url}")
         
         try:
-            async with self.session.get(vtcm_stats_url, timeout=self._cfg_int('api_timeout_seconds', 10)) as response:
+            # 指定 ssl=False（仅此请求）避免特定环境下证书或 TLS 握手导致的 ClientError，同时允许重定向
+            async with self.session.get(
+                vtcm_stats_url,
+                timeout=self._cfg_int('api_timeout_seconds', 10),
+                ssl=False,
+                allow_redirects=True
+            ) as response:
                 if response.status == 200:
                     data = await response.json()
                     response_data = data.get('data', {}) 
+                    logger.info(f"VTCM 里程响应: status=200, code={data.get('code')}, has_data={bool(response_data)}")
                     
-                    total_km = int(response_data.get('totalDistance', 0))
-                    daily_km = int(response_data.get('todayDistance', 0))
+                    # 使用新字段：mileage / todayMileage（单位：公里），兼容旧字段
+                    def _to_int_local(val, default=0):
+                        try:
+                            if val is None:
+                                return default
+                            if isinstance(val, int):
+                                return val
+                            if isinstance(val, float):
+                                return int(val)
+                            s = str(val).strip()
+                            if s == "":
+                                return default
+                            return int(float(s))
+                        except Exception:
+                            return default
+
+                    total_raw = response_data.get('mileage')
+                    daily_raw = response_data.get('todayMileage')
+
+                    total_km = _to_int_local(total_raw, 0)
+                    daily_km = _to_int_local(daily_raw, 0)
                     avatar_url = response_data.get('avatarUrl', '')
+                    logger.info(f"VTCM 里程解析: total_km={total_km}, today_km={daily_km}, avatar={avatar_url}")
                     
                     if data.get('code') != 200 or not response_data:
+                        logger.info(f"VTCM 里程数据校验失败: code={data.get('code')}, has_data={bool(response_data)}")
                         raise ApiResponseException(f"VTCM 里程 API 返回非成功代码或空数据: {data.get('msg', 'N/A')}")
 
                     return {
@@ -488,44 +524,21 @@ class TmpBotPlugin(Star):
                         'debug_error': 'VTCM 里程数据获取成功。'
                     }
                 else:
+                    logger.info(f"VTCM 里程 API 返回非 200 状态: status={response.status}")
                     return {'total_km': 0, 'daily_km': 0, 'avatar_url': '', 'debug_error': f'VTCM 里程 API 返回状态码: {response.status}'}
 
-        except aiohttp.ClientError:
-            return await self._get_player_stats_fallback(tmp_id)
-        except Exception:
-            return await self._get_player_stats_fallback(tmp_id)
-
-    async def _get_player_stats_fallback(self, tmp_id: str) -> Dict[str, int]:
-        """备用方案：使用 TruckyApp V3 API 获取玩家里程 (以米为单位)。"""
-        if not self.session: 
-            return {'total_km': 0, 'daily_km': 0, 'debug_error': 'Fallback: HTTP会话不可用。'}
-
-        trucky_stats_url = f"https://api.truckyapp.com/v3/player/{tmp_id}/stats"
-        logger.info(f"尝试 Trucky V3 API (备用里程): {trucky_stats_url}")
-        
-        try:
-            async with self.session.get(trucky_stats_url, timeout=5) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    response_data = data.get('response', {})
-                    
-                    total_m = response_data.get('total', 0)
-                    daily_m = response_data.get('daily', 0)
-                    
-                    total_km = int(total_m / 1000)
-                    daily_km = int(daily_m / 1000)
-
-                    return {
-                        'total_km': total_km, 
-                        'daily_km': daily_km,
-                        'debug_error': 'Fallback: 里程数据获取成功 (Trucky)。'
-                    }
-                else:
-                    return {'total_km': 0, 'daily_km': 0, 'debug_error': f'Fallback: 里程 API 返回状态码: {response.status}'}
-
+        except aiohttp.ClientError as e:
+            logger.error(f"VTCM 里程 API 网络异常: {e.__class__.__name__}: {str(e)}")
+            return {
+                'total_km': 0, 
+                'daily_km': 0, 
+                'avatar_url': '', 
+                'debug_error': f'VTCM 里程 API 请求失败（网络错误: {e.__class__.__name__}: {str(e)}）。'
+            }
         except Exception as e:
-            logger.error(f"Fallback 获取玩家统计数据失败: {e.__class__.__name__}")
-            return {'total_km': 0, 'daily_km': 0, 'debug_error': f'Fallback: 获取里程失败: {e.__class__.__name__}。'}
+            logger.error(f"VTCM 里程 API 异常: {e.__class__.__name__}")
+            return {'total_km': 0, 'daily_km': 0, 'avatar_url': '', 'debug_error': f'VTCM 里程 API 异常: {e.__class__.__name__}'}
+
 
 
     async def _get_online_status(self, tmp_id: str) -> Dict:
@@ -845,8 +858,10 @@ class TmpBotPlugin(Star):
         # --- 赞助信息结束 ---
 
         # --- 里程信息输出 (不变) ---
+        logger.info(f"查询详情: 里程字典 keys={list(stats_info.keys())}, debug={stats_info.get('debug_error')}")
         total_km = stats_info.get('total_km', 0)
         daily_km = stats_info.get('daily_km', 0)
+        logger.info(f"查询详情: 里程输出值 total_km={total_km}, daily_km={daily_km}")
         
         body += f"🚩历史里程: {total_km:,} km\n".replace(',', ' ')
         body += f"🚩今日里程: {daily_km:,} km\n".replace(',', ' ')
