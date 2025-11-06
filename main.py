@@ -370,27 +370,6 @@ class TmpBotPlugin(Star):
 
     # --- API请求方法 ---
 
-    # V1 API 查询方法，用于获取 isPatreon 字段 (V1 主)
-    async def _get_v1_player_info(self, tmp_id: str) -> Optional[Dict]:
-        """尝试使用 V1 API 获取玩家信息，主要为 isPatreon 字段。"""
-        if not self.session:
-            return None
-        
-        # TruckersMP 官方 V1 接口
-        url = f"https://api.truckersmp.com/v1/player/{tmp_id}"
-        
-        try:
-            async with self.session.get(url, timeout=5) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    # V1 API 的响应结构是 {"error": false, "response": {...}}
-                    return data.get('response') 
-                logger.info(f"V1 API 查询玩家 {tmp_id} 失败，状态码: {response.status}")
-                return None
-        except Exception:
-            logger.error(f"V1 API 查询失败或超时")
-            return None
-
     async def _get_tmp_id_from_steam_id(self, steam_id: str) -> str:
         if not self.session:
             raise NetworkException("插件未初始化，HTTP会话不可用")
@@ -724,15 +703,14 @@ class TmpBotPlugin(Star):
             return
         
         try:
-            # V2 API (获取全量数据) 和 V1 API (获取 isPatreon) 并行查询
-            player_info_raw, bans_info, online_status, stats_info, v1_info = await asyncio.gather(
-                self._get_player_info(tmp_id), # V2 API 
-                self._get_player_bans(tmp_id), 
+            # 并行查询：仅使用 V2 和相关接口（移除已失效的 V1）
+            player_info_raw, bans_info, online_status, stats_info = await asyncio.gather(
+                self._get_player_info(tmp_id),
+                self._get_player_bans(tmp_id),
                 self._get_online_status(tmp_id),
-                self._get_player_stats(tmp_id),
-                self._get_v1_player_info(tmp_id) # V1 API 
+                self._get_player_stats(tmp_id)
             )
-            player_info = player_info_raw 
+            player_info = player_info_raw
         except PlayerNotFoundException as e:
             yield event.plain_result(str(e))
             return
@@ -1107,11 +1085,10 @@ class TmpBotPlugin(Star):
             return
 
         try:
-            # V2 API (获取全量数据) 和 V1 API (获取 isPatreon) 并行查询
-            online_status, player_info, v1_info = await asyncio.gather(
-                self._get_online_status(tmp_id), 
-                self._get_player_info(tmp_id), # V2
-                self._get_v1_player_info(tmp_id) # V1
+            # 并行查询：仅使用 V2 接口（移除已失效的 V1）
+            online_status, player_info = await asyncio.gather(
+                self._get_online_status(tmp_id),
+                self._get_player_info(tmp_id)
             )
 
         except PlayerNotFoundException as e:
@@ -1134,38 +1111,70 @@ class TmpBotPlugin(Star):
         if steam_id_to_display:
             message += f"Steam编号: {steam_id_to_display}\n"
         
-        # --- 【核心逻辑】赞助信息 (Patron) ---
-        is_patron = False
-        tier = '未知等级'
-        amount = 0
+        # --- 【核心逻辑】赞助信息 (仅基于 V2 player 接口字段) ---
+        def _get_nested(d: Dict, *keys):
+            cur = d
+            for k in keys:
+                if not isinstance(cur, dict):
+                    return None
+                cur = cur.get(k)
+            return cur
+
+        def _to_int(val, default=0):
+            try:
+                if val is None:
+                    return default
+                if isinstance(val, int):
+                    return val
+                if isinstance(val, float):
+                    return int(round(val))
+                s = str(val).strip()
+                if s == "":
+                    return default
+                # 允许像 "123.0" 的字符串
+                return int(float(s))
+            except Exception:
+                return default
+
+        # 兼容 isPatron / isPatreon，兼容容器 patreon / patron
+        is_patron = any([
+            bool(player_info.get('isPatron')),
+            bool(player_info.get('isPatreon')),
+            bool(_get_nested(player_info, 'patreon', 'isPatron')),
+            bool(_get_nested(player_info, 'patreon', 'isPatreon')),
+            bool(_get_nested(player_info, 'patron', 'isPatron')),
+            bool(_get_nested(player_info, 'patron', 'isPatreon')),
+        ])
+
+        # 兼容 active 位于顶层 / patreon / patron / donation
+        active = any([
+            bool(player_info.get('active')),
+            bool(_get_nested(player_info, 'patreon', 'active')),
+            bool(_get_nested(player_info, 'patron', 'active')),
+            bool(_get_nested(player_info, 'donation', 'active')),
+        ]) if is_patron else False
+
+        tier = '赞助者'
         currency = 'USD'
-        data_source = "V2 API" # 默认为 V2
+        amount = 0
+        donation_info = player_info.get('donation', {}) if isinstance(player_info.get('donation'), dict) else {}
+        tier = donation_info.get('tier', tier)
+        currency = donation_info.get('currency', currency)
+        if is_patron:
+            amount = _to_int(donation_info.get('amount'), 0)
+            if amount <= 0:
+                # 兼容 currentPledge 以分为单位，需要除以 100
+                cp = _to_int(
+                    _get_nested(player_info, 'currentPledge')
+                    or _get_nested(player_info, 'donation', 'currentPledge')
+                    or _get_nested(player_info, 'patron', 'currentPledge')
+                    or _get_nested(player_info, 'patreon', 'currentPledge'),
+                    0
+                )
+                if cp > 0:
+                    amount = cp // 100
 
-        # 1. V1 API 是主：检查 isPatreon
-        if v1_info and v1_info.get('isPatreon') is not None:
-            is_patron = v1_info.get('isPatreon', False)
-            data_source = "V1 API"
-        
-        # 2. 如果 V1 或 V2 认为玩家赞助，则从 V2 获取详细信息
-        if is_patron or (v1_info is None and player_info.get('patron', {}).get('active')):
-            
-            # V2 API 是备用/详细信息来源
-            if data_source == "V2 API":
-                 is_patron = player_info.get('patron', {}).get('active', False)
-            
-            if is_patron:
-                patron_info = player_info.get('patron', {})
-                donation_info = player_info.get('donation', {})
-                # 从 V2 获取等级/金额
-                tier = donation_info.get('tier', '赞助者')
-                amount = donation_info.get('amount', 0)
-                currency = donation_info.get('currency', 'USD')
-        
-        # --- 最终输出 ---
-        sponsor_note = f"（状态来自 {data_source}）" if data_source == "V1 API" and is_patron else ""
-
-        message += f"是否赞助: {'是' if is_patron else '否'}{sponsor_note}\n"
-        
+        message += f"是否赞助: {'是' if is_patron else '否'}\n"
         if is_patron:
             if amount > 0:
                 message += f"赞助金额: {tier} ({amount} {currency})\n"
