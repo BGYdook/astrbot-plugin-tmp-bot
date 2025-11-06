@@ -11,6 +11,7 @@ import asyncio
 import aiohttp
 import json
 import os
+import base64
 from typing import Optional, List, Dict, Tuple, Any
 from datetime import datetime
 
@@ -19,6 +20,7 @@ try:
     from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
     from astrbot.api.star import Context, Star, register, StarTools
     from astrbot.api import logger
+    from astrbot.api.message_components import Image, Plain
 except ImportError:
     # 最小化兼容回退 
     class _DummyFilter:
@@ -36,6 +38,8 @@ except ImportError:
             return self._sender_id
         async def plain_result(self, msg):
             return msg
+        async def chain_result(self, components):
+            return components
     MessageEventResult = Any 
     class Context: pass
     class Star:
@@ -59,6 +63,17 @@ except ImportError:
                 import traceback
                 traceback.print_exc()
     logger = _Logger()
+    # 兼容运行环境缺失时的占位 Image 类
+    class Image:
+        @staticmethod
+        def fromBytes(b: bytes):
+            return b
+        @staticmethod
+        def fromURL(url: str):
+            return url
+    class Plain:
+        def __init__(self, text: str):
+            self.text = text
 
 
 # --- 辅助函数：格式化时间戳 ---
@@ -148,21 +163,138 @@ class ApiResponseException(TmpApiException):
 # 版本号更新为 1.3.32
 @register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.32", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
-    def __init__(self, context: Context):
+    def __init__(self, context: Context, config: Optional[Dict[str, Any]] = None):
         super().__init__(context)
+        self.config: Dict[str, Any] = config or {}
         self.session: Optional[aiohttp.ClientSession] = None 
         self.data_dir = StarTools.get_data_dir("tmp-bot")
         self.bind_file = os.path.join(self.data_dir, "tmp_bindings.json")
         os.makedirs(self.data_dir, exist_ok=True)
         logger.info("TMP Bot 插件已加载")
 
+    # --- 配置读取辅助 ---
+    def _cfg_bool(self, key: str, default: bool) -> bool:
+        v = self.config.get(key, default)
+        return bool(v) if isinstance(v, (bool, int, str)) else default
+
+    def _cfg_int(self, key: str, default: int) -> int:
+        try:
+            v = self.config.get(key, default)
+            return int(v)
+        except Exception:
+            return default
+
     async def initialize(self):
         # 统一 User-Agent，并更新版本号
+        timeout_sec = self._cfg_int('api_timeout_seconds', 10)
         self.session = aiohttp.ClientSession(
             headers={'User-Agent': 'AstrBot-TMP-Plugin/1.3.32'}, 
-            timeout=aiohttp.ClientTimeout(total=10)
+            timeout=aiohttp.ClientTimeout(total=timeout_sec)
         )
-        logger.info("TMP Bot 插件HTTP会话已创建")
+        logger.info(f"TMP Bot 插件HTTP会话已创建，超时 {timeout_sec}s")
+
+    # --- 工具：头像处理 ---
+    def _normalize_avatar_url(self, url: Optional[str]) -> Optional[str]:
+        if not url:
+            return None
+        # 去除日志可能引入的反引号、括号、引号，以及误传入的 CQ 片段前缀
+        u = str(url).strip()
+        # 清理包装字符
+        for ch in ('`', '"', "'", '(', ')'):
+            u = u.strip(ch)
+        # 如果误传了完整片段，剥离前缀
+        if u.startswith('[CQ:image,file='):
+            u = u[len('[CQ:image,file='):]
+        # 去掉结尾的右括号
+        if u.endswith(']'):
+            u = u[:-1]
+        u = u.strip()
+        return u or None
+
+    async def _get_avatar_base64(self, url: str) -> Optional[str]:
+        if not self.session:
+            return None
+        try:
+            timeout_sec = self._cfg_int('api_timeout_seconds', 10)
+            async with self.session.get(url, timeout=timeout_sec) as resp:
+                if resp.status == 200:
+                    content = await resp.read()
+                    if content:
+                        return base64.b64encode(content).decode('ascii')
+                return None
+        except Exception:
+            return None
+
+    async def _get_avatar_bytes(self, url: str) -> Optional[bytes]:
+        if not self.session:
+            return None
+        try:
+            timeout_sec = self._cfg_int('api_timeout_seconds', 10)
+            async with self.session.get(url, timeout=timeout_sec, allow_redirects=True) as resp:
+                if resp.status == 200:
+                    content = await resp.read()
+                    if content:
+                        return content
+                    else:
+                        logger.info(f"头像下载失败: 空内容 status=200 url={url}")
+                        return None
+                else:
+                    logger.info(f"头像下载失败: status={resp.status} url={url}")
+                    return None
+        except Exception as e:
+            logger.error(f"头像下载异常: url={url} err={e}", exc_info=False)
+            return None
+
+    async def _get_avatar_bytes_with_fallback(self, url: str, tmp_id: Optional[str]) -> Optional[bytes]:
+        """尝试多种 TruckersMP 头像URL变体，尽可能获取头像字节。"""
+        base = self._normalize_avatar_url(url)
+        candidates: List[str] = []
+        if base:
+            candidates.append(base)
+            # 切换 jpg/png
+            if base.lower().endswith('.jpg'):
+                candidates.append(base[:-4] + '.png')
+            elif base.lower().endswith('.png'):
+                candidates.append(base[:-4] + '.jpg')
+            # 解析 avatarsN/{id}.{stamp}.{ext} -> 生成多种组合
+            import re as _re
+            m = _re.search(r"https?://static\.truckersmp\.com/(avatarsN|avatars)/(\d+)(?:\.\d+)?\.(jpg|png)", base, _re.IGNORECASE)
+            if m:
+                folder = m.group(1)
+                pid = m.group(2)
+                ext = m.group(3).lower()
+                alt_ext = 'png' if ext == 'jpg' else 'jpg'
+                # 去掉时间戳
+                candidates.append(f"https://static.truckersmp.com/{folder}/{pid}.{ext}")
+                candidates.append(f"https://static.truckersmp.com/{folder}/{pid}.{alt_ext}")
+                # 切到另一个目录
+                other_folder = 'avatars' if folder.lower() == 'avatarsn' else 'avatarsN'
+                candidates.append(f"https://static.truckersmp.com/{other_folder}/{pid}.{ext}")
+                candidates.append(f"https://static.truckersmp.com/{other_folder}/{pid}.{alt_ext}")
+
+        # 根据 tmp_id 追加常见直连地址
+        if tmp_id:
+            for ext in ('jpg', 'png'):
+                candidates.append(f"https://static.truckersmp.com/avatars/{tmp_id}.{ext}")
+                candidates.append(f"https://static.truckersmp.com/avatarsN/{tmp_id}.{ext}")
+
+        # 去重保持顺序
+        seen = set()
+        uniq: List[str] = []
+        for c in candidates:
+            if not c:
+                continue
+            if c in seen:
+                continue
+            seen.add(c)
+            uniq.append(c)
+
+        for c in uniq:
+            b = await self._get_avatar_bytes(c)
+            logger.info(f"头像下载尝试: url={c} -> {'成功' if b else '失败'}")
+            if b:
+                return b
+        return None
 
     # --- 内部工具方法 (保持不变) ---
     def _load_bindings(self) -> Dict[str, Any]:
@@ -304,22 +436,23 @@ class TmpBotPlugin(Star):
         except Exception:
             return []
             
-    async def _get_player_stats(self, tmp_id: str) -> Dict[str, int]:
-        """通过 da.vtcm.link API 获取玩家的总里程和今日里程。"""
+    async def _get_player_stats(self, tmp_id: str) -> Dict[str, Any]:
+        """通过 da.vtcm.link API 获取玩家的总里程、今日里程和头像。"""
         if not self.session: 
-            return {'total_km': 0, 'daily_km': 0, 'debug_error': 'HTTP会话不可用。'}
+            return {'total_km': 0, 'daily_km': 0, 'avatar_url': '', 'debug_error': 'HTTP会话不可用。'}
 
         vtcm_stats_url = f"https://da.vtcm.link/player/info?tmpId={tmp_id}"
         logger.info(f"尝试 VTCM 里程 API: {vtcm_stats_url}")
         
         try:
-            async with self.session.get(vtcm_stats_url, timeout=5) as response:
+            async with self.session.get(vtcm_stats_url, timeout=self._cfg_int('api_timeout_seconds', 10)) as response:
                 if response.status == 200:
                     data = await response.json()
                     response_data = data.get('data', {}) 
                     
                     total_km = int(response_data.get('totalDistance', 0))
                     daily_km = int(response_data.get('todayDistance', 0))
+                    avatar_url = response_data.get('avatarUrl', '')
                     
                     if data.get('code') != 200 or not response_data:
                         raise ApiResponseException(f"VTCM 里程 API 返回非成功代码或空数据: {data.get('msg', 'N/A')}")
@@ -327,10 +460,11 @@ class TmpBotPlugin(Star):
                     return {
                         'total_km': total_km, 
                         'daily_km': daily_km,
+                        'avatar_url': avatar_url,
                         'debug_error': 'VTCM 里程数据获取成功。'
                     }
                 else:
-                    return {'total_km': 0, 'daily_km': 0, 'debug_error': f'VTCM 里程 API 返回状态码: {response.status}'}
+                    return {'total_km': 0, 'daily_km': 0, 'avatar_url': '', 'debug_error': f'VTCM 里程 API 返回状态码: {response.status}'}
 
         except aiohttp.ClientError:
             return await self._get_player_stats_fallback(tmp_id)
@@ -478,6 +612,45 @@ class TmpBotPlugin(Star):
         sorted_bans = sorted(bans_info, key=lambda x: x.get('timeAdded', ''), reverse=True)
         return len(bans_info), sorted_bans
 
+    def _translate_ban_reason(self, reason: Optional[str]) -> str:
+        """将封禁原因中的所有片段（§X.X - 英文）翻译为中文，保留后续说明/链接。
+
+        支持多段原因，例如：
+        输入："§2.2 - Collisions, §2.5 - Reckless Driving - https://youtu.be/xxx // 30 days due to history (§2.8)"
+        输出："§2.2 - 碰撞, §2.5 - 鲁莽驾驶 - https://youtu.be/xxx // 30天（§2.8历史）"（保留原样的链接与说明）
+        """
+        if not reason or not isinstance(reason, str):
+            return reason or ""
+
+        zh_map = {
+            "2.1": "黑客攻击/错误/功能滥用",
+            "2.2": "碰撞",
+            "2.3": "堵塞",
+            "2.4": "不正确的方式/不适当的超车",
+            "2.5": "鲁莽驾驶",
+            "2.6": "不适当的车队管理/滥用汽车",
+            "2.7": "特色区域和事件服务器",
+        }
+
+        # 找出所有 "§x.x - title" 片段（title 截止到逗号或连字符）
+        matches = list(re.finditer(r"§\s*(?P<code>\d+\.\d+)\s*-\s*(?P<title>[^,\-]+)", reason))
+        if not matches:
+            return reason
+
+        parts = []
+        for m in matches:
+            code = m.group("code").strip()
+            title = m.group("title").strip()
+            zh_title = zh_map.get(code)
+            if zh_title:
+                parts.append(f"§{code} - {zh_title}")
+            else:
+                parts.append(f"§{code} - {title}")
+
+        # 保留最后一个匹配之后的所有内容（通常包含链接与说明）
+        remainder = reason[matches[-1].end():]
+        return ", ".join(parts) + remainder
+
 
     # ******************************************************
     # 命令处理器 
@@ -539,15 +712,15 @@ class TmpBotPlugin(Star):
         last_online_raw = player_info.get('lastOnline')
         last_online_formatted = _format_timestamp_to_readable(last_online_raw)
         
-        # 完整的回复消息构建 (纯文本输出)
-        message = "TMP玩家详细信息\n"
-        message += "=" * 20 + "\n"
-        message += f"ID TMP编号: {tmp_id}\n"
+        # 完整的回复消息构建：标题与正文分离，便于控制发送顺序
+        header = "TMP玩家详细信息\r\n" + "=" * 20 + "\r\n"
+        body = ""
+        body += f"ID TMP编号: {tmp_id}\n"
         if steam_id_to_display:
-            message += f"ID Steam编号: {steam_id_to_display}\n" 
+            body += f"ID Steam编号: {steam_id_to_display}\n" 
             
-        message += f"玩家名称: {player_info.get('name', '未知')}\n"
-        message += f"上次在线: {last_online_formatted}\n"
+        body += f"玩家名称: {player_info.get('name', '未知')}\n"
+        body += f"上次在线: {last_online_formatted}\n"
         
         # 权限/分组信息
         perms_str = "玩家"
@@ -559,13 +732,13 @@ class TmpBotPlugin(Star):
                     perms_str = ', '.join(groups)
             elif isinstance(perms, list) and perms:
                 perms_str = ', '.join(perms)
-        message += f"所属分组: {perms_str}\n"
+        body += f"所属分组: {perms_str}\n"
 
         vtc_name = player_info.get('vtc', {}).get('name')
         vtc_role = player_info.get('vtc', {}).get('role')
-        message += f"所属车队: {vtc_name if vtc_name else '无'}\n"
+        body += f"所属车队: {vtc_name if vtc_name else '无'}\n"
         if vtc_role:
-                message += f"车队角色: {vtc_role}\n"
+                body += f"车队角色: {vtc_role}\n"
         
         # --- 【核心逻辑】赞助信息 (Patron) ---
         is_patron = False
@@ -597,13 +770,13 @@ class TmpBotPlugin(Star):
         # --- 最终输出 ---
         sponsor_note = f"（状态来自 {data_source}）" if data_source == "V1 API" and is_patron else ""
 
-        message += f"是否赞助: {'是' if is_patron else '否'}{sponsor_note}\n"
+        body += f"是否赞助: {'是' if is_patron else '否'}{sponsor_note}\n"
         
         if is_patron:
             if amount > 0:
-                message += f"赞助金额: {tier} ({amount} {currency})\n"
+                body += f"赞助金额: {tier} ({amount} {currency})\n"
             else:
-                message += f"赞助等级: {tier}\n"
+                body += f"赞助等级: {tier}\n"
         # ---------------------------------------------
         # --- 赞助信息结束 ---
 
@@ -611,14 +784,14 @@ class TmpBotPlugin(Star):
         total_km = stats_info.get('total_km', 0)
         daily_km = stats_info.get('daily_km', 0)
         
-        message += f"🚩历史里程: {total_km:,} km\n".replace(',', ' ')
-        message += f"🚩今日里程: {daily_km:,} km\n".replace(',', ' ')
+        body += f"🚩历史里程: {total_km:,} km\n".replace(',', ' ')
+        body += f"🚩今日里程: {daily_km:,} km\n".replace(',', ' ')
         
         # --- 封禁信息 (不变) ---
-        message += f"是否封禁: {'是' if is_banned else '否'}\n"
+        body += f"是否封禁: {'是' if is_banned else '否'}\n"
         
         if ban_count > 0:
-            message += f"历史封禁: {ban_count}次\n"
+            body += f"历史封禁: {ban_count}次\n"
 
         if is_banned:
             
@@ -629,22 +802,23 @@ class TmpBotPlugin(Star):
                     current_ban = sorted_bans[0]
                     
             if current_ban:
-                ban_reason = current_ban.get('reason', '未知封禁原因 (API V2)')
+                ban_reason_raw = current_ban.get('reason', '未知封禁原因 (API V2)')
+                ban_reason = self._translate_ban_reason(ban_reason_raw)
                 ban_expiration = current_ban.get('expiration', banned_until_main) 
                 
-                message += f"当前封禁原因: {ban_reason}\n"
+                body += f"当前封禁原因: {ban_reason}\n"
                 
                 if ban_expiration and ban_expiration.lower().startswith('never'):
-                    message += f"封禁截止: 永久封禁\n"
+                    body += f"封禁截止: 永久封禁\n"
                 else:
-                    message += f"封禁截止: {ban_expiration}\n"
+                    body += f"封禁截止: {ban_expiration}\n"
                     
             else:
-                message += f"当前封禁原因: API详细记录缺失。可能原因：封禁信息被隐藏或数据同步延迟。\n"
+                body += f"当前封禁原因: API详细记录缺失。可能原因：封禁信息被隐藏或数据同步延迟。\n"
                 if banned_until_main and banned_until_main.lower().startswith('never'):
-                    message += f"封禁截止: 永久封禁\n"
+                    body += f"封禁截止: 永久封禁\n"
                 else:
-                    message += f"封禁截止: {banned_until_main}\n"
+                    body += f"封禁截止: {banned_until_main}\n"
         
         
         if online_status and online_status.get('online'):
@@ -653,13 +827,37 @@ class TmpBotPlugin(Star):
             game_mode = "欧卡2" if game_mode_code == 1 else "美卡" if game_mode_code == 2 else "未知游戏"
             city = online_status.get('city', {}).get('name', '未知位置') 
             
-            message += f"在线状态: 在线\n"
-            message += f"所在服务器: {server_name}\n"
-            message += f"所在位置: {city} ({game_mode})\n"
+            body += f"在线状态: 在线\n"
+            body += f"所在服务器: {server_name}\n"
+            body += f"所在位置: {city} ({game_mode})\n"
         else:
-            message += f"在线状态: 离线\n"
+            body += f"在线状态: 离线\n"
         
-        yield event.plain_result(message)
+        # 头像（强制按组件发送）
+        show_avatar_cfg = self._cfg_bool('query_show_avatar_enable', True)
+        logger.info(f"查询详情: 头像开关={'ON' if show_avatar_cfg else 'OFF'}，将组合 Image+Plain 统一发送。")
+        avatar_url = self._normalize_avatar_url(player_info.get('avatar') or stats_info.get('avatar_url'))
+        logger.info(f"查询详情: 规范化后URL={avatar_url}")
+        components = []
+        # 发送顺序控制：当头像关闭时，将标题与正文合并为一个文本组件以保证换行在同一组件内生效
+        if not show_avatar_cfg:
+            logger.info("查询详情: 头像开关为OFF，合并标题与正文为单个文本组件")
+            components.append(Plain(header + "\r\n" + body))
+        else:
+            # 头像开启：标题 -> 头像 -> 空行 -> 正文
+            components.append(Plain(header))
+            if avatar_url:
+                try:
+                    logger.info("查询详情: 组合消息链添加 Image(URL) 组件")
+                    components.append(Image.fromURL(avatar_url))
+                except Exception:
+                    logger.error("查询详情: 生成 Image(URL) 组件失败，跳过头像", exc_info=True)
+            else:
+                logger.info("查询详情: 无可用头像URL，跳过头像组件")
+            # 确保正文从新的一行开始（适配不同适配器的换行处理）
+            components.append(Plain("\r\n"))
+            components.append(Plain(body))
+        yield event.chain_result(components)
     
     @filter.command("DLC") 
     async def tmpdlc(self, event: AstrMessageEvent):
@@ -910,7 +1108,32 @@ class TmpBotPlugin(Star):
         else:
             message += f"在线状态: 离线\n"
 
-        yield event.plain_result(message)
+        # 头像（强制按组件发送，组合链）
+        show_avatar_cfg = self._cfg_bool('query_show_avatar_enable', True)
+        logger.info(f"玩家状态: 头像开关={'ON' if show_avatar_cfg else 'OFF'}，将组合 Image+Plain 统一发送。")
+        # 优先使用 TruckersMP V2 的头像字段，其次 VTCM 查询
+        avatar_url = self._normalize_avatar_url(player_info.get('avatar'))
+        if not avatar_url:
+            try:
+                stats_info = await self._get_player_stats(tmp_id)
+                avatar_url = self._normalize_avatar_url(stats_info.get('avatar_url'))
+            except Exception:
+                avatar_url = None
+        logger.info(f"玩家状态: 规范化后URL={avatar_url}")
+        components = []
+        if show_avatar_cfg and avatar_url:
+            try:
+                logger.info("玩家状态: 组合消息链添加 Image(URL) 组件")
+                components.append(Image.fromURL(avatar_url))
+            except Exception:
+                logger.error("玩家状态: 生成 Image(URL) 组件失败，跳过头像", exc_info=True)
+        else:
+            if not show_avatar_cfg:
+                logger.info("玩家状态: 头像开关为OFF，跳过头像组件")
+            elif not avatar_url:
+                logger.info("玩家状态: 无可用头像URL，跳过头像组件")
+        components.append(Plain(message))
+        yield event.chain_result(components)
     
     # --- 【新功能】定位命令 ---
     @filter.command("定位")

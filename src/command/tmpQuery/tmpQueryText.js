@@ -52,7 +52,8 @@ module.exports = async (ctx, cfg, session, tmpId) => {
   // 拼接消息模板
   let message = ''
   if (cfg.queryShowAvatarEnable) {
-    message += `<img src="${playerInfo.data.avatarUrl}"/>\n`
+    // 使用 OneBot CQ 码发送头像图片，以适配 AstrBot 4.5 与 Omenbot
+    message += `[CQ:image,file=${playerInfo.data.avatarUrl}]\n`
   }
   message += '🆔TMP编号: ' + playerInfo.data.tmpId
   message += '\n😀玩家名称: ' + playerInfo.data.name

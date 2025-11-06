@@ -1,4 +1,3 @@
-const { segment } = require('koishi')
 const { resolve } = require('path')
 const guildBind = require('../database/guildBind')
 const truckyAppApi = require('../api/truckyAppApi')
@@ -88,11 +87,12 @@ module.exports = async (ctx, cfg, session, tmpId) => {
       await common.sleep(100)
       await page.waitForNetworkIdle()
       const element = await page.$("#container");
-      return (
-        segment.image(await element.screenshot({
-          encoding: "binary"
-        }), "image/jpg")
-      )
+      // 使用 OneBot CQ 码返回截图，适配 Omenbot 协议
+      const imageBuffer = await element.screenshot({
+        encoding: 'binary'
+      })
+      const base64 = Buffer.from(imageBuffer).toString('base64')
+      return `[CQ:image,file=base64://${base64}]`
     } catch (e) {
       return '渲染异常，请重试'
     } finally {

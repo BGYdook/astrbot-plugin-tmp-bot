@@ -1,4 +1,4 @@
-_Pycache_/
+__pycache__/
 
 lib
 dist
