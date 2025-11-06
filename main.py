@@ -13,7 +13,7 @@ import json
 import os
 import base64
 from typing import Optional, List, Dict, Tuple, Any
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # 引入 AstrBot 核心 API
 try:
@@ -93,6 +93,30 @@ def _format_timestamp_to_readable(timestamp_str: Optional[str]) -> str:
         # 兼容性回退
         return timestamp_str.split('T')[0] if 'T' in timestamp_str else timestamp_str
 # -----------------------------
+
+def _format_timestamp_to_beijing(timestamp_str: Optional[str]) -> str:
+    """将 UTC 时间戳转换为北京时间 (UTC+8)。兼容 ISO 8601 和简单格式。"""
+    if not timestamp_str:
+        return "未知"
+
+    s = str(timestamp_str).strip()
+    if s.lower().startswith('never'):
+        return "永久封禁"
+
+    try:
+        clean_str = s.replace('T', ' ').split('.')[0].replace('Z', '')
+        dt_utc = datetime.strptime(clean_str, '%Y-%m-%d %H:%M:%S')
+        dt_bj = dt_utc + timedelta(hours=8)
+        return dt_bj.strftime('%Y-%m-%d %H:%M:%S') + " (UTC+8)"
+    except Exception:
+        try:
+            # ISO 8601 with timezone offset, e.g. 2025-12-01T07:55:00+00:00
+            iso = s.replace('Z', '+00:00')
+            dt = datetime.fromisoformat(iso)
+            dt_bj = dt + timedelta(hours=8)
+            return dt_bj.strftime('%Y-%m-%d %H:%M:%S') + " (UTC+8)"
+        except Exception:
+            return s
 
 # --- 辅助函数：获取 DLC 列表 (优化后) ---
 def _get_dlc_info(player_info: Dict) -> Dict[str, List[str]]:
@@ -808,17 +832,17 @@ class TmpBotPlugin(Star):
                 
                 body += f"当前封禁原因: {ban_reason}\n"
                 
-                if ban_expiration and ban_expiration.lower().startswith('never'):
+                if ban_expiration and isinstance(ban_expiration, str) and ban_expiration.lower().startswith('never'):
                     body += f"封禁截止: 永久封禁\n"
                 else:
-                    body += f"封禁截止: {ban_expiration}\n"
+                    body += f"封禁截止: {_format_timestamp_to_beijing(ban_expiration)}\n"
                     
             else:
                 body += f"当前封禁原因: API详细记录缺失。可能原因：封禁信息被隐藏或数据同步延迟。\n"
-                if banned_until_main and banned_until_main.lower().startswith('never'):
+                if banned_until_main and isinstance(banned_until_main, str) and banned_until_main.lower().startswith('never'):
                     body += f"封禁截止: 永久封禁\n"
                 else:
-                    body += f"封禁截止: {banned_until_main}\n"
+                    body += f"封禁截止: {_format_timestamp_to_beijing(banned_until_main)}\n"
         
         
         if online_status and online_status.get('online'):
