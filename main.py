@@ -447,6 +447,7 @@ class TmpBotPlugin(Star):
     async def _get_player_stats(self, tmp_id: str) -> Dict[str, Any]:
         """通过 da.vtcm.link API 获取玩家的总里程、今日里程和头像。
         字段调整：历史里程使用 mileage，今日里程使用 todayMileage。
+        输出调整：将从 API 获取的数值除以 1000（米→公里），保留两位小数。
         不再兼容旧字段 totalDistance/todayDistance，并对数值进行稳健转换。
         """
         if not self.session: 
@@ -468,29 +469,27 @@ class TmpBotPlugin(Star):
                     response_data = data.get('data', {}) 
                     logger.info(f"VTCM 里程响应: status=200, code={data.get('code')}, has_data={bool(response_data)}")
                     
-                    # 使用新字段：mileage / todayMileage（单位：公里），兼容旧字段
-                    def _to_int_local(val, default=0):
+                    # 使用新字段：mileage / todayMileage（单位：米），转换为公里并保留两位小数
+                    def _to_km_2f(val, default=0.0):
                         try:
                             if val is None:
                                 return default
-                            if isinstance(val, int):
-                                return val
-                            if isinstance(val, float):
-                                return int(val)
+                            if isinstance(val, (int, float)):
+                                return round(float(val) / 1000.0, 2)
                             s = str(val).strip()
                             if s == "":
                                 return default
-                            return int(float(s))
+                            return round(float(s) / 1000.0, 2)
                         except Exception:
                             return default
 
                     total_raw = response_data.get('mileage')
                     daily_raw = response_data.get('todayMileage')
 
-                    total_km = _to_int_local(total_raw, 0)
-                    daily_km = _to_int_local(daily_raw, 0)
+                    total_km = _to_km_2f(total_raw, 0.0)
+                    daily_km = _to_km_2f(daily_raw, 0.0)
                     avatar_url = response_data.get('avatarUrl', '')
-                    logger.info(f"VTCM 里程解析: total_km={total_km}, today_km={daily_km}, avatar={avatar_url}")
+                    logger.info(f"VTCM 里程解析: total_km={total_km:.2f}, today_km={daily_km:.2f}, avatar={avatar_url}")
                     
                     if data.get('code') != 200 or not response_data:
                         logger.info(f"VTCM 里程数据校验失败: code={data.get('code')}, has_data={bool(response_data)}")
@@ -826,23 +825,23 @@ class TmpBotPlugin(Star):
         body += f"赞助是否有效: {'是' if active else '否'}\n"
         if is_patron:
             if current_pledge > 0:
-                body += f"当前赞助金额: {current_pledge} 美元\n"
+                body += f"当前赞助金额: {current_pledge}美元\n"
             else:
-                body += f"当前赞助金额: 0 美元（当前未赞助）\n"
-            body += f"历史赞助金额: {lifetime_pledge} 美元\n"
+                body += f"当前赞助金额: 0美元（当前未赞助）\n"
+            body += f"历史赞助金额: {lifetime_pledge}美元\n"
         else:
-            body += f"当前赞助金额: 0 美元\n"
-            body += f"历史赞助金额: 0 美元\n"
+            body += f"当前赞助金额: 0美元\n"
+            body += f"历史赞助金额: 0美元\n"
         # --- 赞助信息结束 ---
 
         # --- 里程信息输出 (不变) ---
         logger.info(f"查询详情: 里程字典 keys={list(stats_info.keys())}, debug={stats_info.get('debug_error')}")
-        total_km = stats_info.get('total_km', 0)
-        daily_km = stats_info.get('daily_km', 0)
-        logger.info(f"查询详情: 里程输出值 total_km={total_km}, daily_km={daily_km}")
+        total_km = stats_info.get('total_km', 0.0)
+        daily_km = stats_info.get('daily_km', 0.0)
+        logger.info(f"查询详情: 里程输出值 total_km={total_km:.2f}, daily_km={daily_km:.2f}")
         
-        body += f"🚩历史里程: {total_km:,} km\n".replace(',', ' ')
-        body += f"🚩今日里程: {daily_km:,} km\n".replace(',', ' ')
+        body += f"🚩历史里程: {total_km:.2f}公里/km\n"
+        body += f"🚩今日里程: {daily_km:.2f}公里/km\n"
         
         # --- 封禁信息 (不变) ---
         body += f"是否封禁: {'是' if is_banned else '否'}\n"
@@ -1177,7 +1176,7 @@ class TmpBotPlugin(Star):
         message += f"是否赞助: {'是' if is_patron else '否'}\n"
         if is_patron:
             if amount > 0:
-                message += f"赞助金额: {tier} ({amount} {currency})\n"
+                message += f"赞助金额: {tier} ({amount}{currency})\n"
             else:
                 message += f"赞助等级: {tier}\n"
         # -------------------
