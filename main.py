@@ -3,7 +3,7 @@
 
 """
 AstrBot-plugin-tmp-bot
-欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.32：V1 优先赞助状态 + 新增 定位 命令)
+欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.50)
 """
 
 import re
@@ -185,8 +185,8 @@ class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
 
-# 版本号更新为 1.3.32
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.32", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
+# 版本号更新为 1.3.50
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.50", "https://github.com/BGYdook/astrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context: Context, config: Optional[Dict[str, Any]] = None):
         super().__init__(context)
