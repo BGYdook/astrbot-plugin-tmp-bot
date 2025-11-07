@@ -5,7 +5,6 @@ const evmOpenApi = require('../../api/evmOpenApi')
 const baiduTranslate = require('../../util/baiduTranslate')
 const {resolve} = require("path");
 const common = require("../../util/common");
-const {segment} = require("koishi");
 
 /**
  * 用户组
@@ -95,11 +94,12 @@ module.exports = async (ctx, cfg, session, tmpId) => {
     await common.sleep(100)
     await page.waitForNetworkIdle()
     const element = await page.$("#container");
-    return (
-      segment.image(await element.screenshot({
-        encoding: "binary"
-      }), "image/jpg")
-    )
+    // 截图并以 OneBot CQ 图片码返回，兼容 Omenbot 协议
+    const imageBuffer = await element.screenshot({
+      encoding: 'binary'
+    })
+    const base64 = Buffer.from(imageBuffer).toString('base64')
+    return `[CQ:image,file=base64://${base64}]`
   } catch {
     return '渲染异常，请重试'
   } finally {
