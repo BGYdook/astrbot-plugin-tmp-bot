@@ -1,6 +1,6 @@
 # astrbot-plugin-tmp-bot
 
-[![npm](https://img.shields.io/npm/v/koishi-plugin-tmp-bot?style=flat-square)](https://www.npmjs.com/package/koishi-plugin-tmp-bot)
+[![npm](https://img.shields.io/npm/v/koishi-plugin-tmp-bot?style=flat-square)](https://github.com/BGYdook/astrbot-plugin-tmp-bot)
 
 欧洲卡车模拟2 TMP查询机器人
 
@@ -21,5 +21,4 @@
 ### TMP数据接口文档
 https://apifox.com/apidoc/shared/38508a88-5ff4-4b29-b724-41f9d3d3336a
 
-### 已部署的机器人
-如不会部署，可直接使用此机器人 => QQ:3523283907
+
