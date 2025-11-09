@@ -592,11 +592,17 @@ class TmpBotPlugin(Star):
         if not self.session:
             raise NetworkException("插件未初始化，HTTP会话不可用")
 
-        url = f"https://da.vtcm.link/player/mileage={tmpIdList}="
+        payload = {
+            "tmpIdList": [tmp_id]
+        }
+        headers = {
+            "Content-Type": "application/json"
+        }
+        url = f"https://da.vtcm.link/player/mileage"
         logger.info(f"尝试 API (排行榜): {url}")
         
         try:
-            async with self.session.get(url, timeout=10) as response:
+            async with self.session.get(url, timeout=10, json=payload, headers=headers) as response:
                 if response.status == 200:
                     data = await response.json()
                     response_data = data.get('data', [])
