@@ -591,14 +591,8 @@ class TmpBotPlugin(Star):
         """获取 TruckersMP 里程排行榜列表 (使用 vtcm.link API)。"""
         if not self.session:
             raise NetworkException("插件未初始化，HTTP会话不可用")
-
-        payload = {
-            "tmpIdList": [tmp_id]
-        }
-        headers = {
-            "Content-Type": "application/json"
-        }
-        url = f"https://da.vtcm.link/player/mileage"
+            
+        url = f"https://da.vtcm.link/player/mileage={tmpIdList}"
         logger.info(f"尝试 API (排行榜): {url}")
         
         try:
