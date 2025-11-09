@@ -9,6 +9,8 @@ AstrBot-plugin-tmp-bot
 import re
 import asyncio
 import aiohttp
+import ssl
+import certifi
 import json
 import os
 import base64
@@ -212,8 +214,13 @@ class TmpBotPlugin(Star):
     async def initialize(self):
         # 统一 User-Agent，并更新版本号
         timeout_sec = self._cfg_int('api_timeout_seconds', 10)
+        
+        # 创建 SSL 上下文，并使用 certifi 提供的证书
+        ssl_context = ssl.create_default_context(cafile=certifi.where())
+        
         # 使用 IPv4 优先的连接器，并允许读取环境代理设置（与浏览器/系统行为更一致）
-        connector = aiohttp.TCPConnector(family=socket.AF_INET)
+        connector = aiohttp.TCPConnector(family=socket.AF_INET, ssl=ssl_context)
+        
         self.session = aiohttp.ClientSession(
             headers={'User-Agent': 'AstrBot-TMP-Plugin/1.3.32'}, 
             timeout=aiohttp.ClientTimeout(total=timeout_sec),
