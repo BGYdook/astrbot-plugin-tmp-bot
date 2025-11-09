@@ -588,11 +588,11 @@ class TmpBotPlugin(Star):
             return {'online': False, 'debug_error': f'Trucky V3 API 发生意外错误: {e.__class__.__name__}。'}
     
     async def _get_rank_list(self, limit: int = 10) -> Optional[List[Dict]]:
-        """获取 TruckersMP 里程排行榜列表 (使用 s.apifox.cn API)。"""
+        """获取 TruckersMP 里程排行榜列表 (使用 vtcm.link API)。"""
         if not self.session:
             raise NetworkException("插件未初始化，HTTP会话不可用")
 
-        url = f"https://s.apifox.cn/38508a88-5ff4-4b29-b724-41f9d3d3336a"
+        url = f"https://api.vtcm.link/api/statistics/mileageRankingList?rankingType=total&rankingCount={limit}"
         logger.info(f"尝试 API (排行榜): {url}")
         
         try:
@@ -1321,16 +1321,16 @@ class TmpBotPlugin(Star):
         message += "=" * 35 + "\n"
         
         for idx, player in enumerate(rank_list):
-            rank = idx + 1
-            name = player.get('serverName', '未知玩家')
-            distance_m = player.get('playerCount', 0)
+            rank = player.get('ranking', idx + 1)
+            name = player.get('name', '未知玩家')
+            distance_m = player.get('mileage', 0)
             
             # 转换为公里并格式化
             distance_km = int(distance_m / 1000)
             distance_str = f"{distance_km:,}".replace(',', ' ')
             
             # 格式化输出：[排名] 玩家名 (ID: TMP ID) - 里程
-            tmp_id = player.get('serverId', 'N/A')
+            tmp_id = player.get('tmpId', 'N/A')
             
             line = f"No.{rank:<2} | {name} (ID:{tmp_id})\n"
             line += f"       {distance_str} km\n"
@@ -1338,7 +1338,7 @@ class TmpBotPlugin(Star):
             message += line
 
         message += "=" * 35 + "\n"
-        message += "数据来源: s.apifox.cn API"
+        message += "数据来源: vtcm.link API"
 
         yield event.plain_result(message)
     # --- 里程排行榜命令处理器结束 ---
