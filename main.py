@@ -610,12 +610,14 @@ class TmpBotPlugin(Star):
                     return []
                 else:
                     raise ApiResponseException(f"排行榜 API 返回错误状态码: {response.status}")
-        except aiohttp.ClientError:
+        except aiohttp.ClientError as e:
+            logger.error(f"排行榜 API 网络请求失败 (aiohttp.ClientError): {e}")
             raise NetworkException("排行榜 API 网络请求失败")
         except asyncio.TimeoutError:
+            logger.error("请求排行榜 API 超时")
             raise NetworkException("请求排行榜 API 超时")
         except Exception as e:
-            logger.error(f"查询排行榜失败: {e}")
+            logger.error(f"查询排行榜时发生未知错误: {e}", exc_info=True)
             raise NetworkException("查询排行榜失败")
 
 
