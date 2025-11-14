@@ -588,19 +588,20 @@ class TmpBotPlugin(Star):
             return {'online': False, 'debug_error': f'Trucky V3 API 发生意外错误: {e.__class__.__name__}。'}
     
     async def _get_rank_list(self, limit: int = 10) -> Optional[List[Dict]]:
-        """获取 TruckersMP 里程排行榜列表 (使用 vtcm.link API)。"""
+        """获取 TruckersMP 里程排行榜列表 (使用 da.vtcm.link API)。"""
         if not self.session:
             raise NetworkException("插件未初始化，HTTP会话不可用")
-            
-        url = f"https://da.vtcm.link/player/mileage={tmpIdList}"
+
+        # 正确的排行榜接口（总里程），支持数量参数
+        url = f"https://da.vtcm.link/statistics/mileageRankingList?rankingType=total&rankingCount={limit}"
         logger.info(f"尝试 API (排行榜): {url}")
-        
+
         try:
-            async with self.session.get(url, timeout=10, json=payload, headers=headers) as response:
+            async with self.session.get(url, timeout=10) as response:
                 if response.status == 200:
                     data = await response.json()
                     response_data = data.get('data', [])
-                    
+
                     if isinstance(response_data, list):
                         return response_data
                     else:
@@ -1340,7 +1341,7 @@ class TmpBotPlugin(Star):
             message += line
 
         message += "=" * 35 + "\n"
-        message += "数据来源: vtcm.link API"
+        message += "数据来源: da.vtcm.link API"
 
         yield event.plain_result(message)
     # --- 里程排行榜命令处理器结束 ---
