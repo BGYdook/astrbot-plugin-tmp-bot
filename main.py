@@ -892,9 +892,9 @@ class TmpBotPlugin(Star):
         # 完整的回复消息构建：标题与正文分离，便于控制发送顺序
         header = "TMP玩家详细信息\r\n" + "=" * 20 + "\r\n"
         body = ""
-        body += f"ID TMP编号: {tmp_id}\n"
+        body += f"ID TMPID: {tmp_id}\n"
         if steam_id_to_display:
-            body += f"ID Steam编号: {steam_id_to_display}\n"
+            body += f"ID SteamID: {steam_id_to_display}\n"
         body += f"玩家名称: {player_info.get('name', '未知')}\n"
         body += f"上次在线: {last_online_formatted}\n"
 
