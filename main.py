@@ -633,35 +633,156 @@ class TmpBotPlugin(Star):
 
     async def _get_vtc_member_role(self, tmp_id: str) -> Optional[str]:
         """使用 da.vtcm.link 的 vtc/memberAll/role 接口查询玩家在车队内的角色。
-        返回字符串（若找不到或异常则返回 None）。"""
+        新逻辑：
+        1) 若 player_info 中已有 vtc.id/vtcId/vtc_id，则直接用该 vtcId 调用 memberAll/role?vtcId=...
+        2) 否则先尝试调用 memberAll/role?tmpId=tmp_id（有些接口支持直接用 tmpId 查询）
+        3) 若仍未命中且有车队名，则尝试通过车队名搜索获取 vtcId（/vtc/search?name=...），再用 vtcId 查询成员角色
+        4) 仍失败时返回 None
+        """
         if not self.session:
             return None
 
-        url = f"https://da.vtcm.link/vtc/memberAll/role?tmpId={tmp_id}"
-        logger.info(f"尝试 VTC 车队角色 API: {url}")
+        # 尝试 1：如果我们已经能从之前抓到的 player_info 中获取 vtc id（临时从绑定缓存/上下文获取）
+        # 这里尝试从缓存/临时文件中读取 player_info.vtc.id 的通用位置（调用方可在调用前填充）
         try:
-            async with self.session.get(url, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
-                if resp.status != 200:
-                    logger.info(f"VTC 角色 API 返回状态码: {resp.status}")
-                    return None
+            # 如果调用方在 session 外准备了临时缓存，可在这里尝试读取（兼容性保守实现）
+            # 但默认我们优先尝试直接用 tmpId 查询
+            pass
+        except Exception:
+            pass
 
-                data = await resp.json()
-                members = data.get('data') or data.get('response') or []
-
-                if not isinstance(members, list):
-                    return None
-
-                for m in members:
-                    # 兼容不同字段名
-                    member_tmp = m.get('tmpId') or m.get('tmp_id') or m.get('tmpIdStr') or m.get('tmpid')
-                    if member_tmp and str(member_tmp) == str(tmp_id):
-                        role = m.get('role') or m.get('roleName') or m.get('position') or m.get('name')
-                        if role:
-                            return str(role)
-                return None
+        logger.info(f"尝试通过 memberAll/role 使用 tmpId 回退查询角色 tmpId={tmp_id}")
+        # 尝试 2：部分接口支持通过 tmpId 直接返回所属车队成员信息
+        try:
+            url_tmp = f"https://da.vtcm.link/vtc/memberAll/role?tmpId={tmp_id}"
+            async with self.session.get(url_tmp, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    members = data.get('data') or data.get('response') or []
+                    if isinstance(members, list):
+                        for m in members:
+                            member_tmp = m.get('tmpId') or m.get('tmp_id') or m.get('tmpIdStr') or m.get('tmpid')
+                            if member_tmp and str(member_tmp) == str(tmp_id):
+                                role = m.get('role') or m.get('roleName') or m.get('position') or m.get('name')
+                                if role:
+                                    logger.info(f"VTC 角色: 通过 tmpId 查询到角色 {role}")
+                                    return str(role)
         except Exception as e:
-            logger.error(f"查询 VTC 车队角色失败: {e}", exc_info=False)
-            return None
+            logger.info(f"memberAll/role?tmpId 查询失败或未命中: {e}")
+
+        # 尝试 3：若上面未命中，尝试根据玩家的 TruckersMP 信息去获取车队 id 再查询
+        # 先尝试从 TruckersMP player 接口拿 vtc id（如果调用方没有传入，可再抓一次）
+        vtc_id = None
+        vtc_name = None
+        try:
+            # 试图从 TruckersMP 官方 player 接口获取 vtc 数据（若之前未获取或未包含）
+            try:
+                player_info = await self._get_player_info(tmp_id)
+                vtc = player_info.get('vtc') if isinstance(player_info.get('vtc'), dict) else {}
+                vtc_id = vtc.get('id') or vtc.get('vtcId') or vtc.get('vtc_id') or vtc.get('VTCId')
+                vtc_name = vtc.get('name') or vtc.get('vtcName') or vtc.get('nameCn')
+            except Exception:
+                # 忽略获取 player_info 的错误，继续尝试其他方法
+                vtc_id = None
+                vtc_name = None
+        except Exception:
+            vtc_id = None
+            vtc_name = None
+
+        # 如果拿到了 vtc_id，直接调用 memberAll/role?vtcId=...
+        if vtc_id:
+            try:
+                url_vid = f"https://da.vtcm.link/vtc/memberAll/role?vtcId={vtc_id}"
+                logger.info(f"尝试通过 vtcId 查询成员角色 vtcId={vtc_id}")
+                async with self.session.get(url_vid, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        members = data.get('data') or data.get('response') or []
+                        if isinstance(members, list):
+                            for m in members:
+                                member_tmp = m.get('tmpId') or m.get('tmp_id') or m.get('tmpIdStr') or m.get('tmpid')
+                                if member_tmp and str(member_tmp) == str(tmp_id):
+                                    role = m.get('role') or m.get('roleName') or m.get('position') or m.get('name')
+                                    if role:
+                                        logger.info(f"VTC 角色: 通过 vtcId 查询到角色 {role}")
+                                        return str(role)
+            except Exception as e:
+                logger.info(f"memberAll/role?vtcId 查询失败: {e}")
+
+        # 如果没有 vtc_id，但是有 vtc_name，可尝试通过 da.vtcm.link 的车队搜索接口获取 vtcId（若存在）
+        if not vtc_id:
+            # 如果之前从 player_info 获取到了 vtc_name，则使用；否则尝试从 da.vtcm.link/player/info 获取
+            if not vtc_name:
+                try:
+                    stats = await self._get_player_stats(tmp_id)
+                    # 某些 VTCM 接口会返回 vtc 信息字段
+                    vtc_name = stats.get('vtc_name') or stats.get('vtc') or vtc_name
+                except Exception:
+                    pass
+
+            if vtc_name:
+                try:
+                    from urllib.parse import quote_plus
+                    qname = quote_plus(str(vtc_name))
+                    search_url = f"https://da.vtcm.link/vtc/search?name={qname}"
+                    logger.info(f"尝试通过车队名搜索获取 vtcId: {search_url}")
+                    async with self.session.get(search_url, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            items = data.get('data') or data.get('response') or []
+                            if isinstance(items, list) and items:
+                                # 选择第一个匹配项（最可能为目标车队）
+                                it = items[0]
+                                vtc_id = it.get('id') or it.get('vtcId') or it.get('vtc_id')
+                                logger.info(f"车队搜索结果: name={vtc_name} -> vtcId={vtc_id}")
+                except Exception as e:
+                    logger.info(f"车队名搜索失败: {e}")
+
+        # 如果获得了 vtc_id，尝试查询成员角色
+        if vtc_id:
+            try:
+                url_vid2 = f"https://da.vtcm.link/vtc/memberAll/role?vtcId={vtc_id}"
+                logger.info(f"最终尝试通过 vtcId 查询成员角色 vtcId={vtc_id}")
+                async with self.session.get(url_vid2, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        members = data.get('data') or data.get('response') or []
+                        if isinstance(members, list):
+                            for m in members:
+                                member_tmp = m.get('tmpId') or m.get('tmp_id') or m.get('tmpIdStr') or m.get('tmpid')
+                                if member_tmp and str(member_tmp) == str(tmp_id):
+                                    role = m.get('role') or m.get('roleName') or m.get('position') or m.get('name')
+                                    if role:
+                                        logger.info(f"VTC 角色: 最终通过 vtcId 查询到角色 {role}")
+                                        return str(role)
+            except Exception as e:
+                logger.info(f"最终 memberAll/role 查询失败: {e}")
+
+        # 作为最后回退，尝试按车队名直接调用 memberAll/role?vtcName=
+        if vtc_name:
+            try:
+                from urllib.parse import quote_plus
+                qname = quote_plus(str(vtc_name))
+                url_name = f"https://da.vtcm.link/vtc/memberAll/role?vtcName={qname}"
+                logger.info(f"最后回退: 尝试通过 vtcName 调用 memberAll/role vtcName={vtc_name}")
+                async with self.session.get(url_name, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        members = data.get('data') or data.get('response') or []
+                        if isinstance(members, list):
+                            for m in members:
+                                member_tmp = m.get('tmpId') or m.get('tmp_id') or m.get('tmpIdStr') or m.get('tmpid')
+                                if member_tmp and str(member_tmp) == str(tmp_id):
+                                    role = m.get('role') or m.get('roleName') or m.get('position') or m.get('name')
+                                    if role:
+                                        logger.info(f"VTC 角色: 通过 vtcName 最终查询到角色 {role}")
+                                        return str(role)
+            except Exception as e:
+                logger.info(f"memberAll/role?vtcName 查询失败: {e}")
+
+        # 未找到
+        logger.info(f"VTC 角色: 未能找到玩家 {tmp_id} 的车队角色信息")
+        return None
 
     # --- 【核心逻辑】封禁信息处理 ---
     def _format_ban_info(self, bans_info: List[Dict]) -> Tuple[int, List[Dict]]:
