@@ -489,6 +489,14 @@ class TmpBotPlugin(Star):
                     total_km = _to_km_2f(total_raw, 0.0)
                     daily_km = _to_km_2f(daily_raw, 0.0)
                     avatar_url = response_data.get('avatarUrl', '')
+                    # 尝试从 VTCM 响应中获取上次在线时间（兼容多个可能的字段名）
+                    last_online = (
+                        response_data.get('lastOnline')
+                        or response_data.get('lastOnlineTime')
+                        or response_data.get('last_login')
+                        or response_data.get('lastLogin')
+                        or None
+                    )
                     logger.info(f"VTCM 里程解析: total_km={total_km:.2f}, today_km={daily_km:.2f}, avatar={avatar_url}")
                     
                     if data.get('code') != 200 or not response_data:
@@ -499,6 +507,8 @@ class TmpBotPlugin(Star):
                         'total_km': total_km, 
                         'daily_km': daily_km,
                         'avatar_url': avatar_url,
+                        # 将上次在线时间传回供上层使用（可能为 ISO 字符串或其他格式）
+                        'last_online': last_online,
                         'debug_error': 'VTCM 里程数据获取成功。'
                     }
                 else:
@@ -726,7 +736,16 @@ class TmpBotPlugin(Star):
         
         ban_count, sorted_bans = self._format_ban_info(bans_info)
         
-        last_online_raw = player_info.get('lastOnline')
+        last_online_raw = (
+            player_info.get('lastOnline')
+            or stats_info.get('last_online')
+            or stats_info.get('lastOnline')
+            or stats_info.get('lastLogin')
+            or stats_info.get('last_login')
+            or None
+        )
+        if last_online_raw and last_online_raw != player_info.get('lastOnline'):
+            logger.info(f"查询详情: 使用 VTCM 提供的上次在线字段，值={last_online_raw}")
         last_online_formatted = _format_timestamp_to_readable(last_online_raw)
         
         # 完整的回复消息构建：标题与正文分离，便于控制发送顺序
