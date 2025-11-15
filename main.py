@@ -891,10 +891,10 @@ class TmpBotPlugin(Star):
         # 完整的回复消息构建：标题与正文分离，便于控制发送顺序
         header = "TMP玩家详细信息\r\n" + "=" * 20 + "\r\n"
         body = ""
-        body += f"ID TMPID: {tmp_id}\n"
+        body += f"🆔 TMP ID: {tmp_id}\n"
         if steam_id_to_display:
-            body += f"ID SteamID: {steam_id_to_display}\n"
-        body += f"玩家名称: {player_info.get('name', '未知')}\n"
+            body += f"🆔 Steam ID: {steam_id_to_display}\n"
+        body += f"😀玩家名称: {player_info.get('name', '未知')}\n"
         body += f"上次在线: {last_online_formatted}\n"
 
         # 权限/分组信息
@@ -911,9 +911,9 @@ class TmpBotPlugin(Star):
 
         vtc_name = player_info.get('vtc', {}).get('name')
         vtc_role = player_info.get('vtc', {}).get('role')
-        body += f"所属车队: {vtc_name if vtc_name else '无'}\n"
+        body += f"🚚所属车队: {vtc_name if vtc_name else '无'}\n"
         if vtc_role:
-            body += f"车队角色: {vtc_role}\n"
+            body += f"🚚车队角色: {vtc_role}\n"
         
         # --- 【核心逻辑】赞助信息 (基于 V2 player 接口字段) ---
         # 规则：
@@ -982,17 +982,17 @@ class TmpBotPlugin(Star):
         current_pledge = (_to_int(current_pledge_raw) // 100) if is_patron else 0
         lifetime_pledge = (_to_int(lifetime_pledge_raw) // 100) if is_patron else 0
 
-        body += f"是否赞助: {'是' if is_patron else '否'}\n"
-        body += f"赞助是否有效: {'是' if active else '否'}\n"
+        body += f"🎁是否赞助: {'是' if is_patron else '否'}\n"
+        body += f"🎁赞助是否有效: {'是' if active else '否'}\n"
         if is_patron:
             if current_pledge > 0:
-                body += f"当前赞助金额: {current_pledge}美元\n"
+                body += f"🎁当前赞助金额: {current_pledge}美元\n"
             else:
-                body += f"当前赞助金额: 0美元（当前未赞助）\n"
-            body += f"历史赞助金额: {lifetime_pledge}美元\n"
+                body += f"🎁当前赞助金额: 0美元（当前未赞助）\n"
+            body += f"🎁历史赞助金额: {lifetime_pledge}美元\n"
         else:
-            body += f"当前赞助金额: 0美元\n"
-            body += f"历史赞助金额: 0美元\n"
+            body += f"🎁当前赞助金额: 0美元\n"
+            body += f"🎁历史赞助金额: 0美元\n"
         # --- 赞助信息结束 ---
 
         # --- 里程信息输出 (不变) ---
@@ -1001,14 +1001,14 @@ class TmpBotPlugin(Star):
         daily_km = stats_info.get('daily_km', 0.0)
         logger.info(f"查询详情: 里程输出值 total_km={total_km:.2f}, daily_km={daily_km:.2f}")
         
-        body += f"历史里程: {total_km:.2f}公里/km\n"
-        body += f"今日里程: {daily_km:.2f}公里/km\n"
+        body += f"🚩历史里程: {total_km:.2f}公里/km\n"
+        body += f"🚩今日里程: {daily_km:.2f}公里/km\n"
         
         # --- 封禁信息 (不变) ---
-        body += f"是否封禁: {'是' if is_banned else '否'}\n"
+        body += f"🚫是否封禁: {'是' if is_banned else '否'}\n"
         
         if ban_count > 0:
-            body += f"历史封禁: {ban_count}次\n"
+            body += f"🚫历史封禁: {ban_count}次\n"
 
         if is_banned:
             
@@ -1023,19 +1023,19 @@ class TmpBotPlugin(Star):
                 ban_reason = self._translate_ban_reason(ban_reason_raw)
                 ban_expiration = current_ban.get('expiration', banned_until_main) 
                 
-                body += f"当前封禁原因: {ban_reason}\n"
+                body += f"🚫当前封禁原因: {ban_reason}\n"
                 
                 if ban_expiration and isinstance(ban_expiration, str) and ban_expiration.lower().startswith('never'):
-                    body += f"封禁截止: 永久封禁\n"
+                    body += f"🚫封禁截止: 永久封禁\n"
                 else:
-                    body += f"封禁截止: {_format_timestamp_to_beijing(ban_expiration)}\n"
+                    body += f"🚫封禁截止: {_format_timestamp_to_beijing(ban_expiration)}\n"
                     
             else:
-                body += f"当前封禁原因: API详细记录缺失。可能原因：封禁信息被隐藏或数据同步延迟。\n"
+                body += f"当前封禁原因: 封禁信息被隐藏。\n"
                 if banned_until_main and isinstance(banned_until_main, str) and banned_until_main.lower().startswith('never'):
-                    body += f"封禁截止: 永久封禁\n"
+                    body += f"🚫封禁截止: 永久封禁\n"
                 else:
-                    body += f"封禁截止: {_format_timestamp_to_beijing(banned_until_main)}\n"
+                    body += f"🚫封禁截止: {_format_timestamp_to_beijing(banned_until_main)}\n"
         
         
         if online_status and online_status.get('online'):
@@ -1044,11 +1044,11 @@ class TmpBotPlugin(Star):
             game_mode = "欧卡2" if game_mode_code == 1 else "美卡" if game_mode_code == 2 else "未知游戏"
             city = online_status.get('city', {}).get('name', '未知位置') 
             
-            body += f"在线状态: 在线\n"
-            body += f"所在服务器: {server_name}\n"
-            body += f"所在位置: {city} ({game_mode})\n"
+            body += f"📶在线状态: 在线\n"
+            body += f"📶所在服务器: {server_name}\n"
+            body += f"📶所在位置: {city} ({game_mode})\n"
         else:
-            body += f"在线状态: 离线\n"
+            body += f"📶在线状态: 离线\n"
         
         # 头像（强制按组件发送）
         show_avatar_cfg = self._cfg_bool('query_show_avatar_enable', True)
