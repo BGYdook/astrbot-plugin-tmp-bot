@@ -895,7 +895,7 @@ class TmpBotPlugin(Star):
         if steam_id_to_display:
             body += f"🆔 Steam ID: {steam_id_to_display}\n"
         body += f"😀玩家名称: {player_info.get('name', '未知')}\n"
-        body += f"上次在线: {last_online_formatted}\n"
+        body += f"📶上次在线: {last_online_formatted}\n"
 
         # 权限/分组信息
         perms_str = "玩家"
@@ -907,7 +907,7 @@ class TmpBotPlugin(Star):
                     perms_str = ', '.join(groups)
             elif isinstance(perms, list) and perms:
                 perms_str = ', '.join(perms)
-        body += f"所属分组: {perms_str}\n"
+        body += f"💼所属分组: {perms_str}\n"
 
         vtc_name = player_info.get('vtc', {}).get('name')
         vtc_role = player_info.get('vtc', {}).get('role')
