@@ -3,7 +3,7 @@
 
 """
 AstrBot-plugin-tmp-bot
-欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.50)
+欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.51)
 """
 
 import re
@@ -734,11 +734,10 @@ class TmpBotPlugin(Star):
         body = ""
         body += f"ID TMP编号: {tmp_id}\n"
         if steam_id_to_display:
-            body += f"ID Steam编号: {steam_id_to_display}\n" 
-            
+            body += f"ID Steam编号: {steam_id_to_display}\n"
         body += f"玩家名称: {player_info.get('name', '未知')}\n"
         body += f"上次在线: {last_online_formatted}\n"
-        
+
         # 权限/分组信息
         perms_str = "玩家"
         if player_info.get('permissions'):
@@ -755,7 +754,7 @@ class TmpBotPlugin(Star):
         vtc_role = player_info.get('vtc', {}).get('role')
         body += f"所属车队: {vtc_name if vtc_name else '无'}\n"
         if vtc_role:
-                body += f"车队角色: {vtc_role}\n"
+            body += f"车队角色: {vtc_role}\n"
         
         # --- 【核心逻辑】赞助信息 (基于 V2 player 接口字段) ---
         # 规则：
@@ -902,6 +901,8 @@ class TmpBotPlugin(Star):
         if not show_avatar_cfg:
             logger.info("查询详情: 头像开关为OFF，合并标题与正文为单个文本组件")
             components.append(Plain(header + "\r\n" + body))
+            yield event.chain_result(components)
+            return
         else:
             # 头像开启：标题 -> 头像 -> 空行 -> 正文
             components.append(Plain(header))
@@ -916,7 +917,7 @@ class TmpBotPlugin(Star):
             # 确保正文从新的一行开始（适配不同适配器的换行处理）
             components.append(Plain("\r\n"))
             components.append(Plain(body))
-        yield event.chain_result(components)
+            yield event.chain_result(components)
     
     @filter.command("DLC") 
     async def tmpdlc(self, event: AstrMessageEvent):
