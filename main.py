@@ -886,8 +886,7 @@ class TmpBotPlugin(Star):
         )
         if last_online_raw and last_online_raw != player_info.get('lastOnline'):
             logger.info(f"查询详情: 使用 VTCM 提供的上次在线字段，值={last_online_raw}")
-        # 将“上次在线”统一显示为北京时间 (UTC+8)
-        last_online_formatted = _format_timestamp_to_beijing(last_online_raw)
+        last_online_formatted = _format_timestamp_to_readable(last_online_raw)
         
         # 完整的回复消息构建：标题与正文分离，便于控制发送顺序
         header = "TMP玩家详细信息\r\n" + "=" * 20 + "\r\n"
