@@ -631,7 +631,39 @@ class TmpBotPlugin(Star):
             logger.error(f"查询排行榜时发生未知错误: {e}", exc_info=True)
             raise NetworkException("查询排行榜失败")
 
+    async def _get_vtc_member_role(self, tmp_id: str) -> Optional[str]:
+        """使用 da.vtcm.link 的 vtc/memberAll/role 接口查询玩家在车队内的角色。
+        返回字符串（若找不到或异常则返回 None）。"""
+        if not self.session:
+            return None
 
+        url = f"https://da.vtcm.link/vtc/memberAll/role?tmpId={tmp_id}"
+        logger.info(f"尝试 VTC 车队角色 API: {url}")
+        try:
+            async with self.session.get(url, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
+                if resp.status != 200:
+                    logger.info(f"VTC 角色 API 返回状态码: {resp.status}")
+                    return None
+
+                data = await resp.json()
+                members = data.get('data') or data.get('response') or []
+
+                if not isinstance(members, list):
+                    return None
+
+                for m in members:
+                    # 兼容不同字段名
+                    member_tmp = m.get('tmpId') or m.get('tmp_id') or m.get('tmpIdStr') or m.get('tmpid')
+                    if member_tmp and str(member_tmp) == str(tmp_id):
+                        role = m.get('role') or m.get('roleName') or m.get('position') or m.get('name')
+                        if role:
+                            return str(role)
+                return None
+        except Exception as e:
+            logger.error(f"查询 VTC 车队角色失败: {e}", exc_info=False)
+            return None
+
+    # --- 【核心逻辑】封禁信息处理 ---
     def _format_ban_info(self, bans_info: List[Dict]) -> Tuple[int, List[Dict]]:
         """只返回历史封禁次数和最新的封禁记录（按时间倒序）"""
         if not bans_info or not isinstance(bans_info, list):
@@ -862,8 +894,8 @@ class TmpBotPlugin(Star):
         daily_km = stats_info.get('daily_km', 0.0)
         logger.info(f"查询详情: 里程输出值 total_km={total_km:.2f}, daily_km={daily_km:.2f}")
         
-        body += f"🚩历史里程: {total_km:.2f}公里/km\n"
-        body += f"🚩今日里程: {daily_km:.2f}公里/km\n"
+        body += f"历史里程: {total_km:.2f}公里/km\n"
+        body += f"今日里程: {daily_km:.2f}公里/km\n"
         
         # --- 封禁信息 (不变) ---
         body += f"是否封禁: {'是' if is_banned else '否'}\n"
