@@ -886,7 +886,8 @@ class TmpBotPlugin(Star):
         )
         if last_online_raw and last_online_raw != player_info.get('lastOnline'):
             logger.info(f"查询详情: 使用 VTCM 提供的上次在线字段，值={last_online_raw}")
-        last_online_formatted = _format_timestamp_to_readable(last_online_raw)
+        # 将“上次在线”统一显示为北京时间 (UTC+8)
+        last_online_formatted = _format_timestamp_to_beijing(last_online_raw)
         
         # 完整的回复消息构建：标题与正文分离，便于控制发送顺序
         header = "TMP玩家详细信息\r\n" + "=" * 20 + "\r\n"
@@ -909,9 +910,19 @@ class TmpBotPlugin(Star):
                 perms_str = ', '.join(perms)
         body += f"💼所属分组: {perms_str}\n"
 
-        vtc_name = player_info.get('vtc', {}).get('name')
-        vtc_role = player_info.get('vtc', {}).get('role')
+        # 车队信息：优先使用 player_info.vtc（若为字典），若缺少 role 则调用 VTCM API 获取
+        vtc = player_info.get('vtc') if isinstance(player_info.get('vtc'), dict) else {}
+        vtc_name = vtc.get('name')
+        vtc_role = vtc.get('role') or vtc.get('position')
         body += f"🚚所属车队: {vtc_name if vtc_name else '无'}\n"
+        if not vtc_role and vtc_name:
+            try:
+                vtc_role_remote = await self._get_vtc_member_role(tmp_id, vtc)
+                if vtc_role_remote:
+                    vtc_role = vtc_role_remote
+                    logger.info(f"查询详情: 从 VTC API 获取到车队角色: {vtc_role}")
+            except Exception as e:
+                logger.info(f"查询详情: 获取 VTC 车队角色时发生异常: {e}", exc_info=False)
         if vtc_role:
             body += f"🚚车队角色: {vtc_role}\n"
         
@@ -1577,6 +1588,7 @@ class TmpBotPlugin(Star):
                                     if speed_str:
                                         output += f" | {speed_str}"
                                     output += "\n"
+                                    
                                     
                                 return output + "\n"
 
