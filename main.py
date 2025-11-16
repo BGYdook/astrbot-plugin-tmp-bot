@@ -1605,23 +1605,22 @@ class TmpBotPlugin(Star):
         except Exception:
             yield event.plain_result("网络请求失败，请检查网络或稍后重试。")
 
-    @filter.command("菜单")
+    @filter.command("帮助")
     async def tmphelp(self, event: AstrMessageEvent):
-        """[命令: 菜单] 显示本插件的命令使用说明。"""
+        """[命令: 帮助] 显示本插件的命令使用说明。"""
         help_text = """TMP查询插件使用说明
 
 可用命令:
-1. 查询 [ID] - 查询玩家的完整信息（支持 TMP ID 或 Steam ID）。
-2. 状态 [ID]- 查询玩家的实时在线状态（支持 TMP ID 或 Steam ID）。 
-3. 定位 [ID] - 【新】查询玩家的实时服务器和位置。
-4. DLC [ID] - 查询玩家拥有的主要地图 DLC 列表（支持 TMP ID 或 Steam ID）。
-5. 排行 - 查询 TruckersMP 总里程排行榜前10名。
-6. 绑定 [ID] - 绑定您的聊天账号与 TMP ID（支持输入 Steam ID 转换）。
-7. 解绑 - 解除账号绑定。
-8. 服务器 - 查看所有在线的TMP服务器的实时状态和在线人数。
-9. 菜单 - 显示此帮助信息。
-
-使用提示: 绑定后可直接发送 查询/状态/DLC/定位 (无需ID参数)
+1. 绑定 [ID]
+2. 查询 [ID]
+3. 状态 [ID]- （修复中）
+4. 定位 [ID] -（api无法获取）
+5. DLC列表 - （修复中）
+6. 排行
+7. 解绑
+8. 服务器
+9. 菜单
+使用提示: 绑定后可直接发送 查询/状态/定位
 """
         yield event.plain_result(help_text)
         
