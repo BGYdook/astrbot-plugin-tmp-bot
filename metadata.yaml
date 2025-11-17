@@ -1,6 +1,6 @@
 name: astrbot-plugin-tmp-bot
 description: 欧洲卡车模拟2 TMP查询机器人 - 支持玩家信息查询、位置查询、服务器状态查询、里程排行榜等功能
-version: 1.3.52
+version: 1.3.55
 main: main.py
 author: BGYdook
 homepage: https://github.com/BGYdook/astrbot-plugin-tmp-bot
@@ -14,7 +14,7 @@ features:
   - 服务器热门地点路况查询
   - 欧卡/美卡服务器状态查询
   - 总里程和今日里程排行榜
-  - 地图DLC列表查询
+  - 地图DLC列表查询（支持图片输出）
   - 版本信息查询
   - 支持TMPID绑定功能
 
@@ -44,9 +44,12 @@ commands:
   - name: tmpversion
     description: 查询版本信息
     usage: tmpversion
-  - name: tmpdlcmap
-    description: 地图DLC列表
-    usage: tmpdlcmap
+  - name: DLC列表
+    description: 列出地图相关 DLC（支持图片输出）
+    usage: DLC列表
+  - name: 地图DLC
+    description: 列出地图相关 DLC（支持图片输出）
+    usage: 地图DLC
   - name: tmpmileageranking
     description: 总里程排行榜，数据从2025年8月23日20:00开始统计
     usage: tmpmileageranking
