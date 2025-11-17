@@ -22,8 +22,7 @@ module.exports = async (ctx, session) => {
     const imageBuffer = await element.screenshot({
       encoding: 'binary'
     })
-    const base64 = Buffer.from(imageBuffer).toString('base64')
-    return `[CQ:image,file=base64://${base64}]`
+    return segment.image(imageBuffer, 'image/jpg')
   } catch (e) {
     console.info(e)
     return '渲染异常，请重试'

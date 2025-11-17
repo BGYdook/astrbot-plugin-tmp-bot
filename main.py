@@ -631,6 +631,100 @@ class TmpBotPlugin(Star):
             logger.error(f"查询排行榜时发生未知错误: {e}", exc_info=True)
             raise NetworkException("查询排行榜失败")
 
+    async def _get_dlc_market_list(self, dlc_type: int = 1) -> List[Dict]:
+        if not self.session:
+            raise NetworkException("插件未初始化，HTTP会话不可用")
+        url = f"https://da.vtcm.link/dlc/list?type={dlc_type}"
+        logger.info(f"DLC列表: 请求 URL={url}")
+        try:
+            async with self.session.get(url, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
+                logger.info(f"DLC列表: 响应 status={resp.status}, content-type={resp.headers.get('Content-Type')}")
+                if resp.status == 200:
+                    data = await resp.json()
+                    items = data.get('data') or []
+                    logger.info(f"DLC列表: 解析到 items_count={len(items) if isinstance(items, list) else 0}")
+                    return items if isinstance(items, list) else []
+                else:
+                    raise ApiResponseException(f"DLC列表 API 返回错误状态码: {resp.status}")
+        except aiohttp.ClientError as e:
+            logger.error(f"DLC列表 API 网络请求失败 (aiohttp.ClientError): {e}")
+            raise NetworkException("DLC列表 API 网络请求失败")
+        except asyncio.TimeoutError:
+            logger.error("请求 DLC列表 API 超时")
+            raise NetworkException("请求 DLC列表 API 超时")
+        except Exception as e:
+            logger.error(f"查询 DLC列表 时发生未知错误: {e}", exc_info=True)
+            raise NetworkException("查询 DLC列表 失败")
+
+    async def _render_text_to_image(self, text: str) -> Optional[Any]:
+        if not self.session:
+            return None
+        # 读取 AstrBot 系统配置 data/cmd_config.json 的 t2i_endpoint/t2i_strategy
+        url = None
+        try:
+            root = os.getcwd()
+            cfg = os.path.join(root, 'data', 'cmd_config.json')
+            if os.path.exists(cfg):
+                with open(cfg, 'r', encoding='utf-8') as f:
+                    j = json.load(f)
+                strategy = str(j.get('t2i_strategy') or '').strip()
+                endpoint = str(j.get('t2i_endpoint') or '').strip()
+                if strategy == 'remote' and endpoint:
+                    e = endpoint[:-1] if endpoint.endswith('/') else endpoint
+                    url = e + "/text2img/generate"
+                    logger.info(f"T2I: 使用系统配置 t2i_endpoint -> {url}")
+        except Exception as e:
+            logger.error(f"T2I: 读取系统配置失败: {e}")
+        if not url:
+            # 环境变量兜底
+            endpoint = str(os.environ.get('ASTRBOT_T2I_ENDPOINT') or '').strip()
+            if endpoint:
+                e = endpoint[:-1] if endpoint.endswith('/') else endpoint
+                url = e + "/text2img/generate"
+                logger.info(f"T2I: 使用环境变量 -> {url}")
+        if not url:
+            logger.info("T2I: 未找到远程服务地址，跳过图片渲染")
+            return None
+        payload = {
+            'text': text
+        }
+        try:
+            async with self.session.post(url, json=payload, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
+                logger.info(f"T2I: POST {url} body_len={len(text)} status={resp.status} ct={resp.headers.get('Content-Type')}")
+                ct = resp.headers.get('Content-Type', '')
+                if 'application/json' in ct:
+                    try:
+                        data = await resp.json()
+                    except Exception as je:
+                        logger.error(f"T2I: JSON解析失败: {je}")
+                        return None
+                    img_b64 = (
+                        data.get('image')
+                        or (data.get('data') or {}).get('image')
+                    )
+                    img_url = (
+                        data.get('url')
+                        or (data.get('output')[0] if isinstance(data.get('output'), list) and data.get('output') else None)
+                    )
+                    if img_b64:
+                        try:
+                            import base64 as _b64
+                            return _b64.b64decode(img_b64)
+                        except Exception:
+                            logger.error("T2I: Base64解码失败")
+                            return None
+                    if img_url:
+                        return str(img_url)
+                    return None
+                else:
+                    content = await resp.read()
+                    if content:
+                        return content
+                    return None
+        except Exception as e:
+            logger.error(f"文本转图片渲染失败: {e}", exc_info=True)
+            return None
+
     async def _get_vtc_member_role(self, tmp_id: str, vtc_info: Optional[Dict] = None) -> Optional[str]:
         """使用 da.vtcm.link 的 vtc/memberAll/role 接口查询玩家在车队内的角色。
         优先策略：
@@ -1156,6 +1250,111 @@ class TmpBotPlugin(Star):
         message += "\n(此列表仅展示主要地图扩展包)"
 
         yield event.plain_result(message)
+
+    @filter.command("DLC列表")
+    async def tmpdlc_list(self, event: AstrMessageEvent):
+        logger.info("DLC列表: 开始处理命令")
+        try:
+            items = await self._get_dlc_market_list(1)
+        except Exception:
+            yield event.plain_result("查询DLC列表失败")
+            logger.error("DLC列表: 获取市场列表失败")
+            return
+        if not items:
+            yield event.plain_result("暂无数据")
+            logger.info("DLC列表: 无数据")
+            return
+        lines: List[str] = []
+        for it in items:
+            name = str(it.get('name') or '').strip()
+            final_price = it.get('finalPrice')
+            discount = it.get('discount') or 0
+            price_str = ""
+            try:
+                if isinstance(final_price, (int, float)):
+                    price_str = f"￥{int(final_price) // 100}"
+            except Exception:
+                price_str = ""
+            if discount and isinstance(discount, (int, float)) and discount > 0:
+                lines.append(f"{name} {price_str} (-{int(discount)}%)")
+            else:
+                lines.append(f"{name} {price_str}")
+        text = "\n".join(lines)
+        logger.info(f"DLC列表: 聚合文本长度={len(text)} 行数={len(lines)}")
+        if self._cfg_bool('dlc_list_image', False):
+            logger.info("DLC列表: 尝试进行图片渲染(html_render)")
+            tmpl = """
+<style>
+  html, body { margin:0; padding:0; background:#222d33; width:auto; }
+  * { box-sizing: border-box; }
+</style>
+<div style=\"width:100vw;background:#222d33;color:#fff;font-family:system-ui,Segoe UI,Helvetica,Arial,sans-serif;\">
+  <div style=\"font-size:20px;font-weight:600;margin:0;padding:12px 0 8px 0;\">DLC 列表</div>
+  {% for it in items %}
+  <div style=\"display:flex;flex-direction:row;background:#24313a;margin:0 0 12px 0;padding:12px;\">
+    <img src=\"{{ it.headerImageUrl }}\" style=\"width:210px;height:auto;object-fit:cover;\"/>
+    <div style=\"flex:1;padding:0 12px;\">
+      <div style=\"font-size:18px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;\">{{ it.name }}</div>
+      <div style=\"font-size:14px;color:#e5e5e5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-overflow:ellipsis;\">{{ it.desc }}</div>
+      <div style=\"margin-top:8px;\">
+        <span style=\"display:inline-block;color:#BEEE11;font-size:16px;\">{{ it.price_str }}</span>
+        {% if it.discount and it.discount > 0 %}
+        <span style=\"display:inline-block;color:#cbcbcb;font-size:16px;text-decoration:line-through;margin-left:6px;\">{{ it.original_price_str }}</span>
+        <span style=\"font-size:14px;color:#BEEE11;background:#4c6b22;padding:2px 6px;margin-left:4px;\">-{{ it.discount }}%</span>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+"""
+            mapped: List[Dict[str, Any]] = []
+            for it in items:
+                name = str(it.get('name') or '').strip()
+                desc = str(it.get('desc') or '').strip()
+                header = str(it.get('headerImageUrl') or '').strip()
+                original = it.get('originalPrice')
+                finalp = it.get('finalPrice')
+                discount = it.get('discount') or 0
+                def _p(v):
+                    try:
+                        return f"￥{int(v) // 100}" if isinstance(v, (int, float)) else ""
+                    except Exception:
+                        return ""
+                mapped.append({
+                    'name': name,
+                    'desc': desc,
+                    'headerImageUrl': header,
+                    'price_str': _p(finalp),
+                    'original_price_str': _p(original),
+                    'discount': int(discount) if isinstance(discount, (int, float)) else 0
+                })
+            try:
+                options = { 'type': 'jpeg', 'quality': 92, 'full_page': True, 'omit_background': False }
+                url = await self.html_render(tmpl, { 'items': mapped }, options=options)
+                if isinstance(url, str) and url:
+                    logger.info(f"DLC列表: html_render 成功 -> {url}")
+                    yield event.chain_result([Image.fromURL(url)])
+                    return
+                logger.error("DLC列表: html_render 返回空，尝试文本渲染")
+            except Exception as e:
+                logger.error(f"DLC列表: html_render 异常: {e}")
+            img = await self._render_text_to_image(text)
+            if isinstance(img, (bytes, bytearray)):
+                logger.info("DLC列表: 文本渲染成功(字节)")
+                yield event.chain_result([Image.fromBytes(img)])
+                return
+            if isinstance(img, str) and img.startswith('http'):
+                logger.info(f"DLC列表: 文本渲染成功(URL={img})")
+                yield event.chain_result([Image.fromURL(img)])
+                return
+            logger.error("DLC列表: 所有渲染失败，回退为文本")
+        yield event.plain_result(text)
+
+    @filter.command("地图DLC")
+    async def tmpdlc_map_alias(self, event: AstrMessageEvent):
+        async for r in self.tmpdlc_list(event):
+            yield r
     # --- DLC 命令处理器结束 ---
 
     @filter.command("绑定")
@@ -1615,7 +1814,7 @@ class TmpBotPlugin(Star):
 2. 查询 [ID]
 3. 状态 [ID]- （修复中）
 4. 定位 [ID] -（api无法获取）
-5. DLC列表 - （修复中）
+5. DLC列表
 6. 排行
 7. 解绑
 8. 服务器
