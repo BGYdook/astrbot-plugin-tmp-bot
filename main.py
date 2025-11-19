@@ -3,7 +3,7 @@
 
 """
 AstrBot-plugin-tmp-bot
-欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.52)
+欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.59)
 """
 
 import re
@@ -576,6 +576,11 @@ class TmpBotPlugin(Star):
                             'serverName': server_name,
                             'game': 1 if server_details.get('game') == 'ETS2' else 2 if server_details.get('game') == 'ATS' else 0,
                             'city': {'name': formatted_location}, 
+                            'serverId': online_data.get('server'),
+                            'x': online_data.get('x'),
+                            'y': online_data.get('y'),
+                            'country': country,
+                            'realName': real_name,
                             'debug_error': 'Trucky V3 判断在线，并获取到实时数据。',
                             'raw_data': '' 
                         }
@@ -1426,179 +1431,12 @@ class TmpBotPlugin(Star):
         else:
             yield event.plain_result("解绑失败，请稍后重试")
 
-    @filter.command("状态")
-    async def tmpstatus(self, event: AstrMessageEvent):
-        """[命令:状态] 查询玩家的实时在线状态。支持输入 TMP ID 或 Steam ID。"""
-        message_str = event.message_str.strip()
-        user_id = event.get_sender_id()
-        
-        match = re.search(r'(状态)\s*(\d+)', message_str) 
-        input_id = match.group(2) if match else None
-        
-        tmp_id = None
-        
-        if input_id:
-            if len(input_id) == 17 and input_id.startswith('7'):
-                try:
-                    tmp_id = await self._get_tmp_id_from_steam_id(input_id)
-                except SteamIdNotFoundException as e:
-                    yield event.plain_result(str(e))
-                    return
-                except NetworkException as e:
-                    yield event.plain_result(f"查询失败: {str(e)}")
-                    return
-            else:
-                tmp_id = input_id
-        else:
-            tmp_id = self._get_bound_tmp_id(user_id)
-        
-        if not tmp_id:
-            yield event.plain_result("请输入正确的玩家编号（TMP ID 或 Steam ID），或先使用 绑定 [TMP ID] 绑定您的账号。")
-            return
-
-        try:
-            # 并行查询：仅使用 V2 接口（移除已失效的 V1）
-            online_status, player_info = await asyncio.gather(
-                self._get_online_status(tmp_id),
-                self._get_player_info(tmp_id)
-            )
-
-        except PlayerNotFoundException as e:
-            yield event.plain_result(str(e))
-            return
-        except Exception as e:
-            yield event.plain_result(f"查询失败: {str(e)}")
-            return
-        
-        player_name = player_info.get('name', '未知')
-        steam_id_to_display = self._get_steam_id_from_player_info(player_info)
-        
-        
-        # --- 核心回复构造 ---
-        message = f"玩家状态查询\n"
-        message += "=" * 15 + "\n"
-        message += f"玩家名称: {player_name}\n"
-        message += f"TMP编号: {tmp_id}\n"
-
-        if steam_id_to_display:
-            message += f"Steam编号: {steam_id_to_display}\n"
-        
-        # --- 【核心逻辑】赞助信息 (仅基于 V2 player 接口字段) ---
-        def _get_nested(d: Dict, *keys):
-            cur = d
-            for k in keys:
-                if not isinstance(cur, dict):
-                    return None
-                cur = cur.get(k)
-            return cur
-
-        def _to_int(val, default=0):
-            try:
-                if val is None:
-                    return default
-                if isinstance(val, int):
-                    return val
-                if isinstance(val, float):
-                    return int(round(val))
-                s = str(val).strip()
-                if s == "":
-                    return default
-                # 允许像 "123.0" 的字符串
-                return int(float(s))
-            except Exception:
-                return default
-
-        # 兼容 isPatron / isPatreon，兼容容器 patreon / patron
-        is_patron = any([
-            bool(player_info.get('isPatron')),
-            bool(player_info.get('isPatreon')),
-            bool(_get_nested(player_info, 'patreon', 'isPatron')),
-            bool(_get_nested(player_info, 'patreon', 'isPatreon')),
-            bool(_get_nested(player_info, 'patron', 'isPatron')),
-            bool(_get_nested(player_info, 'patron', 'isPatreon')),
-        ])
-
-        # 兼容 active 位于顶层 / patreon / patron / donation
-        active = any([
-            bool(player_info.get('active')),
-            bool(_get_nested(player_info, 'patreon', 'active')),
-            bool(_get_nested(player_info, 'patron', 'active')),
-            bool(_get_nested(player_info, 'donation', 'active')),
-        ]) if is_patron else False
-
-        tier = '赞助者'
-        currency = 'USD'
-        amount = 0
-        donation_info = player_info.get('donation', {}) if isinstance(player_info.get('donation'), dict) else {}
-        tier = donation_info.get('tier', tier)
-        currency = donation_info.get('currency', currency)
-        if is_patron:
-            amount = _to_int(donation_info.get('amount'), 0)
-            if amount <= 0:
-                # 兼容 currentPledge 以分为单位，需要除以 100
-                cp = _to_int(
-                    _get_nested(player_info, 'currentPledge')
-                    or _get_nested(player_info, 'donation', 'currentPledge')
-                    or _get_nested(player_info, 'patron', 'currentPledge')
-                    or _get_nested(player_info, 'patreon', 'currentPledge'),
-                    0
-                )
-                if cp > 0:
-                    amount = cp // 100
-
-        message += f"是否赞助: {'是' if is_patron else '否'}\n"
-        if is_patron:
-            if amount > 0:
-                message += f"赞助金额: {tier} ({amount}{currency})\n"
-            else:
-                message += f"赞助等级: {tier}\n"
-        # -------------------
-
-        if online_status and online_status.get('online'):
-            server_name = online_status.get('serverName', '未知服务器')
-            game_mode_code = online_status.get('game', 0)
-            
-            game_mode = "欧卡2" if game_mode_code == 1 else "美卡" if game_mode_code == 2 else "未知游戏"
-            
-            city = online_status.get('city', {}).get('name', '未知位置')
-            
-            message += f"在线状态: 在线\n"
-            message += f"所在服务器: {server_name}\n"
-            message += f"所在位置: {city} ({game_mode})\n"
-        else:
-            message += f"在线状态: 离线\n"
-
-        # 头像（强制按组件发送，组合链）
-        show_avatar_cfg = self._cfg_bool('query_show_avatar_enable', True)
-        logger.info(f"玩家状态: 头像开关={'ON' if show_avatar_cfg else 'OFF'}，将组合 Image+Plain 统一发送。")
-        # 优先使用 TruckersMP V2 的头像字段，其次 VTCM 查询
-        avatar_url = self._normalize_avatar_url(player_info.get('avatar'))
-        if not avatar_url:
-            try:
-                stats_info = await self._get_player_stats(tmp_id)
-                avatar_url = self._normalize_avatar_url(stats_info.get('avatar_url'))
-            except Exception:
-                avatar_url = None
-        logger.info(f"玩家状态: 规范化后URL={avatar_url}")
-        components = []
-        if show_avatar_cfg and avatar_url:
-            try:
-                logger.info("玩家状态: 组合消息链添加 Image(URL) 组件")
-                components.append(Image.fromURL(avatar_url))
-            except Exception:
-                logger.error("玩家状态: 生成 Image(URL) 组件失败，跳过头像", exc_info=True)
-        else:
-            if not show_avatar_cfg:
-                logger.info("玩家状态: 头像开关为OFF，跳过头像组件")
-            elif not avatar_url:
-                logger.info("玩家状态: 无可用头像URL，跳过头像组件")
-        components.append(Plain(message))
-        yield event.chain_result(components)
+    # 状态命令已移除
     
     # --- 【新功能】定位命令 ---
     @filter.command("定位")
     async def tmplocate(self, event: AstrMessageEvent):
-        """[命令:定位] 查询玩家的实时位置。支持输入 TMP ID 或 Steam ID。"""
+        """[命令:定位] 查询玩家的实时位置，并返回图片。支持输入 TMP ID 或 Steam ID。"""
         message_str = event.message_str.strip()
         user_id = event.get_sender_id()
         
@@ -1627,44 +1465,151 @@ class TmpBotPlugin(Star):
             yield event.plain_result("请输入正确的玩家编号（TMP ID 或 Steam ID），或先使用 绑定 [TMP ID] 绑定您的账号。")
             return
 
+        # 1) 玩家基本信息（昵称）
         try:
-            # 只需要在线状态 (位置) 和 玩家信息 (名字)
-            online_status, player_info = await asyncio.gather(
-                self._get_online_status(tmp_id), 
-                self._get_player_info(tmp_id)
-            )
-
+            player_info = await self._get_player_info(tmp_id)
         except PlayerNotFoundException as e:
             yield event.plain_result(str(e))
             return
         except Exception as e:
             yield event.plain_result(f"查询失败: {str(e)}")
             return
-        
-        player_name = player_info.get('name', '未知')
-        
-        # --- 定位回复构造 ---
-        message = f"📍 玩家实时定位\n"
-        message += "=" * 15 + "\n"
-        message += f"玩家名称: {player_name}\n"
-        message += f"TMP编号: {tmp_id}\n"
 
-        if online_status and online_status.get('online'):
-            server_name = online_status.get('serverName', '未知服务器')
-            game_mode_code = online_status.get('game', 0)
-            game_mode = "欧卡2" if game_mode_code == 1 else "美卡" if game_mode_code == 2 else "未知游戏"
-            city = online_status.get('city', {}).get('name', '未知位置')
-            
-            message += f"🚦 在线状态: 在线\n"
-            message += f"🌐 所在服务器: {server_name}\n"
-            message += f"🗺️ 所在位置: {city} ({game_mode})\n"
-        else:
-            # 如果离线
-            last_online_formatted = _format_timestamp_to_readable(player_info.get('lastOnline'))
-            message += f"🚦 在线状态: 离线\n"
-            message += f"⌚ 上次在线: {last_online_formatted}\n"
+        # 2) 在线与坐标（Trucky V3）
+        online = await self._get_online_status(tmp_id)
+        if not online or not online.get('online'):
+            yield event.plain_result("当前玩家未在线无法定位其位置信息")
+            return
 
-        yield event.plain_result(message)
+        # 3) 构造 HTML 渲染数据（玩家 + 位置，周边玩家留作后续扩展）
+        server_name = online.get('serverName', '未知服务器')
+        location_name = online.get('city', {}).get('name') or '未知位置'
+        player_name = player_info.get('name') or '未知'
+
+        avatar_url = self._normalize_avatar_url(player_info.get('avatar'))
+
+        # 4) 周边玩家查询并绘制简易地图（基于 da.vtcm.link）
+        try:
+            server_id = online.get('serverId')
+            cx = float(online.get('x') or 0)
+            cy = float(online.get('y') or 0)
+            ax, ay = cx - 4000, cy + 2500
+            bx, by = cx + 4000, cy - 2500
+            area_url = f"https://da.vtcm.link/map/playerList?aAxisX={ax}&aAxisY={ay}&bAxisX={bx}&bAxisY={by}&serverId={server_id}"
+            logger.info(f"定位: 使用底图查询周边玩家 serverId={server_id} center=({cx},{cy}) url={area_url}")
+            area_players = []
+            if self.session and server_id:
+                async with self.session.get(area_url, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
+                    if resp.status == 200:
+                        j = await resp.json()
+                        area_players = j.get('data') or []
+                        logger.info(f"定位: 周边玩家数量={len(area_players)}")
+            # 将当前玩家追加
+            area_players = [p for p in area_players if str(p.get('tmpId')) != str(tmp_id)]
+            area_players.append({'tmpId': str(tmp_id), 'axisX': cx, 'axisY': cy})
+
+            map_tmpl = """
+<link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css\">
+<script src=\"https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js\"></script>
+<style>
+  html, body { margin:0; padding:0; width:100vw; height:100vh; background:#1f2328; overflow:hidden; }
+  * { box-sizing: border-box; }
+  .wrap { width: 100vw; color:#f2f4f8; font-family: system-ui, Segoe UI, Helvetica, Arial, sans-serif; }
+  #map { width: 100vw; height: calc(100vh - 150px); background:#2a2f36; filter: contrast(1.08) saturate(1.15) brightness(1.18); }
+  .panel { width:100vw; height:150px; background:rgba(28,28,28,.75); display:flex; align-items:center; padding:16px 20px; color:#eaeaea; backdrop-filter: blur(4px); }
+  .avatar { width:64px; height:64px; border-radius:50%; background:#808080; object-fit:cover; margin-right:16px; }
+  .col { flex:1; }
+  .name { font-size:22px; font-weight:600; letter-spacing:.3px; color:#f0f3f5; }
+  .sub { font-size:16px; color:#d8d8d8; margin-top:6px; }
+  .right { width:240px; text-align:right; color:#f0f3f5; font-size:16px; }
+</style>
+<div class=\"wrap\">
+  <div id=\"map\"></div>
+  <div class=\"panel\">
+    <img class=\"avatar\" src=\"{{ avatar }}\" />
+    <div class=\"col\"> 
+      <div class=\"name\">{{ player_name }}</div>
+      <div class=\"sub\">{{ server_name }} 游戏中</div>
+    </div>
+    <div class=\"right\">
+      <div>{{ country or '未知' }}</div>
+      <div>{{ city }}</div>
+    </div>
+  </div>
+</div>
+<script>
+  var promodsIds = [50, 51];
+  var serverId = {{ server_id }};
+  var mapType = promodsIds.indexOf(serverId) !== -1 ? 'promods' : 'ets';
+  var cfg = {
+    ets: {
+      tileUrl: 'https://ets-map.oss-cn-beijing.aliyuncs.com/ets2/05102019/{z}/{x}/{y}.png',
+      mul: { x: 71282, y: 56532 },
+      bounds: { x:131072, y:131072 },
+      maxZoom: 8, minZoom: 2,
+      calc: function(x,y){ return [ x/1.325928 + this.mul.x, y/1.325928 + this.mul.y ]; }
+    },
+    promods: {
+      tileUrl: 'https://ets-map.oss-cn-beijing.aliyuncs.com/promods/05102019/{z}/{x}/{y}.png',
+      mul: { x: 51953, y: 76024 },
+      bounds: { x:131072, y:131072 },
+      maxZoom: 8, minZoom: 2,
+      calc: function(x,y){ return [ x/2.598541 + this.mul.x, y/2.598541 + this.mul.y ]; }
+    }
+  };
+
+  var map = L.map('map', { attributionControl: false, crs: L.CRS.Simple, zoomControl: false });
+  var c = cfg[mapType];
+  var b = L.latLngBounds(
+    map.unproject([0, c.bounds.y], c.maxZoom),
+    map.unproject([c.bounds.x, 0], c.maxZoom)
+  );
+  L.tileLayer(c.tileUrl, { minZoom: c.minZoom, maxZoom: 10, maxNativeZoom: c.maxZoom, tileSize: 512, bounds: b, reuseTiles: true }).addTo(map);
+  map.setMaxBounds(b);
+  var centerX = {{ center_x }};
+  var centerY = {{ center_y }};
+  var players = [ {% for p in players %}{ axisX: {{ p.axisX }}, axisY: {{ p.axisY }}, tmpId: "{{ p.tmpId }}" }{% if not loop.last %}, {% endif %}{% endfor %} ];
+  for (var i=0;i<players.length;i++){
+    var p = players[i];
+    var xy = c.calc(p.axisX, p.axisY);
+    var latlng = map.unproject(xy, c.maxZoom);
+    L.circleMarker(latlng, { color:'#2f2f2f', weight:2, fillColor:(p.tmpId === '{{ me_id }}' ? '#57bd00' : '#3ca7ff'), fillOpacity:1, radius:(p.tmpId === '{{ me_id }}' ? 6 : 5) }).addTo(map);
+  }
+  var centerLL = map.unproject(c.calc(centerX, centerY+80), c.maxZoom);
+  map.setView(centerLL, 7);
+  setTimeout(function(){}, 800); // 轻微延时确保瓦片加载
+</script>
+"""
+            min_x, max_x = ax, bx
+            min_y, max_y = by, ay  # 注意坐标系方向
+            map_data = {
+                'server_name': server_name,
+                'location_name': location_name,
+                'player_name': player_name,
+                'me_id': str(tmp_id),
+                'players': area_players,
+                'min_x': min_x,
+                'max_x': max_x,
+                'min_y': min_y,
+                'max_y': max_y,
+                'avatar': avatar_url or '',
+                'country': (online.get('country') or (location_name.split(' ')[0] if ' ' in location_name else '')),
+                'city': (online.get('realName') or (location_name.split(' ')[1] if ' ' in location_name else location_name)),
+                'server_id': int(online.get('serverId') or 0),
+                'center_x': float(cx),
+                'center_y': float(cy)
+            }
+            logger.info(f"定位: 渲染底图 mapType={'promods' if int(online.get('serverId') or 0) in [50,51] else 'ets'} players={len(area_players)}")
+            url2 = await self.html_render(map_tmpl, map_data, options={'type': 'jpeg', 'quality': 92, 'full_page': True, 'timeout': 8000, 'animations': 'disabled'})
+            if isinstance(url2, str) and url2:
+                yield event.chain_result([Image.fromURL(url2)])
+                return
+        except Exception:
+            pass
+
+        # 最终回退文本
+        msg = f"玩家实时定位\n玩家名称: {player_name}\nTMP编号: {tmp_id}\n服务器: {server_name}\n位置: {location_name}"
+        yield event.plain_result(msg)
     # --- 定位命令结束 ---
     
 
@@ -1812,10 +1757,10 @@ class TmpBotPlugin(Star):
 可用命令:
 1. 绑定 [ID]
 2. 查询 [ID]
-3. 状态 [ID]- （修复中）
-4. 定位 [ID] -（api无法获取）
+3. 状态 [ID]- (修复完成，可用)
+4. 定位 [ID]- (修复完成，可用)
 5. DLC列表
-6. 排行
+6. 排行- (修复中)
 7. 解绑
 8. 服务器
 9. 菜单
