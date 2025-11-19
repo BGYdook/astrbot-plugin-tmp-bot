@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-astrBot-plugin-tmp-bot
+AstrBot-plugin-tmp-bot
 欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.59)
 """
 
@@ -11,7 +11,6 @@ import asyncio
 import aiohttp
 import json
 import os
-import re as _re_local
 import base64
 import socket
 from typing import Optional, List, Dict, Tuple, Any
@@ -186,23 +185,17 @@ class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
 
-# 版本号更新为 1.3.59
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", (_meta_version or "1.3.59"), "https://github.com/BGYdook/astrBot-plugin-tmp-bot")
+# 版本号更新为 1.3.32
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.32", "https://github.com/BGYdook/AstrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
-    def __init__(self):
-        super().__init__()
-        # 会在真实环境中由框架注入 session/context 等
-        self.session = None
-        self._ready = False
-        try:
-            logger.info("TMP Bot 插件初始化开始")
-            # 仅做轻量初始化，避免在导入阶段执行网络/阻塞操作
-            # 真实运行时框架会在 on_load/on_start 注入 session 等资源
-            self._ready = True
-            logger.info("TMP Bot 插件初始化完成（就绪）")
-        except Exception as e:
-            self._ready = False
-            logger.exception("TMP Bot 插件初始化发生异常，标记为未就绪：%s", e)
+    def __init__(self, context: Context, config: Optional[Dict[str, Any]] = None):
+        super().__init__(context)
+        self.config: Dict[str, Any] = config or {}
+        self.session: Optional[aiohttp.ClientSession] = None 
+        self.data_dir = StarTools.get_data_dir("tmp-bot")
+        self.bind_file = os.path.join(self.data_dir, "tmp_bindings.json")
+        os.makedirs(self.data_dir, exist_ok=True)
+        logger.info("TMP Bot 插件已加载")
 
     # --- 配置读取辅助 ---
     def _cfg_bool(self, key: str, default: bool) -> bool:
@@ -222,7 +215,7 @@ class TmpBotPlugin(Star):
         # 使用 IPv4 优先的连接器，并允许读取环境代理设置（与浏览器/系统行为更一致）
         connector = aiohttp.TCPConnector(family=socket.AF_INET)
         self.session = aiohttp.ClientSession(
-            headers={'User-Agent': 'astrBot-TMP-Plugin/1.3.59'}, 
+            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.3.32'}, 
             timeout=aiohttp.ClientTimeout(total=timeout_sec),
             connector=connector,
             trust_env=True
@@ -993,7 +986,7 @@ class TmpBotPlugin(Star):
         if last_online_raw and last_online_raw != player_info.get('lastOnline'):
             logger.info(f"查询详情: 使用 VTCM 提供的上次在线字段，值={last_online_raw}")
         # 将“上次在线”统一显示为北京时间 (UTC+8)
-        last_online_formatted = _format_timestamp_to_readable(last_online_raw)
+        last_online_formatted = _format_timestamp_to_beijing(last_online_raw)
         
         # 完整的回复消息构建：标题与正文分离，便于控制发送顺序
         header = "TMP玩家详细信息\r\n" + "=" * 20 + "\r\n"
@@ -1399,7 +1392,7 @@ class TmpBotPlugin(Star):
         try:
             player_info = await self._get_player_info(tmp_id)
         except PlayerNotFoundException:
-            yield event.plain_result(f"玩家不存在，请检查ID是否正确")
+            yield event.plain_result(f"玩家 TMP ID {tmp_id} 不存在，请检查ID是否正确")
             return
         except Exception as e:
             yield event.plain_result(f"查询失败: {str(e)}")
@@ -1412,7 +1405,10 @@ class TmpBotPlugin(Star):
         if self._bind_tmp_id(user_id, tmp_id, player_name):
             
             message = f"绑定成功！\n"
-            message += f"已将您的账号与TMP玩家 {player_name} (ID: {tmp_id}) 绑定\n"         
+            message += f"已将您的账号与TMP玩家 {player_name} (ID: {tmp_id}) 绑定\n"
+            if steam_id_display:
+                message += f"该玩家的 Steam ID: {steam_id_display}"
+            
             yield event.plain_result(message)
         else:
             yield event.plain_result("绑定失败，请稍后重试")
