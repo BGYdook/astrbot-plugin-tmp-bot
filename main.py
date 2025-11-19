@@ -13,6 +13,10 @@ import json
 import os
 import base64
 import socket
+import zipfile
+import tempfile
+import shutil
+from pathlib import Path
 from typing import Optional, List, Dict, Tuple, Any
 from datetime import datetime, timedelta
 
@@ -1748,6 +1752,128 @@ class TmpBotPlugin(Star):
                     yield event.plain_result(f"查询服务器状态失败，API返回错误状态码: {response.status}")
         except Exception:
             yield event.plain_result("网络请求失败，请检查网络或稍后重试。")
+
+    # --- 自更新命令与实现 ---
+    def _parse_repo_from_metadata(self) -> Optional[Tuple[str, str]]:
+        """从 metadata.yaml 的 repo 字段解析 GitHub 所有者与仓库名。"""
+        try:
+            meta_path = Path(__file__).resolve().parent / 'metadata.yaml'
+            if not meta_path.exists():
+                return None
+            owner = None
+            repo = None
+            with meta_path.open('r', encoding='utf-8') as f:
+                for line in f:
+                    s = line.strip()
+                    if s.startswith('repo:'):
+                        url = s.split(':', 1)[1].strip()
+                        m = re.search(r"github\.com/([^/]+)/([^/\s]+)", url)
+                        if m:
+                            owner, repo = m.group(1), m.group(2)
+                        break
+            if owner and repo:
+                return owner, repo
+        except Exception:
+            pass
+        return None
+
+    def _build_codeload_url(self, ref: str = 'main') -> Optional[str]:
+        """构建 codeload 直链，默认 main 分支。"""
+        parsed = self._parse_repo_from_metadata()
+        if not parsed:
+            return None
+        owner, repo = parsed
+        if ref.lower().startswith('v') or ref.lower().startswith('tag:'):
+            tag = ref.replace('tag:', '')
+            return f"https://codeload.github.com/{owner}/{repo}/zip/refs/tags/{tag}"
+        return f"https://codeload.github.com/{owner}/{repo}/zip/refs/heads/{ref}"
+
+    async def _download_zip_to_temp(self, url: str) -> Optional[Path]:
+        """下载 ZIP 到临时文件，返回路径。"""
+        if not self.session:
+            return None
+        try:
+            timeout_sec = self._cfg_int('api_timeout_seconds', 20)
+            async with self.session.get(url, timeout=timeout_sec) as resp:
+                if resp.status != 200:
+                    logger.error(f"自更新: 下载失败，HTTP {resp.status} -> {url}")
+                    return None
+                data = await resp.read()
+                tmp_fd, tmp_path = tempfile.mkstemp(prefix='tmpbot_update_', suffix='.zip')
+                os.close(tmp_fd)
+                with open(tmp_path, 'wb') as f:
+                    f.write(data)
+                logger.info(f"自更新: ZIP 已下载 -> {tmp_path} ({len(data)} bytes)")
+                return Path(tmp_path)
+        except Exception:
+            logger.error("自更新: 下载异常", exc_info=True)
+            return None
+
+    def _extract_and_overlay(self, zip_path: Path) -> bool:
+        """解压 ZIP 并覆盖到插件目录。"""
+        try:
+            plugin_dir = Path(__file__).resolve().parent
+            with zipfile.ZipFile(str(zip_path), 'r') as zf:
+                tmp_dir = Path(tempfile.mkdtemp(prefix='tmpbot_extract_'))
+                zf.extractall(str(tmp_dir))
+                entries = list(tmp_dir.iterdir())
+                root = entries[0] if entries else None
+                if not root or not root.is_dir():
+                    logger.error("自更新: ZIP 结构异常，未找到根目录")
+                    shutil.rmtree(tmp_dir, ignore_errors=True)
+                    return False
+                for item in root.iterdir():
+                    src = item
+                    dst = plugin_dir / item.name
+                    if src.is_dir():
+                        shutil.copytree(src, dst, dirs_exist_ok=True)
+                    else:
+                        shutil.copy2(src, dst)
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+            logger.info("自更新: 覆盖完成")
+            return True
+        except Exception:
+            logger.error("自更新: 解压或拷贝异常", exc_info=True)
+            return False
+
+    @filter.command("更新插件")
+    async def tmp_update(self, event: AstrMessageEvent):
+        """[命令: 更新插件] 使用 GitHub codeload 直链下载并覆盖安装当前插件。
+
+        用法示例:
+        - 更新插件                (默认更新 main 分支)
+        - 更新插件 dev            (更新 dev 分支)
+        - 更新插件 tag:v1.3.59   (更新指定 tag)
+        - 更新插件 https://...zip (使用你提供的 ZIP 直链)
+        """
+        msg = event.message_str.strip()
+        args = msg.split()
+        ref_or_url = args[1] if len(args) >= 2 else None
+
+        if ref_or_url and ref_or_url.lower().startswith('http'):
+            url = ref_or_url
+        else:
+            url = self._build_codeload_url(ref_or_url or 'main')
+        if not url:
+            yield event.plain_result("更新失败：无法构建下载链接，请检查 metadata.yaml 的 repo 字段。")
+            return
+
+        zip_path = await self._download_zip_to_temp(url)
+        if not zip_path:
+            yield event.plain_result("下载失败：无法获取 ZIP 文件，请稍后再试或提供可访问的 ZIP 直链。")
+            return
+
+        ok = self._extract_and_overlay(zip_path)
+        try:
+            os.remove(str(zip_path))
+        except Exception:
+            pass
+
+        if not ok:
+            yield event.plain_result("更新失败：解压或写入文件时发生错误。")
+            return
+
+        yield event.plain_result("更新完成！请重启 AstrBot 后生效。")
 
     @filter.command("帮助")
     async def tmphelp(self, event: AstrMessageEvent):
