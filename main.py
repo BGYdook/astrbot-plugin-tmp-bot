@@ -1598,9 +1598,9 @@ class TmpBotPlugin(Star):
                 'server_id': int(online.get('serverId') or 0),
                 'center_x': float(cx),
                 'center_y': float(cy)
-            };
+            }
             logger.info(f"定位: 渲染底图 mapType={'promods' if int(online.get('serverId') or 0) in [50,51] else 'ets'} players={len(area_players)}")
-            url2 = await self.html_render(map_tmpl, map_data, options={'type': 'jpeg', 'quality': 92, 'full_page': True, 'timeout': 8000, 'animations': 'disabled'});
+            url2 = await self.html_render(map_tmpl, map_data, options={'type': 'jpeg', 'quality': 92, 'full_page': True, 'timeout': 8000, 'animations': 'disabled'})
             if isinstance(url2, str) and url2:
                 yield event.chain_result([Image.fromURL(url2)])
                 return
@@ -1728,10 +1728,10 @@ class TmpBotPlugin(Star):
                                     else:
                                         output += f"{players_str}\n"
                                     
-                                    output += f"  特性: {collision_str}";
+                                    output += f"  特性: {collision_str}"
                                     if speed_str:
-                                        output += f" | {speed_str}";
-                                    output += "\n";
+                                        output += f" | {speed_str}"
+                                    output += "\n"
                                     
                                     
                                 return output + "\n"
@@ -1774,107 +1774,3 @@ class TmpBotPlugin(Star):
             await self.session.close()
             self.session = None
         logger.info("TMP Bot 插件已卸载")
-
-    # ------------------------------
-    # 精确命令：忽略前缀适配器
-    # 说明：
-    # - 当消息以常见前缀字符（! / . # 或全角符号等）开头时，剥离前缀并调用对应命令处理器
-    # - 只处理带前缀的情况，避免与框架中原有命令的重复触发
-    # - 支持的命令：帮助、查询、DLC、DLC列表、地图DLC、绑定、解绑、定位、排行、服务器
-    # ------------------------------
-    _PREFIX_RE = r'^\s*(?:[!\/\.\#\uFF01\uFF0F])\s*'
-
-    @filter.command(_PREFIX_RE + r'帮助\s*$')
-    async def _prefixed_help(self, event: AstrMessageEvent):
-        orig = event.message_str
-        try:
-            event.message_str = re.sub(_PREFIX_RE, '', orig, count=1)
-            async for r in self.tmphelp(event):
-                yield r
-        finally:
-            event.message_str = orig
-
-    @filter.command(_PREFIX_RE + r'查询\b.*$')
-    async def _prefixed_query(self, event: AstrMessageEvent):
-        orig = event.message_str
-        try:
-            event.message_str = re.sub(_PREFIX_RE, '', orig, count=1)
-            async for r in self.tmpquery(event):
-                yield r
-        finally:
-            event.message_str = orig
-
-    @filter.command(_PREFIX_RE + r'DLC(?:列表)?\b.*$')
-    async def _prefixed_dlc(self, event: AstrMessageEvent):
-        orig = event.message_str
-        try:
-            event.message_str = re.sub(_PREFIX_RE, '', orig, count=1)
-            # 若是精确 DLC 列表请求，调用 tmpdlc_list，否则调用 tmpdlc
-            if re.match(r'^\s*DLC\s*列表', event.message_str, re.IGNORECASE):
-                async for r in self.tmpdlc_list(event):
-                    yield r
-            else:
-                async for r in self.tmpdlc(event):
-                    yield r
-        finally:
-            event.message_str = orig
-
-    @filter.command(_PREFIX_RE + r'地图DLC\s*$')
-    async def _prefixed_dlc_map(self, event: AstrMessageEvent):
-        orig = event.message_str
-        try:
-            event.message_str = re.sub(_PREFIX_RE, '', orig, count=1)
-            async for r in self.tmpdlc_map_alias(event):
-                yield r
-        finally:
-            event.message_str = orig
-
-    @filter.command(_PREFIX_RE + r'绑定\b.*$')
-    async def _prefixed_bind(self, event: AstrMessageEvent):
-        orig = event.message_str
-        try:
-            event.message_str = re.sub(_PREFIX_RE, '', orig, count=1)
-            async for r in self.tmpbind(event):
-                yield r
-        finally:
-            event.message_str = orig
-
-    @filter.command(_PREFIX_RE + r'解绑\s*$')
-    async def _prefixed_unbind(self, event: AstrMessageEvent):
-        orig = event.message_str
-        try:
-            event.message_str = re.sub(_PREFIX_RE, '', orig, count=1)
-            async for r in self.tmpunbind(event):
-                yield r
-        finally:
-            event.message_str = orig
-
-    @filter.command(_PREFIX_RE + r'定位\b.*$')
-    async def _prefixed_locate(self, event: AstrMessageEvent):
-        orig = event.message_str
-        try:
-            event.message_str = re.sub(_PREFIX_RE, '', orig, count=1)
-            async for r in self.tmplocate(event):
-                yield r
-        finally:
-            event.message_str = orig
-
-    @filter.command(_PREFIX_RE + r'排行\s*$')
-    async def _prefixed_rank(self, event: AstrMessageEvent):
-        orig = event.message_str
-        try:
-            event.message_str = re.sub(_PREFIX_RE, '', orig, count=1)
-            async for r in self.tmprank(event):
-                yield r
-        finally:
-            event.message_str = orig
-
-    @filter.command(_PREFIX_RE + r'服务器\s*$')
-    async def _prefixed_server(self, event: AstrMessageEvent):
-        orig = event.message_str
-        try:
-            event.message_str = re.sub(_PREFIX_RE, '', orig, count=1)
-            async for r in self.tmpserver(event):
-                yield r
-        finally:
-            event.message_str = orig
