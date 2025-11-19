@@ -1845,22 +1845,51 @@ class TmpBotPlugin(Star):
         - 更新插件 dev            (更新 dev 分支)
         - 更新插件 tag:v1.3.59   (更新指定 tag)
         - 更新插件 https://...zip (使用你提供的 ZIP 直链)
+        - 更新插件 C:\path\to\file.zip (从本地 ZIP 安装)
         """
         msg = event.message_str.strip()
-        args = msg.split()
-        ref_or_url = args[1] if len(args) >= 2 else None
+        # 提取命令后的整个参数串，允许包含空格的本地路径
+        m = re.match(r"更新插件\s*(.*)$", msg)
+        raw_arg = (m.group(1).strip() if m else '')
 
-        if ref_or_url and ref_or_url.lower().startswith('http'):
-            url = ref_or_url
+        # 本地 ZIP 处理：优先支持 file:/// 和绝对路径
+        local_path: Optional[Path] = None
+        if raw_arg:
+            if raw_arg.lower().startswith('file:///'):
+                p = raw_arg[8:]  # 去掉 file:///
+                local_path = Path(p)
+            elif raw_arg.lower().startswith('file://'):
+                p = raw_arg[7:]
+                local_path = Path(p)
+            elif not raw_arg.lower().startswith('http'):
+                # 将整段作为路径尝试
+                local_path = Path(raw_arg)
+
+        if local_path and local_path.exists() and local_path.suffix.lower() == '.zip':
+            ok = self._extract_and_overlay(local_path)
+            if not ok:
+                yield event.plain_result("更新失败：解压或写入文件时发生错误（本地 ZIP）。")
+                return
+            yield event.plain_result("本地 ZIP 安装完成！请重启 AstrBot 后生效。")
+            return
+
+        # 远程下载路径
+        ref = None
+        if raw_arg:
+            # 支持 tag:vX.Y.Z 或 分支名
+            ref = raw_arg
+        url = None
+        if raw_arg and raw_arg.lower().startswith('http'):
+            url = raw_arg
         else:
-            url = self._build_codeload_url(ref_or_url or 'main')
+            url = self._build_codeload_url(ref or 'main')
         if not url:
             yield event.plain_result("更新失败：无法构建下载链接，请检查 metadata.yaml 的 repo 字段。")
             return
 
         zip_path = await self._download_zip_to_temp(url)
         if not zip_path:
-            yield event.plain_result("下载失败：无法获取 ZIP 文件，请稍后再试或提供可访问的 ZIP 直链。")
+            yield event.plain_result("下载失败：无法获取 ZIP 文件，请稍后再试或先用浏览器下载本地后再执行：更新插件 C:\\path\\file.zip")
             return
 
         ok = self._extract_and_overlay(zip_path)
@@ -1870,7 +1899,7 @@ class TmpBotPlugin(Star):
             pass
 
         if not ok:
-            yield event.plain_result("更新失败：解压或写入文件时发生错误。")
+            yield event.plain_result("更新失败：解压或写入文件时发生错误（远程 ZIP）。")
             return
 
         yield event.plain_result("更新完成！请重启 AstrBot 后生效。")
