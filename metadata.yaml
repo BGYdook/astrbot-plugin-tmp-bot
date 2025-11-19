@@ -1,6 +1,6 @@
 name: astrbot-plugin-tmp-bot
-description: 欧洲卡车模拟2 TMP查询机器人 - 支持玩家信息查询、位置查询、服务器状态查询、里程排行榜等功能
-version: 1.3.55
+description: 欧洲卡车模拟2 TMP查询机器人 - 支持玩家信息查询、位置查询、服务器状态查询、里程排行榜、地图DLC等功能
+version: 1.3.59
 main: main.py
 author: BGYdook
 homepage: https://github.com/BGYdook/astrbot-plugin-tmp-bot
@@ -9,53 +9,46 @@ license: MIT
 
 # 插件功能特性
 features:
-  - TMP玩家信息查询
-  - 玩家位置信息查询
+  - 玩家信息查询
+  - 玩家位置信息查询（底图渲染）
   - 服务器热门地点路况查询
   - 欧卡/美卡服务器状态查询
-  - 总里程和今日里程排行榜
-  - 地图DLC列表查询（支持图片输出）
-  - 版本信息查询
+  - 总里程与今日里程排行榜
+  - 地图DLC列表查询（图片输出）
   - 支持TMPID绑定功能
 
 # 支持的命令列表
 commands:
-  - name: tmpbind
-    description: 绑定 TMPID，绑定后使用其他指令时可省略输入
-    usage: tmpbind 123
-  - name: tmpunbind
+  - name: 绑定
+    description: 绑定 TMPID，绑定后可直接使用查询/定位等命令
+    usage: 绑定 123456
+  - name: 解绑
     description: 解除 TMPID 绑定
-    usage: tmpunbind
-  - name: tmpquery
+    usage: 解绑
+  - name: 查询
     description: 查询TMP玩家信息，可指定ID或使用绑定的ID
-    usage: tmpquery 123 或 tmpquery（使用绑定ID）
-  - name: tmpposition
-    description: 查询玩家位置信息，可指定ID或使用绑定的ID
-    usage: tmpposition 123 或 tmpposition（使用绑定ID）
-  - name: tmptraffic
-    description: 查询服务器热门地点路况信息，支持s1/s2/p/a服务器
-    usage: tmptraffic s1
-  - name: tmpserverats
-    description: 查询美卡服务器信息列表
-    usage: tmpserverats
-  - name: tmpserverets
-    description: 查询欧卡服务器信息列表
-    usage: tmpserverets
-  - name: tmpversion
-    description: 查询版本信息
-    usage: tmpversion
+    usage: 查询 123456 或 查询（使用绑定ID）
+  - name: 定位
+    description: 查询并渲染玩家位置信息（底图+玩家点）
+    usage: 定位 123456 或 定位（使用绑定ID）
+  - name: 服务器
+    description: 查询欧卡/美卡服务器信息列表
+    usage: 服务器
+  - name: 排行
+    description: 查看里程排行榜（总里程/今日里程）
+    usage: 排行
+  - name: DLC
+    description: 列出地图相关 DLC（支持图片输出）
+    usage: DLC
   - name: DLC列表
     description: 列出地图相关 DLC（支持图片输出）
     usage: DLC列表
   - name: 地图DLC
     description: 列出地图相关 DLC（支持图片输出）
     usage: 地图DLC
-  - name: tmpmileageranking
-    description: 总里程排行榜，数据从2025年8月23日20:00开始统计
-    usage: tmpmileageranking
-  - name: tmptodaymileageranking
-    description: 今日里程排行榜，每日0点重置数据
-    usage: tmptodaymileageranking
+  - name: 帮助
+    description: 查看插件命令帮助
+    usage: 帮助
 
 # 使用说明
 usage: |
@@ -94,6 +87,4 @@ keywords:
 python_requires: ">=3.10"
 dependencies:
   - aiohttp>=3.8.0
-  - httpx>=0.24.0
-  - pydantic>=1.10.0
-  - python-dateutil>=2.8.0
+  - certifi
