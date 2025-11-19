@@ -7,14 +7,20 @@ AstrBot-plugin-tmp-bot
 """
 
 import re
-import asyncio
-import aiohttp
-import json
-import os
-import base64
-import socket
 from typing import Optional, List, Dict, Tuple, Any
 from datetime import datetime, timedelta
+
+# 新增缺失的标准库/第三方导入，避免运行时未定义错误
+import aiohttp
+import asyncio
+import os
+import json
+import re
+import socket
+import traceback
+
+# 兼容旧代码里使用的别名
+_re = re
 
 # 引入 AstrBot 核心 API
 try:
