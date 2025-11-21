@@ -187,7 +187,7 @@ class ApiResponseException(TmpApiException):
     pass
 
 # 版本号更新为 1.3.59
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件"**"1.3.59"**"https://github.com/BGYdook/astrBot-plugin-tmp-bot")
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.59", "https://github.com/BGYdook/astrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context, config=None):  # 接收 context 和 config
         super().__init__(context)              # 将 context 传给父类
