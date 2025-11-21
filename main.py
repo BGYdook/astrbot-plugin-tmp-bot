@@ -3,7 +3,7 @@
 
 """
 astrbot-plugin-tmp-bot
-欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.33)
+欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.59)
 """
 
 import re
@@ -187,7 +187,7 @@ class ApiResponseException(TmpApiException):
     pass
 
 # 版本号更新为 1.3.59
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", (_meta_version or "1.3.59"), "https://github.com/BGYdook/astrBot-plugin-tmp-bot")
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "https://github.com/BGYdook/astrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self):
         super().__init__()
