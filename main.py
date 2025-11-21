@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 
 """
-AstrBot-plugin-tmp-bot
-欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.59)
+astrbot-plugin-tmp-bot
+欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.33)
 """
 
 import re
@@ -11,12 +11,9 @@ import asyncio
 import aiohttp
 import json
 import os
+import re as _re_local
 import base64
 import socket
-import zipfile
-import tempfile
-import shutil
-from pathlib import Path
 from typing import Optional, List, Dict, Tuple, Any
 from datetime import datetime, timedelta
 
@@ -190,16 +187,22 @@ class ApiResponseException(TmpApiException):
     pass
 
 # 版本号更新为 1.3.59
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.59", "https://github.com/BGYdook/astrbot-plugin-tmp-bot")
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", (_meta_version or "1.3.59"), "https://github.com/BGYdook/astrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
-    def __init__(self, context: Context, config: Optional[Dict[str, Any]] = None):
-        super().__init__(context)
-        self.config: Dict[str, Any] = config or {}
-        self.session: Optional[aiohttp.ClientSession] = None 
-        self.data_dir = StarTools.get_data_dir("tmp-bot")
-        self.bind_file = os.path.join(self.data_dir, "tmp_bindings.json")
-        os.makedirs(self.data_dir, exist_ok=True)
-        logger.info("TMP Bot 插件已加载")
+    def __init__(self):
+        super().__init__()
+        # 会在真实环境中由框架注入 session/context 等
+        self.session = None
+        self._ready = False
+        try:
+            logger.info("TMP Bot 插件初始化开始")
+            # 仅做轻量初始化，避免在导入阶段执行网络/阻塞操作
+            # 真实运行时框架会在 on_load/on_start 注入 session 等资源
+            self._ready = True
+            logger.info("TMP Bot 插件初始化完成（就绪）")
+        except Exception as e:
+            self._ready = False
+            logger.exception("TMP Bot 插件初始化发生异常，标记为未就绪：%s", e)
 
     # --- 配置读取辅助 ---
     def _cfg_bool(self, key: str, default: bool) -> bool:
@@ -219,7 +222,7 @@ class TmpBotPlugin(Star):
         # 使用 IPv4 优先的连接器，并允许读取环境代理设置（与浏览器/系统行为更一致）
         connector = aiohttp.TCPConnector(family=socket.AF_INET)
         self.session = aiohttp.ClientSession(
-            headers={'User-Agent': 'AstrBot-TMP-Plugin/1.3.32'}, 
+            headers={'User-Agent': 'astrBot-TMP-Plugin/1.3.59'}, 
             timeout=aiohttp.ClientTimeout(total=timeout_sec),
             connector=connector,
             trust_env=True
@@ -1396,7 +1399,7 @@ class TmpBotPlugin(Star):
         try:
             player_info = await self._get_player_info(tmp_id)
         except PlayerNotFoundException:
-            yield event.plain_result(f"玩家 TMP ID {tmp_id} 不存在，请检查ID是否正确")
+            yield event.plain_result(f"玩家不存在，请检查ID是否正确")
             return
         except Exception as e:
             yield event.plain_result(f"查询失败: {str(e)}")
@@ -1409,10 +1412,7 @@ class TmpBotPlugin(Star):
         if self._bind_tmp_id(user_id, tmp_id, player_name):
             
             message = f"绑定成功！\n"
-            message += f"已将您的账号与TMP玩家 {player_name} (ID: {tmp_id}) 绑定\n"
-            if steam_id_display:
-                message += f"该玩家的 Steam ID: {steam_id_display}"
-            
+            message += f"已将您的账号与TMP玩家 {player_name} (ID: {tmp_id}) 绑定\n"         
             yield event.plain_result(message)
         else:
             yield event.plain_result("绑定失败，请稍后重试")
@@ -1753,157 +1753,6 @@ class TmpBotPlugin(Star):
         except Exception:
             yield event.plain_result("网络请求失败，请检查网络或稍后重试。")
 
-    # --- 自更新命令与实现 ---
-    def _parse_repo_from_metadata(self) -> Optional[Tuple[str, str]]:
-        """从 metadata.yaml 的 repo 字段解析 GitHub 所有者与仓库名。"""
-        try:
-            meta_path = Path(__file__).resolve().parent / 'metadata.yaml'
-            if not meta_path.exists():
-                return None
-            owner = None
-            repo = None
-            with meta_path.open('r', encoding='utf-8') as f:
-                for line in f:
-                    s = line.strip()
-                    if s.startswith('repo:'):
-                        url = s.split(':', 1)[1].strip()
-                        m = re.search(r"github\.com/([^/]+)/([^/\s]+)", url)
-                        if m:
-                            owner, repo = m.group(1), m.group(2)
-                        break
-            if owner and repo:
-                return owner, repo
-        except Exception:
-            pass
-        return None
-
-    def _build_codeload_url(self, ref: str = 'main') -> Optional[str]:
-        """构建 codeload 直链，默认 main 分支。"""
-        parsed = self._parse_repo_from_metadata()
-        if not parsed:
-            return None
-        owner, repo = parsed
-        if ref.lower().startswith('v') or ref.lower().startswith('tag:'):
-            tag = ref.replace('tag:', '')
-            return f"https://codeload.github.com/{owner}/{repo}/zip/refs/tags/{tag}"
-        return f"https://codeload.github.com/{owner}/{repo}/zip/refs/heads/{ref}"
-
-    async def _download_zip_to_temp(self, url: str) -> Optional[Path]:
-        """下载 ZIP 到临时文件，返回路径。"""
-        if not self.session:
-            return None
-        try:
-            timeout_sec = self._cfg_int('api_timeout_seconds', 20)
-            async with self.session.get(url, timeout=timeout_sec) as resp:
-                if resp.status != 200:
-                    logger.error(f"自更新: 下载失败，HTTP {resp.status} -> {url}")
-                    return None
-                data = await resp.read()
-                tmp_fd, tmp_path = tempfile.mkstemp(prefix='tmpbot_update_', suffix='.zip')
-                os.close(tmp_fd)
-                with open(tmp_path, 'wb') as f:
-                    f.write(data)
-                logger.info(f"自更新: ZIP 已下载 -> {tmp_path} ({len(data)} bytes)")
-                return Path(tmp_path)
-        except Exception:
-            logger.error("自更新: 下载异常", exc_info=True)
-            return None
-
-    def _extract_and_overlay(self, zip_path: Path) -> bool:
-        """解压 ZIP 并覆盖到插件目录。"""
-        try:
-            plugin_dir = Path(__file__).resolve().parent
-            with zipfile.ZipFile(str(zip_path), 'r') as zf:
-                tmp_dir = Path(tempfile.mkdtemp(prefix='tmpbot_extract_'))
-                zf.extractall(str(tmp_dir))
-                entries = list(tmp_dir.iterdir())
-                root = entries[0] if entries else None
-                if not root or not root.is_dir():
-                    logger.error("自更新: ZIP 结构异常，未找到根目录")
-                    shutil.rmtree(tmp_dir, ignore_errors=True)
-                    return False
-                for item in root.iterdir():
-                    src = item
-                    dst = plugin_dir / item.name
-                    if src.is_dir():
-                        shutil.copytree(src, dst, dirs_exist_ok=True)
-                    else:
-                        shutil.copy2(src, dst)
-                shutil.rmtree(tmp_dir, ignore_errors=True)
-            logger.info("自更新: 覆盖完成")
-            return True
-        except Exception:
-            logger.error("自更新: 解压或拷贝异常", exc_info=True)
-            return False
-
-    @filter.command("更新插件")
-    async def tmp_update(self, event: AstrMessageEvent):
-        """[命令: 更新插件] 使用 GitHub codeload 直链下载并覆盖安装当前插件。
-
-        用法示例:
-        - 更新插件                (默认更新 main 分支)
-        - 更新插件 dev            (更新 dev 分支)
-        - 更新插件 tag:v1.3.59   (更新指定 tag)
-        - 更新插件 https://...zip (使用你提供的 ZIP 直链)
-        - 更新插件 C:\path\to\file.zip (从本地 ZIP 安装)
-        """
-        msg = event.message_str.strip()
-        # 提取命令后的整个参数串，允许包含空格的本地路径
-        m = re.match(r"更新插件\s*(.*)$", msg)
-        raw_arg = (m.group(1).strip() if m else '')
-
-        # 本地 ZIP 处理：优先支持 file:/// 和绝对路径
-        local_path: Optional[Path] = None
-        if raw_arg:
-            if raw_arg.lower().startswith('file:///'):
-                p = raw_arg[8:]  # 去掉 file:///
-                local_path = Path(p)
-            elif raw_arg.lower().startswith('file://'):
-                p = raw_arg[7:]
-                local_path = Path(p)
-            elif not raw_arg.lower().startswith('http'):
-                # 将整段作为路径尝试
-                local_path = Path(raw_arg)
-
-        if local_path and local_path.exists() and local_path.suffix.lower() == '.zip':
-            ok = self._extract_and_overlay(local_path)
-            if not ok:
-                yield event.plain_result("更新失败：解压或写入文件时发生错误（本地 ZIP）。")
-                return
-            yield event.plain_result("本地 ZIP 安装完成！请重启 AstrBot 后生效。")
-            return
-
-        # 远程下载路径
-        ref = None
-        if raw_arg:
-            # 支持 tag:vX.Y.Z 或 分支名
-            ref = raw_arg
-        url = None
-        if raw_arg and raw_arg.lower().startswith('http'):
-            url = raw_arg
-        else:
-            url = self._build_codeload_url(ref or 'main')
-        if not url:
-            yield event.plain_result("更新失败：无法构建下载链接，请检查 metadata.yaml 的 repo 字段。")
-            return
-
-        zip_path = await self._download_zip_to_temp(url)
-        if not zip_path:
-            yield event.plain_result("下载失败：无法获取 ZIP 文件，请稍后再试或先用浏览器下载本地后再执行：更新插件 C:\\path\\file.zip")
-            return
-
-        ok = self._extract_and_overlay(zip_path)
-        try:
-            os.remove(str(zip_path))
-        except Exception:
-            pass
-
-        if not ok:
-            yield event.plain_result("更新失败：解压或写入文件时发生错误（远程 ZIP）。")
-            return
-
-        yield event.plain_result("更新完成！请重启 AstrBot 后生效。")
-
     @filter.command("帮助")
     async def tmphelp(self, event: AstrMessageEvent):
         """[命令: 帮助] 显示本插件的命令使用说明。"""
@@ -1912,8 +1761,8 @@ class TmpBotPlugin(Star):
 可用命令:
 1. 绑定 [ID]
 2. 查询 [ID]
-3. 状态 [ID]- (修复完成，可用)
-4. 定位 [ID]- (修复完成，可用)
+3. 状态 [ID]
+4. 定位 [ID]
 5. DLC列表
 6. 排行- (修复中)
 7. 解绑

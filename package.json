@@ -6,12 +6,10 @@
   "typings": "lib/index.d.ts",
   "author": "BGYdook",
   "repository": {
-    "type": "git",
-    "url": "https://github.com/BGYdook/AstrBot-plugin-tmp-bot"
+    "url": "https://github.com/BGYdook/astrBot-plugin-tmp-bot"
   },
-  "homepage": "https://github.com/BGYdook/AstrBot-plugin-tmp-bot",
+  "homepage": "https://github.com/BGYdook/astrBot-plugin-tmp-bot",
   "files": [
-    "lib",
     "dist"
   ],
   "license": "MIT",
