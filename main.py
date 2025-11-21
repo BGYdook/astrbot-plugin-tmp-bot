@@ -195,6 +195,18 @@ class TmpBotPlugin(Star):
         # 会在真实环境中由框架注入 session/context 等
         self.session = None
         self._ready = False
+        self.config = config or {}
+        try:
+            bind_path = self.config.get('bind_file')
+            if not bind_path:
+                root = os.getcwd()
+                bind_path = os.path.join(root, 'data', 'tmp_bindings.json')
+            d = os.path.dirname(bind_path)
+            if d:
+                os.makedirs(d, exist_ok=True)
+            self.bind_file = bind_path
+        except Exception:
+            self.bind_file = os.path.join(os.getcwd(), 'tmp_bindings.json')
         try:
             logger.info("TMP Bot 插件初始化开始")
             # 仅做轻量初始化，避免在导入阶段执行网络/阻塞操作
