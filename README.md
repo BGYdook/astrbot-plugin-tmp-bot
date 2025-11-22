@@ -1,6 +1,6 @@
 # astrbot-plugin-tmp-bot
 
-[![plugin version](https://img.shields.io/badge/plugin_version-v1.5.0-green)](https://github.com/BGYdook/astrbot-plugin-tmp-bot)
+[![npm](https://img.shields.io/badge/npm-v1.5.0-blue)](https://github.com/BGYdook/astrbot-plugin-tmp-bot)
 
 欧洲卡车模拟2 TMP 查询机器人，用于查询玩家信息、位置、服务器路况及排行榜等。
 
