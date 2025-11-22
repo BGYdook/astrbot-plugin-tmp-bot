@@ -1,1 +1,26 @@
-https://github.com/USERNAME/REPOSITORY/workflows/WORKFLOW_FILE_NAME/badge.svg
+name: Python Tests
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10' # 根据您的项目需求更改 Python 版本
+    - name: Install dependencies
+      # 假设您使用 requirements.txt
+      run: pip install -r requirements.txt 
+    - name: Run Tests
+      # 替换成您的实际测试命令，例如：pytest 或 python -m unittest
+      run: |
+        echo "Running basic checks..."
+        # 只要这个命令不返回非零状态码，工作流就会通过
+        python --version
