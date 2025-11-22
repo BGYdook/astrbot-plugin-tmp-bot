@@ -3,7 +3,7 @@
 
 """
 astrbot-plugin-tmp-bot
-欧卡2TMP查询插件 - AstrBot版本 (版本 1.3.60)
+欧卡2TMP查询插件 - AstrBot版本 (版本 v1.5.0)
 """
 
 import re
@@ -187,7 +187,7 @@ class ApiResponseException(TmpApiException):
     pass
 
 # 版本号更新为 1.3.59
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.3.60", "https://github.com/BGYdook/astrBot-plugin-tmp-bot")
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "v1.5.0", "https://github.com/BGYdook/astrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context, config=None):  # 接收 context 和 config
         super().__init__(context)              # 将 context 传给父类
@@ -917,6 +917,7 @@ class TmpBotPlugin(Star):
             "2.5": "鲁莽驾驶",
             "2.6": "不适当的车队管理/滥用汽车",
             "2.7": "特色区域和事件服务器",
+            "2.8": "历史原因",
         }
 
         # 找出所有 "§x.x - title" 片段（title 截止到逗号或连字符）
@@ -970,7 +971,7 @@ class TmpBotPlugin(Star):
             tmp_id = self._get_bound_tmp_id(user_id)
         
         if not tmp_id:
-            yield event.plain_result("请输入正确的玩家编号（TMP ID 或 Steam ID）")
+            yield event.plain_result("请输入正确的玩家编号 TMP ID")
             return
         
         try:
@@ -1113,12 +1114,12 @@ class TmpBotPlugin(Star):
         lifetime_pledge = (_to_int(lifetime_pledge_raw) // 100) if is_patron else 0
 
         body += f"🎁是否赞助: {'是' if is_patron else '否'}\n"
-        body += f"🎁赞助是否有效: {'是' if active else '否'}\n"
+        body += f"🎁是否有效: {'是' if active else '否'}\n"
         if is_patron:
             if current_pledge > 0:
                 body += f"🎁当前赞助金额: {current_pledge}美元\n"
             else:
-                body += f"🎁当前赞助金额: 0美元（当前未赞助）\n"
+                body += f"🎁当前赞助金额: 0美元\n"
             body += f"🎁历史赞助金额: {lifetime_pledge}美元\n"
         else:
             body += f"🎁当前赞助金额: 0美元\n"
@@ -1210,7 +1211,7 @@ class TmpBotPlugin(Star):
     
     @filter.command("DLC") 
     async def tmpdlc(self, event: AstrMessageEvent):
-        """[命令: DLC] 查询玩家拥有的地图 DLC 列表。支持输入 TMP ID 或 Steam ID。"""
+        """[命令: DLC] 查询玩家拥有的地图 DLC 列表。支持输入 TMP ID。"""
         message_str = event.message_str.strip()
         user_id = event.get_sender_id()
         
@@ -1235,7 +1236,7 @@ class TmpBotPlugin(Star):
             tmp_id = self._get_bound_tmp_id(user_id)
         
         if not tmp_id:
-            yield event.plain_result("请输入正确的玩家编号（TMP ID 或 Steam ID）")
+            yield event.plain_result("请输入正确的玩家编号TMP ID")
             return
 
         try:
@@ -1444,7 +1445,7 @@ class TmpBotPlugin(Star):
         player_name = user_binding.get('player_name', '未知玩家')
         
         if self._unbind_tmp_id(user_id):
-            yield event.plain_result(f"解绑成功！\n已解除与TMP玩家 {player_name} (ID: {tmp_id}) 的绑定")
+            yield event.plain_result(f"解绑成功！\n已解除与TMP玩家 {player_name}的绑定")
         else:
             yield event.plain_result("解绑失败，请稍后重试")
 
@@ -1479,7 +1480,7 @@ class TmpBotPlugin(Star):
             tmp_id = self._get_bound_tmp_id(user_id)
         
         if not tmp_id:
-            yield event.plain_result("请输入正确的玩家编号（TMP ID 或 Steam ID），或先使用 绑定 [TMP ID] 绑定您的账号。")
+            yield event.plain_result("请输入正确的玩家编号 TMP ID")
             return
 
         # 1) 玩家基本信息（昵称）
@@ -1495,7 +1496,7 @@ class TmpBotPlugin(Star):
         # 2) 在线与坐标（Trucky V3）
         online = await self._get_online_status(tmp_id)
         if not online or not online.get('online'):
-            yield event.plain_result("当前玩家未在线无法定位其位置信息")
+            yield event.plain_result("玩家未在线")
             return
 
         # 3) 构造 HTML 渲染数据（玩家 + 位置，周边玩家留作后续扩展）
@@ -1781,7 +1782,7 @@ class TmpBotPlugin(Star):
 7. 解绑
 8. 服务器
 9. 菜单
-使用提示: 绑定后可直接发送 查询/状态/定位
+使用提示: 绑定后可直接发送 查询/定位
 """
         yield event.plain_result(help_text)
         
