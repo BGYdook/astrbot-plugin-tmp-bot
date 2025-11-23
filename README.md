@@ -33,7 +33,7 @@ API 文档与数据来源：https://apifox.com/apidoc/shared/38508a88-5ff4-4b29-
 - 否则- 关闭`DLC列表使用图片输出` 后，`DLC列表` 将以文字形式发送。
 
 ## 安装方法：
-直接在astrbot的插件市场搜索astrbot_plugin_qqadmin，点击安装，耐心等待安装完成
+直接在astrbot的插件市场搜索astrbot_plugin_tmp_bot，点击安装，耐心等待安装完成
 
 
 
