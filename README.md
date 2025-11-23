@@ -1,4 +1,4 @@
-# astrbot-plugin-tmp-bot
+ # astrbot-plugin-tmp-bot
 [![npm](https://img.shields.io/badge/npm-v1.6.0-blue)](https://github.com/BGYdook/astrbot-plugin-tmp-bot)
 
 ![:astrbot_plugin_tmp_bot](https://count.getloli.com/@:astrbot_plugin_tmp-bot?theme=minecraft)
@@ -22,6 +22,8 @@
 
 ### 接口与数据
 API 文档与数据来源：https://apifox.com/apidoc/shared/38508a88-5ff4-4b29-b724-41f9d3d3336a
+
+# 非常感谢[晚安](https://github.com/nulijiazaizhong)提供的帮助，没有他，我的插件不会写的这么好
 
 ## 版本 v1.6.0
 - 在插件 WebUI 中开启 `DLC列表使用图片输出` 后，`DLC列表` 将以图片形式发送。
@@ -54,3 +56,6 @@ https://github.com/BGYdook/astrbot-plugin-tmp-bot
 # 支持
 
 [帮助文档](https://astrbot.app)
+
+以及感谢 [79887143](https://github.com/79887143)提供的api接口
+>[79887143的api接口](https://apifox.com/apidoc/shared/38508a88-5ff4-4b29-b724-41f9d3d3336a)
