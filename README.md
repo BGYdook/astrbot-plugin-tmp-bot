@@ -1,6 +1,8 @@
 # astrbot-plugin-tmp-bot
-
 [![npm](https://img.shields.io/badge/npm-v1.6.0-blue)](https://github.com/BGYdook/astrbot-plugin-tmp-bot)
+
+![:astrbot_plugin_tmp_bot](https://count.getloli.com/@:astrbot_plugin_tmp-bot?theme=minecraft)
+
 
 欧洲卡车模拟2 TMP 查询机器人，用于查询玩家信息、位置、服务器路况及排行榜等。
 
@@ -21,6 +23,34 @@
 ### 接口与数据
 API 文档与数据来源：https://apifox.com/apidoc/shared/38508a88-5ff4-4b29-b724-41f9d3d3336a
 
-### 说明
+## 版本 v1.6.0
 - 在插件 WebUI 中开启 `DLC列表使用图片输出` 后，`DLC列表` 将以图片形式发送。
 - 否则- 关闭`DLC列表使用图片输出` 后，`DLC列表` 将以文字形式发送。
+
+- ## 版本 v1.3.59
+- 否则- 关闭`DLC列表使用图片输出` 后，`DLC列表` 将以文字形式发送。
+
+## 安装方法：
+直接在astrbot的插件市场搜索astrbot_plugin_qqadmin，点击安装，耐心等待安装完成
+
+
+
+或
+
+
+
+复制链接 到astr webui端插件页面 使用链接安装即可
+
+```
+https://github.com/BGYdook/astrbot-plugin-tmp-bot
+```
+
+
+## 👥 贡献指南
+- 🌟 Star 这个项目！（点右上角的星星，感谢支持！）
+- 🐛 提交 Issue 报告问题
+- 💡 提出新功能建议
+- 🔧 提交 Pull Request 改进代码
+# 支持
+
+[帮助文档](https://astrbot.app)
