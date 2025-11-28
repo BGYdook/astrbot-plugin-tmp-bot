@@ -1212,7 +1212,8 @@ class TmpBotPlugin(Star):
 
     @filter.command("查询", prefix=False)
     async def tmpquery_noprefix(self, event: AstrMessageEvent):
-        return await self.tmpquery(event)
+        async for result in self.tmpquery(event):
+            yield result
 
     @filter.command("DLC") 
     async def tmpdlc(self, event: AstrMessageEvent):
