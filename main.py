@@ -187,7 +187,7 @@ class ApiResponseException(TmpApiException):
     pass
 
 # 版本号更新为 1.3.59
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.6.0", "https://github.com/BGYdook/astrBot-plugin-tmp-bot")
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.6.1", "https://github.com/BGYdook/astrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context, config=None):  # 接收 context 和 config
         super().__init__(context)              # 将 context 传给父类
@@ -951,8 +951,8 @@ class TmpBotPlugin(Star):
         message_str = event.message_str.strip()
         user_id = event.get_sender_id()
         
-        m = re.search(r"\b\d{6,}\b", message_str)
-        input_id = m.group(0) if m else None
+        match = re.search(r'查询\s*(\d+)', message_str) 
+        input_id = match.group(1) if match else None
         
         tmp_id = None
         
@@ -1212,8 +1212,7 @@ class TmpBotPlugin(Star):
 
     @filter.command("查询", prefix=False)
     async def tmpquery_noprefix(self, event: AstrMessageEvent):
-        async for result in self.tmpquery(event):
-            yield result
+        return await self.tmpquery(event)
 
     @filter.command("DLC") 
     async def tmpdlc(self, event: AstrMessageEvent):
