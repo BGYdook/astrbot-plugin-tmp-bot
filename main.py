@@ -3,7 +3,7 @@
 
 """
 astrbot-plugin-tmp-bot
-欧卡2TMP查询插件 - AstrBot版本 (版本 1.6.0)
+欧卡2TMP查询插件 - AstrBot版本 (版本 1.6.1)
 """
 
 import re
@@ -187,7 +187,7 @@ class ApiResponseException(TmpApiException):
     pass
 
 # 版本号更新为 1.3.59
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.6.1", "https://github.com/BGYdook/astrBot-plugin-tmp-bot")
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.6.0", "https://github.com/BGYdook/astrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context, config=None):  # 接收 context 和 config
         super().__init__(context)              # 将 context 传给父类
@@ -1209,11 +1209,7 @@ class TmpBotPlugin(Star):
             components.append(Plain("\r\n"))
             components.append(Plain(body))
             yield event.chain_result(components)
-
-    @filter.command("查询", prefix=False)
-    async def tmpquery_noprefix(self, event: AstrMessageEvent):
-        return await self.tmpquery(event)
-
+    
     @filter.command("DLC") 
     async def tmpdlc(self, event: AstrMessageEvent):
         """[命令: DLC] 查询玩家拥有的地图 DLC 列表。支持输入 TMP ID。"""
