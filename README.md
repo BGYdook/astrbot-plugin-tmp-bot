@@ -23,7 +23,7 @@
 ### 接口与数据
 API 文档与数据来源：https://apifox.com/apidoc/shared/38508a88-5ff4-4b29-b724-41f9d3d3336a
 
-# 非常感谢[晚安](https://github.com/nulijiazaizhong)提供的帮助，没有他，我的插件不会写的这么好
+# 非常感谢[晚安](https://github.com/nulijiazaizhong)提供的帮助
 
 ## 版本 v1.6.1
 - 在查询命令中新增车队职位输出，使用TMP网页中显示的原始职位信息。

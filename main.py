@@ -89,7 +89,7 @@ def _format_timestamp_to_readable(timestamp_str: Optional[str]) -> str:
         clean_str = timestamp_str.replace('T', ' ').split('.')[0].replace('Z', '')
         dt_utc = datetime.strptime(clean_str, '%Y-%m-%d %H:%M:%S')
         # 直接显示 UTC 时间，并标注时区
-        return dt_utc.strftime('%Y-%m-%d %H:%M:%S') + " (UTC)"
+        return dt_utc.strftime('%Y-%m-%d %H:%M:%S')
         
     except Exception:
         # 兼容性回退
@@ -109,14 +109,14 @@ def _format_timestamp_to_beijing(timestamp_str: Optional[str]) -> str:
         clean_str = s.replace('T', ' ').split('.')[0].replace('Z', '')
         dt_utc = datetime.strptime(clean_str, '%Y-%m-%d %H:%M:%S')
         dt_bj = dt_utc + timedelta(hours=8)
-        return dt_bj.strftime('%Y-%m-%d %H:%M:%S') + " (UTC+8)"
+        return dt_bj.strftime('%Y-%m-%d %H:%M:%S')
     except Exception:
         try:
             # ISO 8601 with timezone offset, e.g. 2025-12-01T07:55:00+00:00
             iso = s.replace('Z', '+00:00')
             dt = datetime.fromisoformat(iso)
             dt_bj = dt + timedelta(hours=8)
-            return dt_bj.strftime('%Y-%m-%d %H:%M:%S') + " (UTC+8)"
+            return dt_bj.strftime('%Y-%m-%d %H:%M:%S')
         except Exception:
             return s
 
@@ -1209,7 +1209,11 @@ class TmpBotPlugin(Star):
             components.append(Plain("\r\n"))
             components.append(Plain(body))
             yield event.chain_result(components)
-    
+
+    @filter.command("查询", prefix=False)
+    async def tmpquery_noprefix(self, event: AstrMessageEvent):
+        return await self.tmpquery(event)
+
     @filter.command("DLC") 
     async def tmpdlc(self, event: AstrMessageEvent):
         """[命令: DLC] 查询玩家拥有的地图 DLC 列表。支持输入 TMP ID。"""
