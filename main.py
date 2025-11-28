@@ -951,8 +951,8 @@ class TmpBotPlugin(Star):
         message_str = event.message_str.strip()
         user_id = event.get_sender_id()
         
-        match = re.search(r'查询\s*(\d+)', message_str) 
-        input_id = match.group(1) if match else None
+        m = re.search(r"\b\d{6,}\b", message_str)
+        input_id = m.group(0) if m else None
         
         tmp_id = None
         
