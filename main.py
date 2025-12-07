@@ -961,8 +961,8 @@ class TmpBotPlugin(Star):
                 yield event.plain_result("请输入有效的TMP ID或Steam ID")
                 return
         else:
-            # Handle Steam ID conversion (17-digit IDs starting with 7)
-            if len(input_id) == 17 and input_id.startswith('7'):
+            # Handle Steam ID conversion (17-digit IDs starting with 765)
+            if len(input_id) == 17 and input_id.startswith('765'):
                 try:
                     tmp_id = await self._get_tmp_id_from_steam_id(input_id)
                     if not tmp_id:
@@ -970,12 +970,12 @@ class TmpBotPlugin(Star):
                         return
                     input_id = str(tmp_id)  # Use the converted TMP ID
                 except Exception as e:
-                    yield event.plain_result(f"Steam ID查询失败: {str(e)}")
+                    yield event.plain_result(f"Steam ID转换失败: {str(e)}")
                     return
             
             # Validate TMP ID format (should be numeric and reasonable length)
             if not input_id.isdigit() or len(input_id) < 6:
-                yield event.plain_result("请输入有效的TMP ID或Steam ID")
+                yield event.plain_result("请输入有效的TMP ID（6位以上数字）或Steam ID（17位数字）")
                 return
             
             tmp_id = input_id
