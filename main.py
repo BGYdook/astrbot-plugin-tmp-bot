@@ -950,29 +950,34 @@ class TmpBotPlugin(Star):
         message_str = event.message_str.strip()
         user_id = event.get_sender_id()
         
-        match = re.search(r'查询\s*(\d+)', message_str) 
-        input_id = match.group(1) if match else None
+        # Enhanced ID extraction to handle both TMP IDs and Steam IDs
+        m = re.search(r"\b\d{6,}\b", message_str)
+        input_id = m.group(0) if m else None
         
-        tmp_id = None
-        
-        if input_id:
+        if not input_id:
+            tmp_id = self._get_bound_tmp_id(user_id)
+            if not tmp_id:
+                yield event.plain_result("请输入有效的TMP ID或Steam ID")
+                return
+        else:
+            # Handle Steam ID conversion (17-digit IDs starting with 7)
             if len(input_id) == 17 and input_id.startswith('7'):
                 try:
                     tmp_id = await self._get_tmp_id_from_steam_id(input_id)
-                except SteamIdNotFoundException as e:
-                    yield event.plain_result(str(e))
+                    if not tmp_id:
+                        yield event.plain_result(f"未找到Steam ID {input_id} 对应的TMP玩家")
+                        return
+                    input_id = str(tmp_id)  # Use the converted TMP ID
+                except Exception as e:
+                    yield event.plain_result(f"Steam ID查询失败: {str(e)}")
                     return
-                except NetworkException as e:
-                    yield event.plain_result(f"查询失败: {str(e)}")
-                    return
-            else:
-                tmp_id = input_id
-        else:
-            tmp_id = self._get_bound_tmp_id(user_id)
-        
-        if not tmp_id:
-            yield event.plain_result("请输入正确的玩家编号 TMP ID")
-            return
+            
+            # Validate TMP ID format (should be numeric and reasonable length)
+            if not input_id.isdigit() or len(input_id) < 6:
+                yield event.plain_result("请输入有效的TMP ID或Steam ID")
+                return
+            
+            tmp_id = input_id
         
         try:
             # 并行查询：仅使用 V2 和相关接口（移除已失效的 V1）
