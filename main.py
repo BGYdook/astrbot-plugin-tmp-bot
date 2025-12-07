@@ -3,7 +3,7 @@
 
 """
 astrbot-plugin-tmp-bot
-欧卡2TMP查询插件 - AstrBot版本 (版本 1.6.0)
+欧卡2TMP查询插件 - AstrBot版本 (版本 1.6.1)
 """
 
 import re
@@ -89,7 +89,7 @@ def _format_timestamp_to_readable(timestamp_str: Optional[str]) -> str:
         clean_str = timestamp_str.replace('T', ' ').split('.')[0].replace('Z', '')
         dt_utc = datetime.strptime(clean_str, '%Y-%m-%d %H:%M:%S')
         # 直接显示 UTC 时间，并标注时区
-        return dt_utc.strftime('%Y-%m-%d %H:%M:%S') + " (UTC)"
+        return dt_utc.strftime('%Y-%m-%d %H:%M:%S')
         
     except Exception:
         # 兼容性回退
@@ -109,14 +109,14 @@ def _format_timestamp_to_beijing(timestamp_str: Optional[str]) -> str:
         clean_str = s.replace('T', ' ').split('.')[0].replace('Z', '')
         dt_utc = datetime.strptime(clean_str, '%Y-%m-%d %H:%M:%S')
         dt_bj = dt_utc + timedelta(hours=8)
-        return dt_bj.strftime('%Y-%m-%d %H:%M:%S') + " (UTC+8)"
+        return dt_bj.strftime('%Y-%m-%d %H:%M:%S')
     except Exception:
         try:
             # ISO 8601 with timezone offset, e.g. 2025-12-01T07:55:00+00:00
             iso = s.replace('Z', '+00:00')
             dt = datetime.fromisoformat(iso)
             dt_bj = dt + timedelta(hours=8)
-            return dt_bj.strftime('%Y-%m-%d %H:%M:%S') + " (UTC+8)"
+            return dt_bj.strftime('%Y-%m-%d %H:%M:%S')
         except Exception:
             return s
 
@@ -509,6 +509,7 @@ class TmpBotPlugin(Star):
                     total_km = _to_km_2f(total_raw, 0.0)
                     daily_km = _to_km_2f(daily_raw, 0.0)
                     avatar_url = response_data.get('avatarUrl', '')
+                    vtc_role = response_data.get('vtcRole') or response_data.get('vtc_role')
                     # 尝试从 VTCM 响应中获取上次在线时间（兼容多个可能的字段名）
                     last_online = (
                         response_data.get('lastOnline')
@@ -524,11 +525,11 @@ class TmpBotPlugin(Star):
                         raise ApiResponseException(f"VTCM 里程 API 返回非成功代码或空数据: {data.get('msg', 'N/A')}")
 
                     return {
-                        'total_km': total_km, 
+                        'total_km': total_km,
                         'daily_km': daily_km,
                         'avatar_url': avatar_url,
-                        # 将上次在线时间传回供上层使用（可能为 ISO 字符串或其他格式）
                         'last_online': last_online,
+                        'vtcRole': vtc_role,
                         'debug_error': 'VTCM 里程数据获取成功。'
                     }
                 else:
@@ -1038,7 +1039,7 @@ class TmpBotPlugin(Star):
         # 车队信息：优先使用 player_info.vtc（若为字典），若缺少 role 则调用 VTCM API 获取
         vtc = player_info.get('vtc') if isinstance(player_info.get('vtc'), dict) else {}
         vtc_name = vtc.get('name')
-        vtc_role = vtc.get('role') or vtc.get('position')
+        vtc_role = vtc.get('role') or vtc.get('position') or stats_info.get('vtcRole')
         body += f"🚚所属车队: {vtc_name if vtc_name else '无'}\n"
         if not vtc_role and vtc_name:
             try:
@@ -1049,7 +1050,7 @@ class TmpBotPlugin(Star):
             except Exception as e:
                 logger.info(f"查询详情: 获取 VTC 车队角色时发生异常: {e}", exc_info=False)
         if vtc_role:
-            body += f"🚚车队角色: {vtc_role}\n"
+            body += f"🚚车队职位: {vtc_role}\n"
         
         # --- 【核心逻辑】赞助信息 (基于 V2 player 接口字段) ---
         # 规则：
