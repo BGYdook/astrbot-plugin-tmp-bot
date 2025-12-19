@@ -459,9 +459,16 @@ class TmpBotPlugin(Star):
             async with self.session.get(url, timeout=10) as response:
                 if response.status == 200:
                     data = await response.json()
-                    return data.get('response', [])
+                    # 兼容：优先取 response，其次直接取 data（防止结构变化）
+                    bans = data.get('response') or data.get('data') or []
+                    if not isinstance(bans, list):
+                        bans = []
+                    logger.info(f"Bans API 返回结构: keys={list(data.keys())}, count={len(bans)}")
+                    return bans
+                logger.warning(f"Bans API 非200状态: {response.status}")
                 return []
-        except Exception:
+        except Exception as e:
+            logger.error(f"获取玩家封禁失败: {e}", exc_info=False)
             return []
             
     async def _get_player_stats(self, tmp_id: str) -> Dict[str, Any]:
