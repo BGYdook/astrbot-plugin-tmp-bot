@@ -3,7 +3,7 @@
 
 """
 astrbot-plugin-tmp-bot
-欧卡2TMP查询插件 - AstrBot版本 (版本 1.6.1)
+欧卡2TMP查询插件 - AstrBot版本 (版本 1.6.2)
 """
 
 import re
@@ -1017,6 +1017,15 @@ class TmpBotPlugin(Star):
         if steam_id_to_display:
             body += f"🆔 Steam ID: {steam_id_to_display}\n"
         body += f"😀玩家名称: {player_info.get('name', '未知')}\n"
+        # 📑注册日期：优先使用 joinDate，其次 fallback 到 created_at/registrationDate
+        join_date_raw = (
+            player_info.get('joinDate')
+            or player_info.get('created_at')
+            or player_info.get('registrationDate')
+            or None
+        )
+        join_date_formatted = _format_timestamp_to_readable(join_date_raw) if join_date_raw else '未知'
+        body += f"📑注册日期: {join_date_formatted}\n"
         body += f"📶上次在线: {last_online_formatted}\n"
 
         # 权限/分组信息
@@ -1136,11 +1145,9 @@ class TmpBotPlugin(Star):
         body += f"🚩历史里程: {total_km:.2f}公里/km\n"
         body += f"🚩今日里程: {daily_km:.2f}公里/km\n"
         
-        # --- 封禁信息 (不变) ---
+        # --- 封禁信息 (无论是否封禁都显示历史封禁次数) ---
         body += f"🚫是否封禁: {'是' if is_banned else '否'}\n"
-        
-        if ban_count > 0:
-            body += f"🚫历史封禁: {ban_count}次\n"
+        body += f"🚫历史封禁: {ban_count}次\n"
 
         if is_banned:
             
