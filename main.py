@@ -23,6 +23,9 @@ try:
     from astrbot.api.star import Context, Star, register, StarTools
     from astrbot.api import logger
     from astrbot.api.message_components import Image, Plain
+    # 强制 INFO 级别，确保能看到 bans 日志
+    import logging
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 except ImportError:
     # 最小化兼容回退 
     class _DummyFilter:
@@ -463,7 +466,9 @@ class TmpBotPlugin(Star):
                     bans = data.get('response') or data.get('data') or []
                     if not isinstance(bans, list):
                         bans = []
-                    logger.info(f"Bans API 返回结构: keys={list(data.keys())}, count={len(bans)}")
+                    # 额外打印完整返回，方便一次性定位
+                    logger.info(f"Bans API 原始返回: {data}")
+                    logger.info(f"Bans API 提取后: keys={list(data.keys())}, count={len(bans)}")
                     return bans
                 logger.warning(f"Bans API 非200状态: {response.status}")
                 return []
