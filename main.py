@@ -1157,19 +1157,19 @@ class TmpBotPlugin(Star):
         body += f"🚩历史里程: {total_km:.2f}公里/km\n"
         body += f"🚩今日里程: {daily_km:.2f}公里/km\n"
         
-        # --- 封禁信息 (无论是否封禁都显示历史封禁次数) ---
+        # --- 封禁信息 (不变) ---
         body += f"🚫是否封禁: {'是' if is_banned else '否'}\n"
+
+            
         body += f"🚫历史封禁: {ban_count}次\n"
 
-        if is_banned:
-            
-            current_ban = None
-            if sorted_bans:
+        current_ban = None
+        if sorted_bans:
                 current_ban = next((ban for ban in sorted_bans if ban.get('active')), None)
                 if not current_ban:
                     current_ban = sorted_bans[0]
                     
-            if current_ban:
+        if current_ban:
                 ban_reason_raw = current_ban.get('reason', '未知封禁原因 (API V2)')
                 ban_reason = self._translate_ban_reason(ban_reason_raw)
                 ban_expiration = current_ban.get('expiration', banned_until_main) 
@@ -1181,8 +1181,12 @@ class TmpBotPlugin(Star):
                 else:
                     body += f"🚫封禁截止: {_format_timestamp_to_beijing(ban_expiration)}\n"
                     
-            else:
                 body += f"当前封禁原因: 封禁信息被隐藏。\n"
+                if banned_until_main and isinstance(banned_until_main, str) and banned_until_main.lower().startswith('never'):
+                    body += f"🚫封禁截止: 永久封禁\n"
+                else:
+                    body += f"🚫封禁截止: {_format_timestamp_to_beijing(banned_until_main)}\n"
+                body += f"🚫当前封禁原因: 封禁信息被隐藏。\n"
                 if banned_until_main and isinstance(banned_until_main, str) and banned_until_main.lower().startswith('never'):
                     body += f"🚫封禁截止: 永久封禁\n"
                 else:
