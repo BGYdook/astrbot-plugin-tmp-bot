@@ -1159,9 +1159,9 @@ class TmpBotPlugin(Star):
         
         # --- 封禁信息 (不变) ---
         body += f"🚫是否封禁: {'是' if is_banned else '否'}\n"
-
-            
-        body += f"🚫历史封禁: {ban_count}次\n"
+        
+        if ban_count > 0:
+            body += f"🚫历史封禁: {ban_count}次\n"
 
         current_ban = None
         if sorted_bans:
