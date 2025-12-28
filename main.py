@@ -1184,7 +1184,7 @@ class TmpBotPlugin(Star):
                     body += f"🚫封禁截止: {_format_timestamp_to_beijing(ban_expiration)}\n"
                     
             else:
-                body += f"当前封禁原因: 封禁信息被隐藏。\n"
+                body += f"🚫当前封禁原因: 封禁信息被隐藏。\n"
                 if banned_until_main and isinstance(banned_until_main, str) and banned_until_main.lower().startswith('never'):
                     body += f"🚫封禁截止: 永久封禁\n"
                 else:
