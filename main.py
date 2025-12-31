@@ -1753,31 +1753,40 @@ class TmpBotPlugin(Star):
 
         rank_tmpl = """
 <style>
-  html, body { margin:0; padding:0; background:#1b242c; color:#fff; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-  .wrap { padding:16px 20px; }
-  .title { font-size:20px; font-weight:600; margin-bottom:8px; }
-  .subtitle { font-size:12px; color:#aaa; margin-bottom:12px; }
-  .row { display:flex; align-items:flex-start; padding:6px 0; border-bottom:1px solid #29333d; }
-  .rank { width:48px; font-weight:600; }
-  .name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .km { width:140px; text-align:right; font-variant-numeric:tabular-nums; }
+  html, body { margin:0; padding:0; background:#000; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  .wrap { width:340px; background:linear-gradient(135deg,#1f2f54,#0f2c2a); overflow:hidden; padding-bottom:12px; box-shadow:0 4px 20px rgba(0,0,0,0.5); }
+  .header { height:45px; background-color:rgba(0,0,0,.1); display:flex; align-items:center; justify-content:center; padding:0 20px; box-shadow:0 0 16px rgba(0,0,0,.4); }
+  .header-title { color:#b0c7ff; font-size:16px; font-weight:600; text-align:center; }
+  .list { padding:12px 16px 0 16px; }
+  .item { background-color:rgba(0,0,0,0.25); margin-bottom:4px; border-radius:6px; overflow:hidden; border:1px solid rgba(255,255,255,0.1); }
+  .item.top3 { background:linear-gradient(135deg,rgba(255,215,0,0.2),rgba(255,215,0,0.1)); border-color:rgba(255,215,0,0.3); box-shadow:0 2px 8px rgba(255,215,0,0.2); }
+  .item-content { display:flex; align-items:center; padding:8px 14px; }
+  .rank { width:32px; color:#fff; font-size:15px; font-weight:bold; text-align:center; text-shadow:0 1px 2px rgba(0,0,0,0.5); }
+  .rank.top1 { color:#ffd700; text-shadow:0 0 8px rgba(255,215,0,0.6); }
+  .rank.top2 { color:#c0c0c0; text-shadow:0 0 6px rgba(192,192,192,0.5); }
+  .rank.top3 { color:#cd7f32; text-shadow:0 0 6px rgba(205,127,50,0.5); }
+  .name { flex:1; padding:0 10px; min-width:0; color:#fff; font-size:13px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; text-shadow:0 1px 2px rgba(0,0,0,0.5); max-width:160px; }
+  .km { color:#fff; font-size:13px; font-weight:700; text-align:right; white-space:nowrap; text-shadow:0 1px 2px rgba(0,0,0,0.5); min-width:65px; }
 </style>
 <div class="wrap">
-  <div class="title">{{ title }}</div>
-  <div class="subtitle">前10名 · 单位: km</div>
-  {% for it in items %}
-  <div class="row">
-    <div class="rank">No.{{ it.rank }}</div>
-    <div class="name">{{ it.name }} (ID:{{ it.tmp_id }})</div>
-    <div class="km">{{ it.km }} km</div>
+  <div class="header"><div class="header-title">{{ title }}</div></div>
+  <div class="list">
+    {% for it in items %}
+    <div class="item{% if it.rank <= 3 %} top3{% endif %}">
+      <div class="item-content">
+        <div class="rank{% if it.rank == 1 %} top1{% elif it.rank == 2 %} top2{% elif it.rank == 3 %} top3{% endif %}">#{{ it.rank }}</div>
+        <div class="name">{{ it.name }} (ID:{{ it.tmp_id }})</div>
+        <div class="km">{{ it.km }} km</div>
+      </div>
+    </div>
+    {% endfor %}
   </div>
-  {% endfor %}
 </div>
 """
 
         try:
             options = { 'type': 'jpeg', 'quality': 92, 'full_page': True, 'omit_background': False }
-            url = await self.html_render(rank_tmpl, { 'title': 'TruckersMP 玩家总里程排行榜 (前10名)', 'items': items }, options=options)
+            url = await self.html_render(rank_tmpl, { 'title': '- 总行驶里程排行榜 -', 'items': items }, options=options)
             if isinstance(url, str) and url:
                 yield event.chain_result([Image.fromURL(url)])
                 return
@@ -1852,31 +1861,40 @@ class TmpBotPlugin(Star):
 
         rank_tmpl = """
 <style>
-  html, body { margin:0; padding:0; background:#1b242c; color:#fff; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-  .wrap { padding:16px 20px; }
-  .title { font-size:20px; font-weight:600; margin-bottom:8px; }
-  .subtitle { font-size:12px; color:#aaa; margin-bottom:12px; }
-  .row { display:flex; align-items:flex-start; padding:6px 0; border-bottom:1px solid #29333d; }
-  .rank { width:48px; font-weight:600; }
-  .name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .km { width:140px; text-align:right; font-variant-numeric:tabular-nums; }
+  html, body { margin:0; padding:0; background:#000; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  .wrap { width:340px; background:linear-gradient(135deg,#1f2f54,#0f2c2a); overflow:hidden; padding-bottom:12px; box-shadow:0 4px 20px rgba(0,0,0,0.5); }
+  .header { height:45px; background-color:rgba(0,0,0,.1); display:flex; align-items:center; justify-content:center; padding:0 20px; box-shadow:0 0 16px rgba(0,0,0,.4); }
+  .header-title { color:#b0c7ff; font-size:16px; font-weight:600; text-align:center; }
+  .list { padding:12px 16px 0 16px; }
+  .item { background-color:rgba(0,0,0,0.25); margin-bottom:4px; border-radius:6px; overflow:hidden; border:1px solid rgba(255,255,255,0.1); }
+  .item.top3 { background:linear-gradient(135deg,rgba(255,215,0,0.2),rgba(255,215,0,0.1)); border-color:rgba(255,215,0,0.3); box-shadow:0 2px 8px rgba(255,215,0,0.2); }
+  .item-content { display:flex; align-items:center; padding:8px 14px; }
+  .rank { width:32px; color:#fff; font-size:15px; font-weight:bold; text-align:center; text-shadow:0 1px 2px rgba(0,0,0,0.5); }
+  .rank.top1 { color:#ffd700; text-shadow:0 0 8px rgba(255,215,0,0.6); }
+  .rank.top2 { color:#c0c0c0; text-shadow:0 0 6px rgba(192,192,192,0.5); }
+  .rank.top3 { color:#cd7f32; text-shadow:0 0 6px rgba(205,127,50,0.5); }
+  .name { flex:1; padding:0 10px; min-width:0; color:#fff; font-size:13px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; text-shadow:0 1px 2px rgba(0,0,0,0.5); max-width:160px; }
+  .km { color:#fff; font-size:13px; font-weight:700; text-align:right; white-space:nowrap; text-shadow:0 1px 2px rgba(0,0,0,0.5); min-width:65px; }
 </style>
 <div class="wrap">
-  <div class="title">{{ title }}</div>
-  <div class="subtitle">前10名 · 单位: km</div>
-  {% for it in items %}
-  <div class="row">
-    <div class="rank">No.{{ it.rank }}</div>
-    <div class="name">{{ it.name }} (ID:{{ it.tmp_id }})</div>
-    <div class="km">{{ it.km }} km</div>
+  <div class="header"><div class="header-title">{{ title }}</div></div>
+  <div class="list">
+    {% for it in items %}
+    <div class="item{% if it.rank <= 3 %} top3{% endif %}">
+      <div class="item-content">
+        <div class="rank{% if it.rank == 1 %} top1{% elif it.rank == 2 %} top2{% elif it.rank == 3 %} top3{% endif %}">#{{ it.rank }}</div>
+        <div class="name">{{ it.name }} (ID:{{ it.tmp_id }})</div>
+        <div class="km">{{ it.km }} km</div>
+      </div>
+    </div>
+    {% endfor %}
   </div>
-  {% endfor %}
 </div>
 """
 
         try:
             options = { 'type': 'jpeg', 'quality': 92, 'full_page': True, 'omit_background': False }
-            url = await self.html_render(rank_tmpl, { 'title': 'TruckersMP 玩家今日里程排行榜 (前10名)', 'items': items }, options=options)
+            url = await self.html_render(rank_tmpl, { 'title': '- 今日行驶里程排行榜 -', 'items': items }, options=options)
             if isinstance(url, str) and url:
                 yield event.chain_result([Image.fromURL(url)])
                 return
