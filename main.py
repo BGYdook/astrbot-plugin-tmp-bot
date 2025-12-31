@@ -522,6 +522,34 @@ class TmpBotPlugin(Star):
                     daily_km = _to_km_2f(daily_raw, 0.0)
                     avatar_url = response_data.get('avatarUrl', '')
                     vtc_role = response_data.get('vtcRole') or response_data.get('vtc_role')
+                    def _to_int_rank(val):
+                        try:
+                            if val is None:
+                                return None
+                            if isinstance(val, int):
+                                return val
+                            if isinstance(val, float):
+                                return int(val)
+                            s = str(val).strip()
+                            if s == "":
+                                return None
+                            return int(float(s))
+                        except Exception:
+                            return None
+                    total_rank_raw = (
+                        response_data.get('mileageRank')
+                        or response_data.get('totalMileageRank')
+                        or response_data.get('mileage_rank')
+                        or response_data.get('total_rank')
+                    )
+                    daily_rank_raw = (
+                        response_data.get('todayMileageRank')
+                        or response_data.get('todayRank')
+                        or response_data.get('today_mileage_rank')
+                        or response_data.get('today_rank')
+                    )
+                    total_rank = _to_int_rank(total_rank_raw)
+                    daily_rank = _to_int_rank(daily_rank_raw)
                     # 尝试从 VTCM 响应中获取上次在线时间（兼容多个可能的字段名）
                     last_online = (
                         response_data.get('lastOnline')
@@ -530,7 +558,7 @@ class TmpBotPlugin(Star):
                         or response_data.get('lastLogin')
                         or None
                     )
-                    logger.info(f"VTCM 里程解析: total_km={total_km:.2f}, today_km={daily_km:.2f}, avatar={avatar_url}")
+                    logger.info(f"VTCM 里程解析: total_km={total_km:.2f}, today_km={daily_km:.2f}, total_rank={total_rank}, daily_rank={daily_rank}, avatar={avatar_url}")
                     
                     if data.get('code') != 200 or not response_data:
                         logger.info(f"VTCM 里程数据校验失败: code={data.get('code')}, has_data={bool(response_data)}")
@@ -542,6 +570,8 @@ class TmpBotPlugin(Star):
                         'avatar_url': avatar_url,
                         'last_online': last_online,
                         'vtcRole': vtc_role,
+                        'total_rank': total_rank,
+                        'daily_rank': daily_rank,
                         'debug_error': 'VTCM 里程数据获取成功。'
                     }
                 else:
@@ -635,14 +665,20 @@ class TmpBotPlugin(Star):
             logger.error(f"Trucky V3 API 解析失败: {e.__class__.__name__}", exc_info=True)
             return {'online': False, 'debug_error': f'Trucky V3 API 发生意外错误: {e.__class__.__name__}。'}
     
-    async def _get_rank_list(self, limit: int = 10) -> Optional[List[Dict]]:
-        """获取 TruckersMP 里程排行榜列表 (使用 da.vtcm.link API)。"""
+    async def _get_rank_list(self, ranking_type: str = "total", limit: int = 10) -> Optional[List[Dict]]:
+        """获取 TruckersMP 里程排行榜列表 (使用 da.vtcm.link API)。
+
+        ranking_type:
+            - "total": 总里程排行
+            - "today": 今日里程排行
+        """
         if not self.session:
             raise NetworkException("插件未初始化，HTTP会话不可用")
 
-        # 正确的排行榜接口（总里程），支持数量参数
-        url = f"https://da.vtcm.link/statistics/mileageRankingList?rankingType=total&rankingCount={limit}"
-        logger.info(f"尝试 API (排行榜): {url}")
+        # 第三方接口使用数字枚举：1=总里程，2=今日里程
+        type_code = 2 if str(ranking_type).lower() in ["today", "daily", "2"] else 1
+        url = f"https://da.vtcm.link/statistics/mileageRankingList?rankingType={type_code}&rankingCount={limit}"
+        logger.info(f"尝试 API (排行榜): type={ranking_type}({type_code}), url={url}")
 
         try:
             async with self.session.get(url, timeout=10) as response:
@@ -1008,6 +1044,12 @@ class TmpBotPlugin(Star):
         banned_until_main = player_info.get('bannedUntil', '永久/未知') 
         
         ban_count, sorted_bans = self._format_ban_info(bans_info)
+        bans_count_raw = player_info.get('bansCount')
+        if bans_count_raw is not None:
+            try:
+                ban_count = int(str(bans_count_raw).strip())
+            except Exception:
+                pass
         
         last_online_raw = (
             player_info.get('lastOnline')
@@ -1135,27 +1177,34 @@ class TmpBotPlugin(Star):
         current_pledge = (_to_int(current_pledge_raw) // 100) if is_patron else 0
         lifetime_pledge = (_to_int(lifetime_pledge_raw) // 100) if is_patron else 0
 
-        body += f"🎁是否赞助: {'是' if is_patron else '否'}\n"
-        body += f"🎁是否有效: {'是' if active else '否'}\n"
         if is_patron:
+            body += f"🎁是否赞助: 是\n"
+            body += f"🎁是否有效: {'是' if active else '否'}\n"
             if current_pledge > 0:
                 body += f"🎁当前赞助金额: {current_pledge}美元\n"
             else:
                 body += f"🎁当前赞助金额: 0美元\n"
             body += f"🎁历史赞助金额: {lifetime_pledge}美元\n"
-        else:
-            body += f"🎁当前赞助金额: 0美元\n"
-            body += f"🎁历史赞助金额: 0美元\n"
         # --- 赞助信息结束 ---
 
         # --- 里程信息输出 (不变) ---
         logger.info(f"查询详情: 里程字典 keys={list(stats_info.keys())}, debug={stats_info.get('debug_error')}")
         total_km = stats_info.get('total_km', 0.0)
         daily_km = stats_info.get('daily_km', 0.0)
-        logger.info(f"查询详情: 里程输出值 total_km={total_km:.2f}, daily_km={daily_km:.2f}")
+        total_rank = stats_info.get('total_rank')
+        daily_rank = stats_info.get('daily_rank')
+        logger.info(f"查询详情: 里程输出值 total_km={total_km:.2f}, daily_km={daily_km:.2f}, total_rank={total_rank}, daily_rank={daily_rank}")
         
         body += f"🚩历史里程: {total_km:.2f}公里/km\n"
         body += f"🚩今日里程: {daily_km:.2f}公里/km\n"
+        if total_rank:
+            body += f"🏆总里程排行: 第{total_rank}名\n"
+        else:
+            body += f"🏆总里程排行: 未上榜/暂无数据\n"
+        if daily_rank:
+            body += f"🏁今日里程排行: 第{daily_rank}名\n"
+        else:
+            body += f"🏁今日里程排行: 未上榜/暂无数据\n"
         
         # --- 封禁信息 (不变) ---
         body += f"🚫是否封禁: {'是' if is_banned else '否'}\n"
@@ -1176,7 +1225,7 @@ class TmpBotPlugin(Star):
                 ban_reason = self._translate_ban_reason(ban_reason_raw)
                 ban_expiration = current_ban.get('expiration', banned_until_main) 
                 
-                body += f"🚫当前封禁原因: {ban_reason}\n"
+                body += f"🚫封禁原因: {ban_reason}\n"
                 
                 if ban_expiration and isinstance(ban_expiration, str) and ban_expiration.lower().startswith('never'):
                     body += f"🚫封禁截止: 永久封禁\n"
@@ -1184,7 +1233,7 @@ class TmpBotPlugin(Star):
                     body += f"🚫封禁截止: {_format_timestamp_to_beijing(ban_expiration)}\n"
                     
             else:
-                body += f"🚫当前封禁原因: 封禁信息被隐藏。\n"
+                body += f"🚫封禁原因: 隐藏。\n"
                 if banned_until_main and isinstance(banned_until_main, str) and banned_until_main.lower().startswith('never'):
                     body += f"🚫封禁截止: 永久封禁\n"
                 else:
@@ -1653,19 +1702,18 @@ class TmpBotPlugin(Star):
     # --- 定位命令结束 ---
     
 
-    # --- 里程排行榜命令处理器 ---
-    @filter.command("排行") 
-    async def tmprank(self, event: AstrMessageEvent):
-        """[命令: 排行] 查询 TruckersMP 玩家总里程排行榜前10名。"""
+    # --- 里程排行榜命令处理器：总里程 ---
+    @filter.command("总里程排行") 
+    async def tmprank_total(self, event: AstrMessageEvent):
+        """[命令: 总里程排行] 查询 TruckersMP 玩家总里程排行榜前10名。"""
         
         try:
-            # 获取排行榜数据，默认为前10名
-            rank_list = await self._get_rank_list(limit=10)
+            rank_list = await self._get_rank_list(ranking_type="total", limit=10)
         except NetworkException as e:
             yield event.plain_result(f"查询排行榜失败: {str(e)}")
             return
-        except ApiResponseException as e:
-            yield event.plain_result(f"查询排行榜失败: API返回数据异常。")
+        except ApiResponseException:
+            yield event.plain_result("查询排行榜失败: API返回数据异常。")
             return
         except Exception:
             yield event.plain_result("查询排行榜时发生未知错误。")
@@ -1680,14 +1728,11 @@ class TmpBotPlugin(Star):
         
         for idx, player in enumerate(rank_list):
             rank = player.get('ranking', idx + 1)
-            name = player.get('name', '未知玩家')
-            distance_m = player.get('mileage', 0)
+            name = player.get('name', '未知玩家') or player.get('tmpName', '未知玩家')
+            distance_m = player.get('mileage') or player.get('distance') or 0
             
-            # 转换为公里并格式化
-            distance_km = int(distance_m / 1000)
+            distance_km = int(distance_m / 1000) if isinstance(distance_m, (int, float)) else 0
             distance_str = f"{distance_km:,}".replace(',', ' ')
-            
-            # 格式化输出：[排名] 玩家名 (ID: TMP ID) - 里程
             tmp_id = player.get('tmpId', 'N/A')
             
             line = f"No.{rank:<2} | {name} (ID:{tmp_id})\n"
@@ -1698,8 +1743,66 @@ class TmpBotPlugin(Star):
         message += "=" * 35 + "\n"
         message += "数据来源: da.vtcm.link API"
 
+        img = await self._render_text_to_image(message)
+        if isinstance(img, (bytes, bytearray)):
+            yield event.chain_result([Image.fromBytes(img)])
+            return
+        if isinstance(img, str) and img.startswith('http'):
+            yield event.chain_result([Image.fromURL(img)])
+            return
         yield event.plain_result(message)
-    # --- 里程排行榜命令处理器结束 ---
+    # --- 里程排行榜命令处理器：总里程结束 ---
+
+    # --- 里程排行榜命令处理器：今日里程 ---
+    @filter.command("今日里程排行") 
+    async def tmprank_today(self, event: AstrMessageEvent):
+        """[命令: 今日里程排行] 查询 TruckersMP 玩家今日里程排行榜前10名。"""
+        
+        try:
+            rank_list = await self._get_rank_list(ranking_type="today", limit=10)
+        except NetworkException as e:
+            yield event.plain_result(f"查询排行榜失败: {str(e)}")
+            return
+        except ApiResponseException:
+            yield event.plain_result("查询排行榜失败: API返回数据异常。")
+            return
+        except Exception:
+            yield event.plain_result("查询排行榜时发生未知错误。")
+            return
+
+        if not rank_list:
+            yield event.plain_result("当前无法获取排行榜数据或排行榜为空。")
+            return
+            
+        message = "🏁 TruckersMP 玩家今日里程排行榜 (前10名)\n"
+        message += "=" * 35 + "\n"
+        
+        for idx, player in enumerate(rank_list):
+            rank = player.get('ranking', idx + 1)
+            name = player.get('name', '未知玩家') or player.get('tmpName', '未知玩家')
+            distance_m = player.get('mileage') or player.get('distance') or 0
+            
+            distance_km = int(distance_m / 1000) if isinstance(distance_m, (int, float)) else 0
+            distance_str = f"{distance_km:,}".replace(',', ' ')
+            tmp_id = player.get('tmpId', 'N/A')
+            
+            line = f"No.{rank:<2} | {name} (ID:{tmp_id})\n"
+            line += f"       {distance_str} km\n"
+            
+            message += line
+
+        message += "=" * 35 + "\n"
+        message += "数据来源: da.vtcm.link API"
+
+        img = await self._render_text_to_image(message)
+        if isinstance(img, (bytes, bytearray)):
+            yield event.chain_result([Image.fromBytes(img)])
+            return
+        if isinstance(img, str) and img.startswith('http'):
+            yield event.chain_result([Image.fromURL(img)])
+            return
+        yield event.plain_result(message)
+    # --- 里程排行榜命令处理器：今日里程结束 ---
 
 
     @filter.command("服务器")
@@ -1800,10 +1903,11 @@ class TmpBotPlugin(Star):
 3. 状态 [ID]
 4. 定位 [ID]
 5. DLC列表
-6. 排行- (修复中)
-7. 解绑
-8. 服务器
-9. 菜单
+6.总里程排行- (修复中)
+7.今日里程排行- (修复中)
+8. 解绑
+9. 服务器
+10. 菜单
 使用提示: 绑定后可直接发送 查询/定位
 """
         yield event.plain_result(help_text)
