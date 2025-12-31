@@ -1226,7 +1226,7 @@ class TmpBotPlugin(Star):
                     body += f"🚫封禁截止: {_format_timestamp_to_beijing(ban_expiration)}\n"
                     
             else:
-                body += f"🚫封禁原因: 隐藏。\n"
+                body += f"🚫封禁原因: 隐藏\n"
                 if banned_until_main and isinstance(banned_until_main, str) and banned_until_main.lower().startswith('never'):
                     body += f"🚫封禁截止: 永久封禁\n"
                 else:
@@ -1722,7 +1722,16 @@ class TmpBotPlugin(Star):
         
         for idx, player in enumerate(rank_list):
             rank = player.get('ranking', idx + 1)
-            name = player.get('name', '未知玩家') or player.get('tmpName', '未知玩家')
+            raw_name = (
+                player.get('tmpName')
+                or player.get('name')
+                or player.get('tmp_name')
+                or player.get('nickName')
+                or player.get('nickname')
+            )
+            name = str(raw_name).strip() if raw_name is not None else ''
+            if not name:
+                name = '未知玩家'
             distance_m = player.get('mileage') or player.get('distance') or 0
             
             distance_km = int(distance_m / 1000) if isinstance(distance_m, (int, float)) else 0
@@ -1812,7 +1821,16 @@ class TmpBotPlugin(Star):
         
         for idx, player in enumerate(rank_list):
             rank = player.get('ranking', idx + 1)
-            name = player.get('name', '未知玩家') or player.get('tmpName', '未知玩家')
+            raw_name = (
+                player.get('tmpName')
+                or player.get('name')
+                or player.get('tmp_name')
+                or player.get('nickName')
+                or player.get('nickname')
+            )
+            name = str(raw_name).strip() if raw_name is not None else ''
+            if not name:
+                name = '未知玩家'
             distance_m = player.get('mileage') or player.get('distance') or 0
             
             distance_km = int(distance_m / 1000) if isinstance(distance_m, (int, float)) else 0
@@ -1853,7 +1871,6 @@ class TmpBotPlugin(Star):
     <div class="km">{{ it.km }} km</div>
   </div>
   {% endfor %}
-  <div class="subtitle">数据来源: da.vtcm.link API</div>
 </div>
 """
 
