@@ -1178,8 +1178,6 @@ class TmpBotPlugin(Star):
         lifetime_pledge = (_to_int(lifetime_pledge_raw) // 100) if is_patron else 0
 
         if is_patron:
-            body += f"🎁是否赞助: 是\n"
-            body += f"🎁是否有效: {'是' if active else '否'}\n"
             if current_pledge > 0:
                 body += f"🎁当前赞助金额: {current_pledge}美元\n"
             else:
@@ -1199,18 +1197,13 @@ class TmpBotPlugin(Star):
         body += f"🚩今日里程: {daily_km:.2f}公里/km\n"
         if total_rank:
             body += f"🏆总里程排行: 第{total_rank}名\n"
-        else:
-            body += f"🏆总里程排行: 未上榜/暂无数据\n"
         if daily_rank:
             body += f"🏁今日里程排行: 第{daily_rank}名\n"
-        else:
-            body += f"🏁今日里程排行: 未上榜/暂无数据\n"
         
         # --- 封禁信息 (不变) ---
         body += f"🚫是否封禁: {'是' if is_banned else '否'}\n"
         
-        if ban_count > 0:
-            body += f"🚫历史封禁: {ban_count}次\n"
+        body += f"🚫历史封禁: {ban_count}次\n"
 
         if is_banned:
             
@@ -1725,6 +1718,7 @@ class TmpBotPlugin(Star):
             
         message = "🏆 TruckersMP 玩家总里程排行榜 (前10名)\n"
         message += "=" * 35 + "\n"
+        items: List[Dict[str, Any]] = []
         
         for idx, player in enumerate(rank_list):
             rank = player.get('ranking', idx + 1)
@@ -1737,11 +1731,49 @@ class TmpBotPlugin(Star):
             
             line = f"No.{rank:<2} | {name} (ID:{tmp_id})\n"
             line += f"       {distance_str} km\n"
-            
             message += line
 
+            items.append({
+                'rank': rank,
+                'name': name,
+                'km': distance_km,
+                'tmp_id': tmp_id,
+            })
+
         message += "=" * 35 + "\n"
-        message += "数据来源: da.vtcm.link API"
+
+        rank_tmpl = """
+<style>
+  html, body { margin:0; padding:0; background:#1b242c; color:#fff; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  .wrap { padding:16px 20px; }
+  .title { font-size:20px; font-weight:600; margin-bottom:8px; }
+  .subtitle { font-size:12px; color:#aaa; margin-bottom:12px; }
+  .row { display:flex; align-items:flex-start; padding:6px 0; border-bottom:1px solid #29333d; }
+  .rank { width:48px; font-weight:600; }
+  .name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .km { width:140px; text-align:right; font-variant-numeric:tabular-nums; }
+</style>
+<div class="wrap">
+  <div class="title">{{ title }}</div>
+  <div class="subtitle">前10名 · 单位: km</div>
+  {% for it in items %}
+  <div class="row">
+    <div class="rank">No.{{ it.rank }}</div>
+    <div class="name">{{ it.name }} (ID:{{ it.tmp_id }})</div>
+    <div class="km">{{ it.km }} km</div>
+  </div>
+  {% endfor %}
+</div>
+"""
+
+        try:
+            options = { 'type': 'jpeg', 'quality': 92, 'full_page': True, 'omit_background': False }
+            url = await self.html_render(rank_tmpl, { 'title': 'TruckersMP 玩家总里程排行榜 (前10名)', 'items': items }, options=options)
+            if isinstance(url, str) and url:
+                yield event.chain_result([Image.fromURL(url)])
+                return
+        except Exception:
+            pass
 
         img = await self._render_text_to_image(message)
         if isinstance(img, (bytes, bytearray)):
@@ -1776,6 +1808,7 @@ class TmpBotPlugin(Star):
             
         message = "🏁 TruckersMP 玩家今日里程排行榜 (前10名)\n"
         message += "=" * 35 + "\n"
+        items: List[Dict[str, Any]] = []
         
         for idx, player in enumerate(rank_list):
             rank = player.get('ranking', idx + 1)
@@ -1788,11 +1821,50 @@ class TmpBotPlugin(Star):
             
             line = f"No.{rank:<2} | {name} (ID:{tmp_id})\n"
             line += f"       {distance_str} km\n"
-            
             message += line
 
+            items.append({
+                'rank': rank,
+                'name': name,
+                'km': distance_km,
+                'tmp_id': tmp_id,
+            })
+
         message += "=" * 35 + "\n"
-        message += "数据来源: da.vtcm.link API"
+
+        rank_tmpl = """
+<style>
+  html, body { margin:0; padding:0; background:#1b242c; color:#fff; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  .wrap { padding:16px 20px; }
+  .title { font-size:20px; font-weight:600; margin-bottom:8px; }
+  .subtitle { font-size:12px; color:#aaa; margin-bottom:12px; }
+  .row { display:flex; align-items:flex-start; padding:6px 0; border-bottom:1px solid #29333d; }
+  .rank { width:48px; font-weight:600; }
+  .name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .km { width:140px; text-align:right; font-variant-numeric:tabular-nums; }
+</style>
+<div class="wrap">
+  <div class="title">{{ title }}</div>
+  <div class="subtitle">前10名 · 单位: km</div>
+  {% for it in items %}
+  <div class="row">
+    <div class="rank">No.{{ it.rank }}</div>
+    <div class="name">{{ it.name }} (ID:{{ it.tmp_id }})</div>
+    <div class="km">{{ it.km }} km</div>
+  </div>
+  {% endfor %}
+  <div class="subtitle">数据来源: da.vtcm.link API</div>
+</div>
+"""
+
+        try:
+            options = { 'type': 'jpeg', 'quality': 92, 'full_page': True, 'omit_background': False }
+            url = await self.html_render(rank_tmpl, { 'title': 'TruckersMP 玩家今日里程排行榜 (前10名)', 'items': items }, options=options)
+            if isinstance(url, str) and url:
+                yield event.chain_result([Image.fromURL(url)])
+                return
+        except Exception:
+            pass
 
         img = await self._render_text_to_image(message)
         if isinstance(img, (bytes, bytearray)):
