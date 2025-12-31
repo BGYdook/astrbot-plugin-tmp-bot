@@ -1,5 +1,5 @@
  # astrbot-plugin-tmp-bot
-[![npm](https://img.shields.io/badge/npm-v1.6.2-blue)](https://github.com/BGYdook/astrbot-plugin-tmp-bot)
+[![npm](https://img.shields.io/badge/npm-v1.6.3-blue)](https://github.com/BGYdook/astrbot-plugin-tmp-bot)
 
 ![:astrbot_plugin_tmp_bot](https://count.getloli.com/@:astrbot_plugin_tmp-bot?theme=minecraft)
 
@@ -25,6 +25,12 @@ API 文档与数据来源：https://apifox.com/apidoc/shared/38508a88-5ff4-4b29-
 
 # 非常感谢[晚安](https://github.com/nulijiazaizhong)提供的帮助
 
+## 版本v1.6.3
+- 在查询命令中对历史封禁修改了每次都显示，tmp赞助检测到赞助才显示
+- 添加排行功能
+## 版本v1.6.2
+- 添加“注册日期”和“历史封禁”一直显示
+
 ## 版本 v1.6.1
 - 在查询命令中新增车队职位输出，使用TMP网页中显示的原始职位信息。
 
@@ -32,7 +38,7 @@ API 文档与数据来源：https://apifox.com/apidoc/shared/38508a88-5ff4-4b29-
 - 在插件 WebUI 中开启 `DLC列表使用图片输出` 后，`DLC列表` 将以图片形式发送。
 - 否则- 关闭`DLC列表使用图片输出` 后，`DLC列表` 将以文字形式发送。
 
-- ## 版本 v1.3.59
+## 版本 v1.3.59
 - 否则- 关闭`DLC列表使用图片输出` 后，`DLC列表` 将以文字形式发送。
 
 ## 安装方法：

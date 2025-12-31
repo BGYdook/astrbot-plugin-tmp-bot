@@ -1,6 +1,6 @@
 name: astrbot-plugin-tmp-bot
 description: 欧洲卡车模拟2 TMP查询机器人 - 支持玩家信息查询、位置查询、服务器状态查询、里程排行榜、地图DLC等功能
-version: 1.6.2
+version: 1.6.3
 main: main.py
 author: BGYdook,晚安（Goodnight_An）
 homepage: https://github.com/BGYdook/astrbot-plugin-tmp-bot
