@@ -1753,8 +1753,8 @@ class TmpBotPlugin(Star):
 
         rank_tmpl = """
 <style>
-  html, body { margin:0; padding:0; width:340px; background:#000; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-  .wrap { width:340px; background:linear-gradient(135deg,#1f2f54,#0f2c2a); overflow:hidden; padding-bottom:12px; box-shadow:0 4px 20px rgba(0,0,0,0.5); border-radius:16px; }
+  html, body { margin:0; padding:0; width:1024px; height:576px; background:linear-gradient(135deg,#1f2f54,#0f2c2a); font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; display:flex; align-items:center; justify-content:center; }
+  .wrap { width:360px; background:rgba(0,0,0,0.25); overflow:hidden; padding-bottom:12px; box-shadow:0 4px 20px rgba(0,0,0,0.5); border-radius:16px; }
   .header { height:45px; background-color:rgba(0,0,0,.1); display:flex; align-items:center; justify-content:center; padding:0 20px; box-shadow:0 0 16px rgba(0,0,0,.4); }
   .header-title { color:#b0c7ff; font-size:16px; font-weight:600; text-align:center; }
   .list { padding:12px 16px 0 16px; }
@@ -1861,8 +1861,8 @@ class TmpBotPlugin(Star):
 
         rank_tmpl = """
 <style>
-  html, body { margin:0; padding:0; width:340px; background:#000; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-  .wrap { width:340px; background:linear-gradient(135deg,#1f2f54,#0f2c2a); overflow:hidden; padding-bottom:12px; box-shadow:0 4px 20px rgba(0,0,0,0.5); border-radius:16px; }
+  html, body { margin:0; padding:0; width:1024px; height:576px; background:linear-gradient(135deg,#1f2f54,#0f2c2a); font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; display:flex; align-items:center; justify-content:center; }
+  .wrap { width:360px; background:rgba(0,0,0,0.25); overflow:hidden; padding-bottom:12px; box-shadow:0 4px 20px rgba(0,0,0,0.5); border-radius:16px; }
   .header { height:45px; background-color:rgba(0,0,0,.1); display:flex; align-items:center; justify-content:center; padding:0 20px; box-shadow:0 0 16px rgba(0,0,0,.4); }
   .header-title { color:#b0c7ff; font-size:16px; font-weight:600; text-align:center; }
   .list { padding:12px 16px 0 16px; }
