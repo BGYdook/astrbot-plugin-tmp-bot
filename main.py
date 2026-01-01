@@ -730,6 +730,43 @@ class TmpBotPlugin(Star):
             logger.error(f"查询 DLC列表 时发生未知错误: {e}", exc_info=True)
             raise NetworkException("查询 DLC列表 失败")
 
+    async def _get_traffic_top(self, server_key: str) -> List[Dict]:
+        if not self.session:
+            raise NetworkException("插件未初始化，HTTP会话不可用")
+        key = (server_key or "").strip().lower()
+        alias = {
+            "s1": "sim1",
+            "s2": "sim2",
+            "p": "eupromods1",
+            "a": "arc1",
+        }
+        server = alias.get(key, key)
+        if not server:
+            raise ApiResponseException("无效的服务器标识")
+        url = f"https://api.truckyapp.com/v2/traffic/top?game=ets2&server={server}"
+        logger.info(f"路况: 请求 URL={url}")
+        try:
+            async with self.session.get(url, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
+                status = resp.status
+                if status == 200:
+                    data = await resp.json()
+                    items = data.get('response') if isinstance(data, dict) else data
+                    if isinstance(items, list):
+                        return items
+                    raise ApiResponseException("路况 API 数据结构异常")
+                if status == 404:
+                    return []
+                raise ApiResponseException(f"路况 API 返回错误状态码: {status}")
+        except aiohttp.ClientError as e:
+            logger.error(f"路况 API 网络请求失败 (aiohttp.ClientError): {e}")
+            raise NetworkException("路况 API 网络请求失败")
+        except asyncio.TimeoutError:
+            logger.error("请求 路况 API 超时")
+            raise NetworkException("请求 路况 API 超时")
+        except Exception as e:
+            logger.error(f"查询路况时发生未知错误: {e}", exc_info=True)
+            raise NetworkException("查询路况失败")
+
     async def _render_text_to_image(self, text: str) -> Optional[Any]:
         if not self.session:
             return None
@@ -1033,6 +1070,10 @@ class TmpBotPlugin(Star):
             return
         if msg.startswith("服务器"):
             async for r in self.tmpserver(event):
+                yield r
+            return
+        if msg.startswith("路况"):
+            async for r in self.tmptraffic(event):
                 yield r
             return
         if msg.startswith("帮助"):
@@ -1953,6 +1994,121 @@ class TmpBotPlugin(Star):
         yield event.plain_result(message)
     # --- 里程排行榜命令处理器：今日里程结束 ---
 
+    async def tmptraffic(self, event: AstrMessageEvent):
+        message_str = (event.message_str or "").strip()
+        m = re.search(r"路况\s+(\S+)", message_str)
+        server_token = m.group(1).strip().lower() if m else ""
+        if not server_token:
+            yield event.plain_result("用法: 路况 [服务器简称]，例如: 路况 s1")
+            return
+        try:
+            items = await self._get_traffic_top(server_token)
+        except NetworkException as e:
+            yield event.plain_result(f"查询路况失败: {str(e)}")
+            return
+        except ApiResponseException:
+            yield event.plain_result("查询路况失败: API 返回数据异常。")
+            return
+        except Exception:
+            yield event.plain_result("查询路况时发生未知错误。")
+            return
+        if not items:
+            yield event.plain_result("当前服务器暂无热门路段数据。")
+            return
+        severity_map = {
+            "Fluid": "🟢畅通",
+            "Moderate": "🟠正常",
+            "Congested": "🔴缓慢",
+            "Heavy": "🟣拥堵",
+        }
+        type_map = {
+            "City": "城市",
+            "Road": "公路",
+            "Intersection": "十字路口",
+        }
+        lines: List[str] = []
+        img_items: List[Dict[str, Any]] = []
+        for t in items:
+            country = str(t.get("country") or "").strip() or "未知区域"
+            raw_name = str(t.get("name") or "").strip()
+            name = raw_name
+            place_type = ""
+            idx1 = raw_name.rfind("(")
+            idx2 = raw_name.rfind(")")
+            if idx1 > 0 and idx2 > idx1:
+                name = raw_name[:idx1].strip()
+                place_type = raw_name[idx1 + 1:idx2].strip()
+            severity_key = str(t.get("newSeverity") or "").strip()
+            severity_text = severity_map.get(severity_key) or severity_key or "未知"
+            players = t.get("players")
+            players_str = ""
+            if isinstance(players, (int, float)):
+                players_str = str(int(players))
+            elif players is not None:
+                players_str = str(players)
+            line = f"{country} - {name}"
+            if place_type:
+                line += f" ({type_map.get(place_type, place_type)})"
+            line += f"\n路况: {severity_text}"
+            if players_str:
+                line += f" | 人数: {players_str}"
+            lines.append(line)
+            img_items.append({
+                'country': country,
+                'name': name,
+                'type': type_map.get(place_type, place_type) if place_type else "",
+                'severity_text': severity_text,
+                'severity_color': '#00d26a' if severity_key == 'Fluid' else '#ff6723' if severity_key == 'Moderate' else '#f8312f' if severity_key == 'Congested' else '#8d67c5' if severity_key == 'Heavy' else '#ffffff',
+                'players': players_str,
+            })
+        header = "🚦 服务器热门路况\n" + "=" * 20
+        message = header + "\n" + "\n\n".join(lines)
+
+        traffic_tmpl = """
+<style>
+  html, body { margin:0; padding:0; width:420px; background:#000; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  .wrap { width:420px; background:linear-gradient(135deg,#1f2f54,#0f2c2a); overflow:hidden; padding:16px 16px 10px 16px; box-shadow:0 4px 20px rgba(0,0,0,0.5); border-radius:16px; }
+  .title { color:#b0c7ff; font-size:16px; font-weight:600; text-align:left; margin-bottom:8px; }
+  .subtitle { color:#9fb0ff; font-size:12px; margin-bottom:10px; }
+  .item { background-color:rgba(0,0,0,0.25); margin-bottom:6px; border-radius:8px; padding:8px 10px; border:1px solid rgba(255,255,255,0.08); }
+  .line1 { display:flex; align-items:center; margin-bottom:4px; }
+  .country { color:#fff; font-size:13px; font-weight:600; margin-right:6px; }
+  .name { color:#e6e9ff; font-size:13px; flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .line2 { display:flex; align-items:center; font-size:12px; color:#d0d4ff; }
+  .severity { font-weight:600; margin-right:8px; }
+  .players { margin-right:8px; }
+  .type { opacity:0.85; }
+</style>
+<div class="wrap">
+  <div class="title">服务器热门路况</div>
+  <div class="subtitle">服务器: {{ server_token }}</div>
+  {% for it in items %}
+  <div class="item">
+    <div class="line1">
+      <div class="country">{{ it.country }}</div>
+      <div class="name">{{ it.name }}</div>
+    </div>
+    <div class="line2">
+      <div class="severity" style="color: {{ it.severity_color }};">{{ it.severity_text }}</div>
+      {% if it.players %}<div class="players">{{ it.players }} 人</div>{% endif %}
+      {% if it.type %}<div class="type">{{ it.type }}</div>{% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+"""
+
+        try:
+            options = { 'type': 'jpeg', 'quality': 92, 'full_page': False, 'omit_background': False }
+            url = await self.html_render(traffic_tmpl, { 'server_token': server_token.upper(), 'items': img_items }, options=options)
+            if isinstance(url, str) and url:
+                yield event.chain_result([Image.fromURL(url)])
+                return
+        except Exception:
+            pass
+
+        yield event.plain_result(message)
+
 
     async def tmpserver(self, event: AstrMessageEvent):
         """[命令: 服务器] 查询TruckersMP官方服务器的实时状态。"""
@@ -2049,11 +2205,12 @@ class TmpBotPlugin(Star):
 2. 查询 [ID]
 3. 定位 [ID]
 4. DLC列表
-5.总里程排行- (修复图片尺寸问题)
-6.今日里程排行- (修复图片尺寸问题)
-7. 解绑
-8. 服务器
-9. 菜单
+5. 总里程排行
+6. 今日里程排行
+7. 路况 [服务器简称]
+8. 解绑
+9. 服务器
+10. 菜单
 使用提示: 绑定后可直接发送 查询/定位
 """
         yield event.plain_result(help_text)
