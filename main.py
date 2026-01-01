@@ -1996,11 +1996,43 @@ class TmpBotPlugin(Star):
 
     async def tmptraffic(self, event: AstrMessageEvent):
         message_str = (event.message_str or "").strip()
-        m = re.search(r"路况\s+(\S+)", message_str)
+        m = re.search(r"路况\s*(\S+)", message_str)
         server_token = m.group(1).strip().lower() if m else ""
         if not server_token:
             yield event.plain_result("用法: 路况 [服务器简称]，例如: 路况 s1")
             return
+
+        server_info_map: Dict[str, Dict[str, Any]] = {
+            's1': { 'map_type': 'ets', 'server_id': 2, 'bounds': (-94189, 93775, 79264, -78999) },
+            's2': { 'map_type': 'ets', 'server_id': 41, 'bounds': (-94189, 93775, 79264, -78999) },
+            'p':  { 'map_type': 'promods', 'server_id': 50, 'bounds': (-96355, 16381, 205581, -70750) },
+            'a':  { 'map_type': 'ets', 'server_id': 7, 'bounds': (-94189, 93775, 79264, -78999) },
+        }
+
+        server_info = server_info_map.get(server_token)
+        if not server_info:
+            yield event.plain_result("请输入正确的服务器名称 (s1, s2, p, a)")
+            return
+
+        player_coords: List[Dict[str, float]] = []
+        if self.session:
+            ax, ay, bx, by = server_info['bounds']
+            try:
+                url = f"https://da.vtcm.link/map/playerList?aAxisX={ax}&aAxisY={ay}&bAxisX={bx}&bAxisY={by}&serverId={server_info['server_id']}"
+                logger.info(f"路况: 查询地图玩家数据 url={url}")
+                async with self.session.get(url, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
+                    if resp.status == 200:
+                        j = await resp.json()
+                        data_list = j.get('data') or []
+                        for p in data_list:
+                            try:
+                                x = float(p.get('axisX'))
+                                y = float(p.get('axisY'))
+                                player_coords.append({'x': x, 'y': y})
+                            except Exception:
+                                continue
+            except Exception as e:
+                logger.error(f"路况: 获取地图玩家数据失败: {e}")
         try:
             items = await self._get_traffic_top(server_token)
         except NetworkException as e:
@@ -2028,6 +2060,7 @@ class TmpBotPlugin(Star):
         }
         lines: List[str] = []
         img_items: List[Dict[str, Any]] = []
+        traffic_list_for_html: List[Dict[str, Any]] = []
         for t in items:
             country = str(t.get("country") or "").strip() or "未知区域"
             raw_name = str(t.get("name") or "").strip()
@@ -2061,51 +2094,38 @@ class TmpBotPlugin(Star):
                 'severity_color': '#00d26a' if severity_key == 'Fluid' else '#ff6723' if severity_key == 'Moderate' else '#f8312f' if severity_key == 'Congested' else '#8d67c5' if severity_key == 'Heavy' else '#ffffff',
                 'players': players_str,
             })
+            traffic_list_for_html.append({
+                'country': country,
+                'province': name,
+                'playerCount': int(players) if isinstance(players, (int, float)) else players_str,
+                'severity': {
+                    'text': severity_text,
+                    'color': '#00d26a' if severity_key == 'Fluid' else '#ff6723' if severity_key == 'Moderate' else '#f8312f' if severity_key == 'Congested' else '#8d67c5' if severity_key == 'Heavy' else '#ffffff',
+                }
+            })
         header = "🚦 服务器热门路况\n" + "=" * 20
         message = header + "\n" + "\n\n".join(lines)
 
-        traffic_tmpl = """
-<style>
-  html, body { margin:0; padding:0; width:420px; background:#000; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-  .wrap { width:420px; background:linear-gradient(135deg,#1f2f54,#0f2c2a); overflow:hidden; padding:16px 16px 10px 16px; box-shadow:0 4px 20px rgba(0,0,0,0.5); border-radius:16px; }
-  .title { color:#b0c7ff; font-size:16px; font-weight:600; text-align:left; margin-bottom:8px; }
-  .subtitle { color:#9fb0ff; font-size:12px; margin-bottom:10px; }
-  .item { background-color:rgba(0,0,0,0.25); margin-bottom:6px; border-radius:8px; padding:8px 10px; border:1px solid rgba(255,255,255,0.08); }
-  .line1 { display:flex; align-items:center; margin-bottom:4px; }
-  .country { color:#fff; font-size:13px; font-weight:600; margin-right:6px; }
-  .name { color:#e6e9ff; font-size:13px; flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .line2 { display:flex; align-items:center; font-size:12px; color:#d0d4ff; }
-  .severity { font-weight:600; margin-right:8px; }
-  .players { margin-right:8px; }
-  .type { opacity:0.85; }
-</style>
-<div class="wrap">
-  <div class="title">服务器热门路况</div>
-  <div class="subtitle">服务器: {{ server_token }}</div>
-  {% for it in items %}
-  <div class="item">
-    <div class="line1">
-      <div class="country">{{ it.country }}</div>
-      <div class="name">{{ it.name }}</div>
-    </div>
-    <div class="line2">
-      <div class="severity" style="color: {{ it.severity_color }};">{{ it.severity_text }}</div>
-      {% if it.players %}<div class="players">{{ it.players }} 人</div>{% endif %}
-      {% if it.type %}<div class="type">{{ it.type }}</div>{% endif %}
-    </div>
-  </div>
-  {% endfor %}
-</div>
-"""
-
+        # 优先尝试使用现有 traffic.html 模板渲染地图热力图
         try:
-            options = { 'type': 'jpeg', 'quality': 92, 'full_page': False, 'omit_background': False }
-            url = await self.html_render(traffic_tmpl, { 'server_token': server_token.upper(), 'items': img_items }, options=options)
-            if isinstance(url, str) and url:
-                yield event.chain_result([Image.fromURL(url)])
-                return
-        except Exception:
-            pass
+            root_dir = os.path.dirname(os.path.abspath(__file__))
+            tpl_path = os.path.join(root_dir, 'src', 'resource', 'traffic.html')
+            if os.path.exists(tpl_path):
+                with open(tpl_path, 'r', encoding='utf-8') as f:
+                    base_html = f.read()
+                payload = {
+                    'mapType': server_info['map_type'],
+                    'trafficList': traffic_list_for_html,
+                    'playerCoordinateList': [[c['x'], c['y']] for c in player_coords],
+                }
+                injected = base_html.replace('</body>', f"<script>setData({json.dumps(payload, ensure_ascii=False)});</script></body>")
+                options = { 'type': 'jpeg', 'quality': 92, 'full_page': True, 'timeout': 8000, 'animations': 'disabled' }
+                url = await self.html_render(injected, {}, options=options)
+                if isinstance(url, str) and url:
+                    yield event.chain_result([Image.fromURL(url)])
+                    return
+        except Exception as e:
+            logger.error(f"路况: 地图渲染失败, 回退为文本: {e}")
 
         yield event.plain_result(message)
 
