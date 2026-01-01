@@ -1,5 +1,5 @@
  # astrbot-plugin-tmp-bot
-[![npm](https://img.shields.io/badge/npm-v1.6.3-blue)](https://github.com/BGYdook/astrbot-plugin-tmp-bot)
+[![npm](https://img.shields.io/badge/npm-v1.6.5-blue)](https://github.com/BGYdook/astrbot-plugin-tmp-bot)
 
 ![:astrbot_plugin_tmp_bot](https://count.getloli.com/@:astrbot_plugin_tmp-bot?theme=minecraft)
 
@@ -20,10 +20,14 @@
 | tmpmileageranking | 总里程排行榜（自 2025-08-23 20:00 起统计，绑定后可查看个人排名） | tmpmileageranking |
 | tmptodaymileageranking | 今日里程排行榜（每日 0 点重置，绑定后可查看个人排名） | tmptodaymileageranking |
 
-### 接口文档
-API 文档地址：https://s.apifox.cn/38508a88-5ff4-4b29-b724-41f9d3d3336a
+### 接口与数据
+API 文档与数据来源：https://apifox.com/apidoc/shared/38508a88-5ff4-4b29-b724-41f9d3d3336a
 
 ## 非常感谢[晚安](https://github.com/nulijiazaizhong)提供的帮助
+
+## 版本v1.6.5
+- 添加路况功能
+- 修改查询时可加空格或不加空格
 
 ## 版本v1.6.4
 - 修改了不要前缀即可使用命令
@@ -69,5 +73,5 @@ https://github.com/BGYdook/astrbot-plugin-tmp-bot
 
 [帮助文档](https://astrbot.app)
 
-以及感谢 [79887143](https://github.com/79887143) 提供的 API 接口与文档
->[79887143 的 API 文档](https://s.apifox.cn/38508a88-5ff4-4b29-b724-41f9d3d3336a)
+以及感谢 [79887143](https://github.com/79887143)提供的api接口
+>[79887143的api接口](https://apifox.com/apidoc/shared/38508a88-5ff4-4b29-b724-41f9d3d3336a)
