@@ -1068,6 +1068,10 @@ class TmpBotPlugin(Star):
             async for r in self.tmprank_today(event):
                 yield r
             return
+        if msg.startswith("服务器"):
+            async for r in self.tmpserver(event):
+                yield r
+            return
         if msg.startswith("路况"):
             async for r in self.tmptraffic(event):
                 yield r
