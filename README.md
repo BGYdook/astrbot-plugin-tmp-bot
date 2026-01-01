@@ -23,7 +23,10 @@
 ### 接口与数据
 API 文档与数据来源：https://apifox.com/apidoc/shared/38508a88-5ff4-4b29-b724-41f9d3d3336a
 
-# 非常感谢[晚安](https://github.com/nulijiazaizhong)提供的帮助
+## 非常感谢[晚安](https://github.com/nulijiazaizhong)提供的帮助
+
+## 版本v1.6.4
+- 修改了不要前缀即可使用命令
 
 ## 版本v1.6.3
 - 在查询命令中对历史封禁修改了每次都显示，tmp赞助检测到赞助才显示
