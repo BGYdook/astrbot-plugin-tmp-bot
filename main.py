@@ -990,10 +990,60 @@ class TmpBotPlugin(Star):
 
 
     # ******************************************************
-    # 命令处理器 
+    # 命令处理与消息监听 
     # ******************************************************
+
+    @filter.event_message_type(filter.EventMessageType.ALL)
+    async def _on_any_message_dispatch(self, event: AstrMessageEvent):
+        msg = (event.message_str or "").strip()
+        if not msg:
+            return
+
+        if msg.startswith("查询"):
+            async for r in self.tmpquery(event):
+                yield r
+            return
+        if msg.startswith("DLC列表") or msg.startswith("地图DLC"):
+            async for r in self.tmpdlc_list(event):
+                yield r
+            return
+        if msg.startswith("DLC"):
+            async for r in self.tmpdlc(event):
+                yield r
+            return
+        if msg.startswith("绑定"):
+            async for r in self.tmpbind(event):
+                yield r
+            return
+        if msg.startswith("解绑"):
+            async for r in self.tmpunbind(event):
+                yield r
+            return
+        if msg.startswith("定位"):
+            async for r in self.tmplocate(event):
+                yield r
+            return
+        if msg.startswith("总里程排行"):
+            async for r in self.tmprank_total(event):
+                yield r
+            return
+        if msg.startswith("今日里程排行"):
+            async for r in self.tmprank_today(event):
+                yield r
+            return
+        if msg.startswith("服务器"):
+            async for r in self.tmpserver(event):
+                yield r
+            return
+        if msg.startswith("帮助"):
+            async for r in self.tmphelp(event):
+                yield r
+            return
+
     
-    @filter.command("查询") 
+    
+    # 具体功能实现
+
     async def tmpquery(self, event: AstrMessageEvent):
         """[命令: 查询] TMP玩家完整信息查询。支持输入 TMP ID 或 Steam ID。"""
         message_str = event.message_str.strip()
@@ -1273,7 +1323,6 @@ class TmpBotPlugin(Star):
             components.append(Plain(body))
             yield event.chain_result(components)
     
-    @filter.command("DLC") 
     async def tmpdlc(self, event: AstrMessageEvent):
         """[命令: DLC] 查询玩家拥有的地图 DLC 列表。支持输入 TMP ID。"""
         message_str = event.message_str.strip()
@@ -1341,7 +1390,6 @@ class TmpBotPlugin(Star):
 
         yield event.plain_result(message)
 
-    @filter.command("DLC列表")
     async def tmpdlc_list(self, event: AstrMessageEvent):
         logger.info("DLC列表: 开始处理命令")
         try:
@@ -1441,13 +1489,11 @@ class TmpBotPlugin(Star):
             logger.error("DLC列表: 所有渲染失败，回退为文本")
         yield event.plain_result(text)
 
-    @filter.command("地图DLC")
     async def tmpdlc_map_alias(self, event: AstrMessageEvent):
         async for r in self.tmpdlc_list(event):
             yield r
     # --- DLC 命令处理器结束 ---
 
-    @filter.command("绑定")
     async def tmpbind(self, event: AstrMessageEvent):
         """[命令: 绑定] 绑定您的聊天账号与TMP ID。支持输入 TMP ID 或 Steam ID。"""
         message_str = event.message_str.strip()
@@ -1495,7 +1541,6 @@ class TmpBotPlugin(Star):
         else:
             yield event.plain_result("绑定失败，请稍后重试")
 
-    @filter.command("解绑")
     async def tmpunbind(self, event: AstrMessageEvent):
         """[命令: 解绑] 解除当前用户的TruckersMP ID绑定。"""
         user_id = event.get_sender_id()
@@ -1516,7 +1561,6 @@ class TmpBotPlugin(Star):
     # 状态命令已移除
     
     # --- 【新功能】定位命令 ---
-    @filter.command("定位")
     async def tmplocate(self, event: AstrMessageEvent):
         """[命令:定位] 查询玩家的实时位置，并返回图片。支持输入 TMP ID 或 Steam ID。"""
         message_str = event.message_str.strip()
@@ -1696,7 +1740,6 @@ class TmpBotPlugin(Star):
     
 
     # --- 里程排行榜命令处理器：总里程 ---
-    @filter.command("总里程排行") 
     async def tmprank_total(self, event: AstrMessageEvent):
         """[命令: 总里程排行] 查询 TruckersMP 玩家总里程排行榜前10名。"""
         
@@ -1804,7 +1847,6 @@ class TmpBotPlugin(Star):
     # --- 里程排行榜命令处理器：总里程结束 ---
 
     # --- 里程排行榜命令处理器：今日里程 ---
-    @filter.command("今日里程排行") 
     async def tmprank_today(self, event: AstrMessageEvent):
         """[命令: 今日里程排行] 查询 TruckersMP 玩家今日里程排行榜前10名。"""
         
@@ -1912,7 +1954,6 @@ class TmpBotPlugin(Star):
     # --- 里程排行榜命令处理器：今日里程结束 ---
 
 
-    @filter.command("服务器")
     async def tmpserver(self, event: AstrMessageEvent):
         """[命令: 服务器] 查询TruckersMP官方服务器的实时状态。"""
         if not self.session: 
@@ -1999,7 +2040,6 @@ class TmpBotPlugin(Star):
         except Exception:
             yield event.plain_result("网络请求失败，请检查网络或稍后重试。")
 
-    @filter.command("帮助")
     async def tmphelp(self, event: AstrMessageEvent):
         """[命令: 帮助] 显示本插件的命令使用说明。"""
         help_text = """TMP查询插件使用说明
