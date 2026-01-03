@@ -391,6 +391,71 @@ class TmpBotPlugin(Star):
             return self._save_bindings(bindings)
         return False
 
+    COUNTRY_MAP_EN_TO_CN = {
+        "germany": "德国",
+        "france": "法国",
+        "united kingdom": "英国",
+        "uk": "英国",
+        "netherlands": "荷兰",
+        "belgium": "比利时",
+        "poland": "波兰",
+        "czech republic": "捷克",
+        "czechia": "捷克",
+        "slovakia": "斯洛伐克",
+        "italy": "意大利",
+        "spain": "西班牙",
+        "portugal": "葡萄牙",
+        "switzerland": "瑞士",
+        "austria": "奥地利",
+        "hungary": "匈牙利",
+        "denmark": "丹麦",
+        "sweden": "瑞典",
+        "norway": "挪威",
+        "finland": "芬兰",
+        "estonia": "爱沙尼亚",
+        "latvia": "拉脱维亚",
+        "lithuania": "立陶宛",
+        "russia": "俄罗斯",
+        "turkey": "土耳其",
+        "romania": "罗马尼亚",
+        "bulgaria": "保加利亚",
+        "greece": "希腊",
+        "united states": "美国",
+        "usa": "美国",
+    }
+
+    CITY_MAP_EN_TO_CN = {
+        "calais": "加来",
+        "duisburg": "杜伊斯堡",
+        "berlin": "柏林",
+        "paris": "巴黎",
+        "london": "伦敦",
+        "cambridge": "剑桥",
+        "milano": "米兰",
+        "milan": "米兰",
+        "rome": "罗马",
+        "madrid": "马德里",
+        "barcelona": "巴塞罗那",
+        "lisbon": "里斯本",
+        "rotterdam": "鹿特丹",
+        "amsterdam": "阿姆斯特丹",
+        "brussels": "布鲁塞尔",
+        "prague": "布拉格",
+        "vienna": "维也纳",
+        "budapest": "布达佩斯",
+        "warsaw": "华沙",
+        "krakow": "克拉科夫",
+    }
+
+    def _translate_country_city(self, country: Optional[str], city: Optional[str]) -> Tuple[str, str]:
+        country_en = (country or "").strip()
+        city_en = (city or "").strip()
+        country_key = country_en.lower()
+        city_key = city_en.lower()
+        country_cn = self.COUNTRY_MAP_EN_TO_CN.get(country_key, country_en)
+        city_cn = self.CITY_MAP_EN_TO_CN.get(city_key, city_en)
+        return country_cn, city_cn
+
     # --- API请求方法 ---
 
     async def _get_tmp_id_from_steam_id(self, steam_id: str) -> str:
@@ -622,17 +687,21 @@ class TmpBotPlugin(Star):
                         location_data = online_data.get('location', {})
                         country = location_data.get('poi', {}).get('country')
                         real_name = location_data.get('poi', {}).get('realName')
-                        
-                        if not country: country = location_data.get('country')
-                        if not real_name: real_name = location_data.get('realName')
+
+                        if not country:
+                            country = location_data.get('country')
+                        if not real_name:
+                            real_name = location_data.get('realName')
+
+                        country_cn, city_cn = self._translate_country_city(country, real_name)
 
                         formatted_location = '未知位置'
-                        if country and real_name:
-                            formatted_location = f"{country} {real_name}"
-                        elif real_name:
-                            formatted_location = real_name
-                        elif country:
-                            formatted_location = country
+                        if country_cn and city_cn:
+                            formatted_location = f"{country_cn} {city_cn}"
+                        elif city_cn:
+                            formatted_location = city_cn
+                        elif country_cn:
+                            formatted_location = country_cn
                         
                         return {
                             'online': True,
@@ -642,8 +711,8 @@ class TmpBotPlugin(Star):
                             'serverId': online_data.get('server'),
                             'x': online_data.get('x'),
                             'y': online_data.get('y'),
-                            'country': country,
-                            'realName': real_name,
+                            'country': country_cn,
+                            'realName': city_cn,
                             'debug_error': 'Trucky V3 判断在线，并获取到实时数据。',
                             'raw_data': '' 
                         }
@@ -996,34 +1065,57 @@ class TmpBotPlugin(Star):
             return reason or ""
 
         zh_map = {
-            "2.1": "黑客攻击/错误/功能滥用",
+            "1.1": "账号、设备与游戏设置责任",
+            "1.2": "逃避封禁",
+            "1.3": "个人信息与隐私",
+            "1.4": "不当内容与交流",
+            "1.5": "语言、头像和昵称违规",
+            "1.6": "冒充官方或其他玩家",
+            "1.7": "刷屏/滥用系统",
+            "2.1": "黑客/漏洞/功能滥用",
             "2.2": "碰撞",
             "2.3": "堵塞",
-            "2.4": "不正确的方式/不适当的超车",
+            "2.4": "错误驾驶方式/不当超车",
             "2.5": "鲁莽驾驶",
-            "2.6": "不适当的车队管理/滥用汽车",
-            "2.7": "特色区域和事件服务器",
+            "2.6": "骚扰、侮辱或不当行为",
+            "2.7": "特色区域和事件服务器规则",
             "2.8": "历史原因",
+            "2.9": "保存修改",
+            "3.1": "违规保存编辑",
+            "3.2": "不兼容或缺失组件",        }
+        keyword_map = {
+            "collisions": "碰撞",
+            "reckless driving": "鲁莽驾驶",
+            "blocking": "堵塞",
+            "trolling": "恶意捣乱",
+            "inappropriate overtaking": "不当超车",
+            "wrong way": "逆行",
+            "ramming": "蓄意撞车",
+            "chat abuse": "聊天滥用",
+            "insulting": "辱骂他人",
         }
 
-        # 找出所有 "§x.x - title" 片段（title 截止到逗号或连字符）
         matches = list(re.finditer(r"§\s*(?P<code>\d+\.\d+)\s*-\s*(?P<title>[^,\-]+)", reason))
-        if not matches:
-            return reason
+        if matches:
+            parts = []
+            for m in matches:
+                code = m.group("code").strip()
+                title = m.group("title").strip()
+                zh_title = zh_map.get(code)
+                if zh_title:
+                    parts.append(f"§{code} - {zh_title}")
+                else:
+                    parts.append(f"§{code} - {title}")
+            remainder = reason[matches[-1].end():]
+            result = ", ".join(parts) + remainder
+        else:
+            result = reason
 
-        parts = []
-        for m in matches:
-            code = m.group("code").strip()
-            title = m.group("title").strip()
-            zh_title = zh_map.get(code)
-            if zh_title:
-                parts.append(f"§{code} - {zh_title}")
-            else:
-                parts.append(f"§{code} - {title}")
+        for en, zh in keyword_map.items():
+            pattern = r"\b" + re.escape(en) + r"\b"
+            result = re.sub(pattern, zh, result, flags=re.IGNORECASE)
 
-        # 保留最后一个匹配之后的所有内容（通常包含链接与说明）
-        remainder = reason[matches[-1].end():]
-        return ", ".join(parts) + remainder
+        return result
 
 
     # ******************************************************
@@ -1036,47 +1128,47 @@ class TmpBotPlugin(Star):
         if not msg:
             return
 
-        if msg.startswith("查询"):
+        if re.match(r'^查询(\s*\d+)?\s*$', msg):
             async for r in self.tmpquery(event):
                 yield r
             return
-        if msg.startswith("DLC列表") or msg.startswith("地图DLC"):
+        if msg == "DLC列表" or msg == "地图DLC":
             async for r in self.tmpdlc_list(event):
                 yield r
             return
-        if msg.startswith("DLC"):
+        if re.match(r'^DLC(\s*\d+)?\s*$', msg):
             async for r in self.tmpdlc(event):
                 yield r
             return
-        if msg.startswith("绑定"):
+        if re.match(r'^绑定\s*\d+\s*$', msg):
             async for r in self.tmpbind(event):
                 yield r
             return
-        if msg.startswith("解绑"):
+        if re.match(r'^解绑\s*$', msg):
             async for r in self.tmpunbind(event):
                 yield r
             return
-        if msg.startswith("定位"):
+        if re.match(r'^定位(\s*\d+)?\s*$', msg):
             async for r in self.tmplocate(event):
                 yield r
             return
-        if msg.startswith("总里程排行"):
+        if re.match(r'^总里程排行\s*$', msg):
             async for r in self.tmprank_total(event):
                 yield r
             return
-        if msg.startswith("今日里程排行"):
+        if re.match(r'^今日里程排行\s*$', msg):
             async for r in self.tmprank_today(event):
                 yield r
             return
-        if msg.startswith("服务器"):
+        if re.match(r'^服务器\s*$', msg):
             async for r in self.tmpserver(event):
                 yield r
             return
-        if msg.startswith("路况"):
+        if re.match(r'^路况(\s+\S+)?\s*$', msg):
             async for r in self.tmptraffic(event):
                 yield r
             return
-        if msg.startswith("帮助"):
+        if re.match(r'^帮助\s*$', msg):
             async for r in self.tmphelp(event):
                 yield r
             return
@@ -1089,7 +1181,20 @@ class TmpBotPlugin(Star):
         """[命令: 查询] TMP玩家完整信息查询。支持输入 TMP ID 或 Steam ID。"""
         message_str = event.message_str.strip()
         user_id = event.get_sender_id()
-        
+
+        target_user_id = None
+        message_obj = getattr(event, "message_obj", None)
+        if message_obj is not None:
+            try:
+                chain = getattr(message_obj, "message", None) or []
+                for seg in chain:
+                    qq = getattr(seg, "qq", None)
+                    if qq:
+                        target_user_id = str(qq)
+                        break
+            except Exception:
+                target_user_id = None
+
         match = re.search(r'查询\s*(\d+)', message_str) 
         input_id = match.group(1) if match else None
         
@@ -1108,7 +1213,8 @@ class TmpBotPlugin(Star):
             else:
                 tmp_id = input_id
         else:
-            tmp_id = self._get_bound_tmp_id(user_id)
+            bind_user_id = target_user_id or user_id
+            tmp_id = self._get_bound_tmp_id(bind_user_id)
         
         if not tmp_id:
             yield event.plain_result("请输入正确的玩家编号 TMP ID")
@@ -2028,7 +2134,9 @@ class TmpBotPlugin(Star):
         }
         lines: List[str] = []
         for t in items:
-            country = str(t.get("country") or "").strip() or "未知区域"
+            country_raw = str(t.get("country") or "").strip()
+            country_cn, _ = self._translate_country_city(country_raw, None)
+            country = country_cn or "未知区域"
             raw_name = str(t.get("name") or "").strip()
             name = raw_name
             place_type = ""
@@ -2154,7 +2262,7 @@ class TmpBotPlugin(Star):
 4. DLC列表
 5. 总里程排行
 6. 今日里程排行
-7. 路况 [服务器简称]
+7. 路况
 8. 解绑
 9. 服务器
 10. 菜单
