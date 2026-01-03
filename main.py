@@ -458,6 +458,21 @@ class TmpBotPlugin(Star):
         city_cn = self.CITY_MAP_EN_TO_CN.get(city_key, city_en)
         return country_cn, city_cn
 
+    def _translate_traffic_name(self, name: Optional[str]) -> str:
+        s = (name or "").strip()
+        if not s:
+            return s
+        normalized = s.replace("—", "-")
+        parts = [p.strip() for p in normalized.split("-")]
+        if len(parts) <= 1:
+            key = s.lower()
+            return self.CITY_MAP_EN_TO_CN.get(key, s)
+        translated_parts = []
+        for p in parts:
+            key = p.lower()
+            translated_parts.append(self.CITY_MAP_EN_TO_CN.get(key, p))
+        return " - ".join(translated_parts)
+
     # --- API请求方法 ---
 
     async def _get_tmp_id_from_steam_id(self, steam_id: str) -> str:
@@ -1175,7 +1190,7 @@ class TmpBotPlugin(Star):
             async for r in self.tmpunbind(event):
                 yield r
             return
-        if re.match(r'^定位(\s*\d+)?\s*$', msg):
+        if re.match(r'^定位(\s*\d+)?\s*$', msg) or (msg.startswith("定位") and has_at):
             async for r in self.tmplocate(event):
                 yield r
             return
@@ -1195,7 +1210,11 @@ class TmpBotPlugin(Star):
             async for r in self.tmptraffic(event):
                 yield r
             return
-        if re.match(r'^帮助\s*$', msg):
+        if re.match(r'^插件版本\s*$', msg):
+            async for r in self.tmpversion(event):
+                yield r
+            return
+        if re.match(r'^菜单\s*$', msg):
             async for r in self.tmphelp(event):
                 yield r
             return
@@ -1756,12 +1775,40 @@ class TmpBotPlugin(Star):
         message_str = event.message_str.strip()
         user_id = event.get_sender_id()
         
+        target_user_id = None
+        message_obj = getattr(event, "message_obj", None)
+        if message_obj is not None:
+            try:
+                chain = getattr(message_obj, "message", None) or []
+                for seg in chain:
+                    seg_type = getattr(seg, "type", None)
+                    if isinstance(seg, dict):
+                        seg_type = seg.get("type") or seg_type
+                    if isinstance(seg_type, str) and seg_type.lower() == "at":
+                        uid = (
+                            getattr(seg, "qq", None)
+                            or getattr(seg, "user_id", None)
+                            or getattr(seg, "id", None)
+                        )
+                        if isinstance(seg, dict):
+                            uid = seg.get("qq") or seg.get("user_id") or seg.get("id") or uid
+                        if uid:
+                            target_user_id = str(uid)
+                            break
+                    uid2 = getattr(seg, "qq", None)
+                    if isinstance(seg, dict):
+                        uid2 = seg.get("qq") or uid2
+                    if uid2:
+                        target_user_id = str(uid2)
+                        break
+            except Exception:
+                target_user_id = None
+
         match = re.search(r'(定位)\s*(\d+)', message_str) 
         input_id = match.group(2) if match else None
         
         tmp_id = None
         
-        # --- ID 解析逻辑 ---
         if input_id:
             if len(input_id) == 17 and input_id.startswith('7'):
                 try:
@@ -1775,7 +1822,8 @@ class TmpBotPlugin(Star):
             else:
                 tmp_id = input_id
         else:
-            tmp_id = self._get_bound_tmp_id(user_id)
+            bind_user_id = target_user_id or user_id
+            tmp_id = self._get_bound_tmp_id(bind_user_id)
         
         if not tmp_id:
             yield event.plain_result("请输入正确的玩家编号 TMP ID")
@@ -2188,6 +2236,7 @@ class TmpBotPlugin(Star):
             if idx1 > 0 and idx2 > idx1:
                 name = raw_name[:idx1].strip()
                 place_type = raw_name[idx1 + 1:idx2].strip()
+            translated_name = self._translate_traffic_name(name)
             severity_key = str(t.get("newSeverity") or "").strip()
             severity_text = severity_map.get(severity_key) or severity_key or "未知"
             players = t.get("players")
@@ -2196,7 +2245,7 @@ class TmpBotPlugin(Star):
                 players_str = str(int(players))
             elif players is not None:
                 players_str = str(players)
-            line = f"{country} - {name}"
+            line = f"{country} - {translated_name}"
             if place_type:
                 line += f" ({type_map.get(place_type, place_type)})"
             line += f"\n路况: {severity_text}"
@@ -2294,8 +2343,35 @@ class TmpBotPlugin(Star):
         except Exception:
             yield event.plain_result("网络请求失败，请检查网络或稍后重试。")
 
+    async def tmpversion(self, event: AstrMessageEvent):
+        """[命令: 插件版本] 实时查询 TMP 联机插件版本信息。"""
+        if not self.session:
+            yield event.plain_result("插件初始化中，请稍后重试")
+            return
+
+        try:
+            url = "https://api.truckersmp.com/v2/version"
+            async with self.session.get(url, timeout=10) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    plugin_ver = data.get("name") or data.get("version") or "未知"
+                    ets2_ver = data.get("supported_game_version") or data.get("supported_ets2_version") or "未知"
+                    ats_ver = data.get("supported_ats_game_version") or data.get("supported_ats_version") or "未知"
+                    protocol = data.get("protocol") or "未知"
+
+                    message = "TMP 插件版本信息\n" + "=" * 18 + "\n"
+                    message += f"TMP 插件版本: {plugin_ver}\n"
+                    message += f"协议版本: {protocol}\n"
+                    message += f"欧卡支持版本: {ets2_ver}\n"
+                    message += f"美卡支持版本: {ats_ver}"
+                    yield event.plain_result(message)
+                else:
+                    yield event.plain_result(f"查询版本信息失败，API返回错误状态码: {response.status}")
+        except Exception:
+            yield event.plain_result("查询版本信息失败，请稍后重试。")
+
     async def tmphelp(self, event: AstrMessageEvent):
-        """[命令: 帮助] 显示本插件的命令使用说明。"""
+        """[命令: 菜单] 显示本插件的命令使用说明。"""
         help_text = """TMP查询插件使用说明
 
 可用命令:
@@ -2308,7 +2384,8 @@ class TmpBotPlugin(Star):
 7. 路况
 8. 解绑
 9. 服务器
-10. 菜单
+10. 插件版本
+11. 菜单
 使用提示: 绑定后可直接发送 查询/定位
 """
         yield event.plain_result(help_text)
