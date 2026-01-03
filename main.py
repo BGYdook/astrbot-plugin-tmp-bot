@@ -3,7 +3,7 @@
 
 """
 astrbot-plugin-tmp-bot
-欧卡2TMP查询插件 - AstrBot版本 (版本 1.6.5)
+欧卡2TMP查询插件 (版本 1.6.6)
 """
 
 import re
@@ -2361,7 +2361,6 @@ class TmpBotPlugin(Star):
 
                     message = "TMP 插件版本信息\n" + "=" * 18 + "\n"
                     message += f"TMP 插件版本: {plugin_ver}\n"
-                    message += f"协议版本: {protocol}\n"
                     message += f"欧卡支持版本: {ets2_ver}\n"
                     message += f"美卡支持版本: {ats_ver}"
                     yield event.plain_result(message)
