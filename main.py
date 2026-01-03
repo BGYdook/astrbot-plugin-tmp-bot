@@ -422,6 +422,7 @@ class TmpBotPlugin(Star):
         "greece": "希腊",
         "united states": "美国",
         "usa": "美国",
+        "iceland": "冰岛",
     }
 
     CITY_MAP_EN_TO_CN = {
@@ -445,6 +446,7 @@ class TmpBotPlugin(Star):
         "budapest": "布达佩斯",
         "warsaw": "华沙",
         "krakow": "克拉科夫",
+        "akureyri": "阿克雷里",
     }
 
     def _translate_country_city(self, country: Optional[str], city: Optional[str]) -> Tuple[str, str]:
@@ -1128,7 +1130,32 @@ class TmpBotPlugin(Star):
         if not msg:
             return
 
-        if re.match(r'^查询(\s*\d+)?\s*$', msg):
+        message_obj = getattr(event, "message_obj", None)
+        has_at = False
+        if message_obj is not None:
+            try:
+                chain = getattr(message_obj, "message", None) or []
+                for seg in chain:
+                    seg_type = getattr(seg, "type", None)
+                    if isinstance(seg, dict):
+                        seg_type = seg.get("type") or seg_type
+                    if isinstance(seg_type, str) and seg_type.lower() == "at":
+                        has_at = True
+                        break
+                    uid = (
+                        getattr(seg, "qq", None)
+                        or getattr(seg, "user_id", None)
+                        or getattr(seg, "id", None)
+                    )
+                    if isinstance(seg, dict):
+                        uid = seg.get("qq") or seg.get("user_id") or seg.get("id") or uid
+                    if uid is not None:
+                        has_at = True
+                        break
+            except Exception:
+                has_at = False
+
+        if re.match(r'^查询(\s*\d+)?\s*$', msg) or (msg.startswith("查询") and has_at):
             async for r in self.tmpquery(event):
                 yield r
             return
@@ -1188,9 +1215,25 @@ class TmpBotPlugin(Star):
             try:
                 chain = getattr(message_obj, "message", None) or []
                 for seg in chain:
-                    qq = getattr(seg, "qq", None)
-                    if qq:
-                        target_user_id = str(qq)
+                    seg_type = getattr(seg, "type", None)
+                    if isinstance(seg, dict):
+                        seg_type = seg.get("type") or seg_type
+                    if isinstance(seg_type, str) and seg_type.lower() == "at":
+                        uid = (
+                            getattr(seg, "qq", None)
+                            or getattr(seg, "user_id", None)
+                            or getattr(seg, "id", None)
+                        )
+                        if isinstance(seg, dict):
+                            uid = seg.get("qq") or seg.get("user_id") or seg.get("id") or uid
+                        if uid:
+                            target_user_id = str(uid)
+                            break
+                    uid2 = getattr(seg, "qq", None)
+                    if isinstance(seg, dict):
+                        uid2 = seg.get("qq") or uid2
+                    if uid2:
+                        target_user_id = str(uid2)
                         break
             except Exception:
                 target_user_id = None
