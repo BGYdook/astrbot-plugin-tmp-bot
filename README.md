@@ -1,5 +1,5 @@
  # astrbot-plugin-tmp-bot
-[![npm](https://img.shields.io/badge/npm-v1.6.6-blue)](https://github.com/BGYdook/astrbot-plugin-tmp-bot)
+[![npm](https://img.shields.io/badge/npm-v1.6.8-blue)](https://github.com/BGYdook/astrbot-plugin-tmp-bot)
 
 ![:astrbot_plugin_tmp_bot](https://count.getloli.com/@:astrbot_plugin_tmp-bot?theme=minecraft)
 
@@ -25,6 +25,12 @@ API 文档与数据来源：https://apifox.com/apidoc/shared/38508a88-5ff4-4b29-
 https://truckersmp.com/developers/api
 
 ## 非常感谢[晚安](https://github.com/nulijiazaizhong)提供的帮助
+
+## 版本v1.6.8
+- 修复定位地图在游戏更新后显示异常的问题
+- 更新ProMods地图瓦片源至156版本
+- 优化地图坐标转换逻辑
+- 清理冗余项目文件
 
 ## 版本v1.6.6
 - 添加查询时可以@别人查询

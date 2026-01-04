@@ -190,7 +190,7 @@ class ApiResponseException(TmpApiException):
     pass
 
 # 版本号更新为 1.3.59
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.6.0", "https://github.com/BGYdook/astrBot-plugin-tmp-bot")
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.6.8", "https://github.com/BGYdook/astrBot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context, config=None):  # 接收 context 和 config
         super().__init__(context)              # 将 context 传给父类
@@ -1907,18 +1907,40 @@ class TmpBotPlugin(Star):
   var mapType = promodsIds.indexOf(serverId) !== -1 ? 'promods' : 'ets';
   var cfg = {
     ets: {
-      tileUrl: 'https://ets-map.oss-cn-beijing.aliyuncs.com/ets2/05102019/{z}/{x}/{y}.png',
-      mul: { x: 71282, y: 56532 },
-      bounds: { x:131072, y:131072 },
+      tileUrl: 'https://ets2.online/map/ets2map_157/{z}/{x}/{y}.png',
+      bounds: { x:65536, y:65536 },
       maxZoom: 8, minZoom: 2,
-      calc: function(x,y){ return [ x/1.325928 + this.mul.x, y/1.325928 + this.mul.y ]; }
+      calc: function(xx, yy) {
+        var MAX_X = 65536;
+        var MAX_Y = 65536;
+        const x1 = -113177.313;
+        const x2 = 97925.625;
+        const y1 = -122648.086;
+        const y2 = 88454.85;
+        const xtot = x2 - x1;
+        const ytot = y2 - y1;
+        const xrel = (xx - x1) / xtot;
+        const yrel = (yy - y1) / ytot;
+        return [ xrel * MAX_X, yrel * MAX_Y ];
+      }
     },
     promods: {
-      tileUrl: 'https://ets-map.oss-cn-beijing.aliyuncs.com/promods/05102019/{z}/{x}/{y}.png',
-      mul: { x: 51953, y: 76024 },
-      bounds: { x:131072, y:131072 },
+      tileUrl: 'https://ets2.online/map/ets2mappromods_156/{z}/{x}/{y}.png',
+      bounds: { x:65536, y:65536 },
       maxZoom: 8, minZoom: 2,
-      calc: function(x,y){ return [ x/2.598541 + this.mul.x, y/2.598541 + this.mul.y ]; }
+      calc: function(xx, yy) {
+        var MAX_X = 65536;
+        var MAX_Y = 65536;
+        const x1 = -135110.156;
+        const x2 = 168923.75;
+        const y1 = -190095.016;
+        const y2 = 113938.891;
+        const xtot = x2 - x1;
+        const ytot = y2 - y1;
+        const xrel = (xx - x1) / xtot;
+        const yrel = (yy - y1) / ytot;
+        return [ xrel * MAX_X, yrel * MAX_Y ];
+      }
     }
   };
 
@@ -1928,7 +1950,7 @@ class TmpBotPlugin(Star):
     map.unproject([0, c.bounds.y], c.maxZoom),
     map.unproject([c.bounds.x, 0], c.maxZoom)
   );
-  L.tileLayer(c.tileUrl, { minZoom: c.minZoom, maxZoom: 10, maxNativeZoom: c.maxZoom, tileSize: 512, bounds: b, reuseTiles: true }).addTo(map);
+ L.tileLayer(c.tileUrl, { minZoom: c.minZoom, maxZoom: 10, maxNativeZoom: c.maxZoom, tileSize: 256, bounds: b, reuseTiles: true }).addTo(map);
   map.setMaxBounds(b);
   var centerX = {{ center_x }};
   var centerY = {{ center_y }};
