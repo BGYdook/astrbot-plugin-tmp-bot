@@ -26,6 +26,7 @@ https://truckersmp.com/developers/api
 
 ## 非常感谢[晚安](https://github.com/nulijiazaizhong)提供的帮助
 
+## 历史更新
 
 ## 版本v1.6.9
 - 修复历史里程/今日里程为O时不显示
@@ -34,6 +35,7 @@ https://truckersmp.com/developers/api
 - 调整了上次在线的顺序
 - 调整注册时间为UTC+8
 - 调整当检测到在线不显示上次在线
+- 调整当所属车队为无时不显示
 - 删除查询时显示的TMP玩家详细信息
 - 为位置翻译增加一层可配置修正表
 - 给astrbot的描述添加上了详细信息

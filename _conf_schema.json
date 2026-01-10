@@ -7,9 +7,9 @@
   },
   "baidu_translate_enable": {
     "type": "bool",
-    "default": false,
-    "title": "是否启用百度翻译",
-    "description": "启用后，插件将调用百度翻译进行文本翻译。"
+    "default": true,
+    "title": "启用百度翻译进行文本翻译",
+    "description": "开启后，将自动调用百度翻译对国家、城市、道路等位置信息进行中文翻译。"
   },
   "baidu_translate_app_id": {
     "type": "string",

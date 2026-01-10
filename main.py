@@ -3,7 +3,7 @@
 
 """
 astrbot-plugin-tmp-bot
-欧卡2TMP查询插件 (版本 1.6.6)
+欧卡2TMP查询插件 (版本 1.6.9)
 """
 
 import re
@@ -1514,7 +1514,8 @@ class TmpBotPlugin(Star):
         vtc = player_info.get('vtc') if isinstance(player_info.get('vtc'), dict) else {}
         vtc_name = vtc.get('name')
         vtc_role = vtc.get('role') or vtc.get('position') or stats_info.get('vtcRole')
-        body += f"🚚所属车队: {vtc_name if vtc_name else '无'}\n"
+        if vtc_name:
+            body += f"🚚所属车队: {vtc_name}\n"
         if not vtc_role and vtc_name:
             try:
                 vtc_role_remote = await self._get_vtc_member_role(tmp_id, vtc)
