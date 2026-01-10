@@ -125,6 +125,22 @@ def _format_timestamp_to_beijing(timestamp_str: Optional[str]) -> str:
         except Exception:
             return s
 
+def _cleanup_cn_location_text(text: str) -> str:
+    s = str(text or "").strip()
+    if not s:
+        return s
+    try:
+        s = _re_local.sub(r"^(n\.|v\.|adj\.|adv\.|vt\.|vi\.|prep\.|pron\.|conj\.|abbr\.)\s*", "", s, flags=_re_local.IGNORECASE)
+        s = _re_local.sub(r"（[^）]*）", "", s)
+        s = _re_local.sub(r"\([^)]*\)", "", s)
+        for sep in ["；", ";", "，"]:
+            if sep in s:
+                s = s.split(sep, 1)[0]
+        s = s.strip(" 、，。.；;")
+        return s or text
+    except Exception:
+        return text
+
 # --- 辅助函数：获取 DLC 列表 (优化后) ---
 def _get_dlc_info(player_info: Dict) -> Dict[str, List[str]]:
     """从玩家信息中提取并分组主要的地图 DLC 列表。"""
@@ -334,7 +350,8 @@ class TmpBotPlugin(Star):
                 if not items or not isinstance(items, list):
                     return content
                 first = items[0]
-                dst = first.get('v') or content if isinstance(first, dict) else content
+                raw_dst = first.get('v') or content if isinstance(first, dict) else content
+                dst = _cleanup_cn_location_text(raw_dst)
                 if use_cache and cache:
                     self._translate_cache[s] = dst
                 return dst
@@ -1283,6 +1300,7 @@ class TmpBotPlugin(Star):
 
     @filter.command("查询")
     async def cmd_tmp_query(self, event: AstrMessageEvent, tmp_id: str | None = None):
+        """查询玩家详细信息，支持绑定ID与@他人。"""
         orig = getattr(event, "message_str", "") or ""
         try:
             if tmp_id:
@@ -1299,6 +1317,7 @@ class TmpBotPlugin(Star):
 
     @filter.command("定位")
     async def cmd_tmp_locate(self, event: AstrMessageEvent, tmp_id: str | None = None):
+        """查询并渲染玩家当前位置（底图+自动翻译位置）。"""
         orig = getattr(event, "message_str", "") or ""
         try:
             if tmp_id:
@@ -1315,6 +1334,7 @@ class TmpBotPlugin(Star):
 
     @filter.command("路况")
     async def cmd_tmp_traffic(self, event: AstrMessageEvent, server: str | None = None):
+        """查询指定服务器热门路段的实时路况信息。"""
         orig = getattr(event, "message_str", "") or ""
         try:
             if server:
@@ -1331,26 +1351,31 @@ class TmpBotPlugin(Star):
 
     @filter.command("总里程排行")
     async def cmd_tmp_rank_total(self, event: AstrMessageEvent):
+        """查看玩家总里程排行榜前若干名。"""
         async for r in self.tmprank_total(event):
             yield r
 
     @filter.command("今日里程排行")
     async def cmd_tmp_rank_today(self, event: AstrMessageEvent):
+        """查看今日里程排行榜前若干名。"""
         async for r in self.tmprank_today(event):
             yield r
 
     @filter.command("服务器")
     async def cmd_tmp_server(self, event: AstrMessageEvent):
+        """查看欧卡/美卡官方服务器的实时状态列表。"""
         async for r in self.tmpserver(event):
             yield r
 
     @filter.command("插件版本")
     async def cmd_tmp_plugin_version(self, event: AstrMessageEvent):
+        """查询当前TMP插件版本信息。"""
         async for r in self.tmpversion(event):
             yield r
 
-    @filter.command("帮助")
+    @filter.command("菜单")
     async def cmd_tmp_help(self, event: AstrMessageEvent):
+        """显示本插件支持的指令与用法。"""
         async for r in self.tmphelp(event):
             yield r
 
@@ -1358,7 +1383,7 @@ class TmpBotPlugin(Star):
     # 具体功能实现
 
     async def tmpquery(self, event: AstrMessageEvent):
-        """[命令: 查询] TMP玩家完整信息查询。支持输入 TMP ID 或 Steam ID。"""
+        """[命令: 查询] 玩家完整信息查询。支持输入 TMP ID 或 Steam ID。"""
         message_str = event.message_str.strip()
         user_id = event.get_sender_id()
 
@@ -1643,7 +1668,7 @@ class TmpBotPlugin(Star):
 
             body += f"📶在线状态: 在线\n"
             body += f"📶所在服务器: {server_name}\n"
-            body += f"📶所在位置: {city} ({game_mode})\n"
+            body += f"📶所在位置: {city}\n"
         else:
             body += f"📶在线状态: 离线\n"
             body += f"📶上次在线: {last_online_formatted}\n"
