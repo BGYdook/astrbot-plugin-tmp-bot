@@ -14,6 +14,8 @@ import os
 import re as _re_local
 import base64
 import socket
+import hashlib
+import random
 from typing import Optional, List, Dict, Tuple, Any
 from datetime import datetime, timedelta
 
@@ -199,6 +201,7 @@ class TmpBotPlugin(Star):
         self.session = None
         self._ready = False
         self.config = config or {}
+        self._translate_cache: Dict[str, str] = {}
         try:
             bind_path = self.config.get('bind_file')
             if not bind_path:
@@ -231,6 +234,12 @@ class TmpBotPlugin(Star):
             return int(v)
         except Exception:
             return default
+
+    def _cfg_str(self, key: str, default: str) -> str:
+        v = self.config.get(key, default)
+        if v is None:
+            return default
+        return str(v)
 
     async def initialize(self):
         # 统一 User-Agent，并更新版本号
@@ -296,6 +305,41 @@ class TmpBotPlugin(Star):
         except Exception as e:
             logger.error(f"头像下载异常: url={url} err={e}", exc_info=False)
             return None
+
+    async def _translate_text(self, content: str, cache: bool = True) -> str:
+        s = (content or "").strip()
+        if not s:
+            return content
+        if not self._cfg_bool('baidu_translate_enable', False):
+            return content
+        if not self.session:
+            return content
+        use_cache = self._cfg_bool('baidu_translate_cache_enable', False)
+        if use_cache and cache:
+            cached = self._translate_cache.get(s)
+            if cached:
+                return cached
+        try:
+            timeout_sec = self._cfg_int('api_timeout_seconds', 10)
+            url = 'https://fanyi.baidu.com/sug'
+            data = {'kw': s}
+            headers = {'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'}
+            async with self.session.post(url, data=data, headers=headers, timeout=timeout_sec) as resp:
+                if resp.status != 200:
+                    return content
+                j = await resp.json()
+                if not isinstance(j, dict):
+                    return content
+                items = j.get('data')
+                if not items or not isinstance(items, list):
+                    return content
+                first = items[0]
+                dst = first.get('v') or content if isinstance(first, dict) else content
+                if use_cache and cache:
+                    self._translate_cache[s] = dst
+                return dst
+        except Exception:
+            return content
 
     async def _get_avatar_bytes_with_fallback(self, url: str, tmp_id: Optional[str]) -> Optional[bytes]:
         """尝试多种 TruckersMP 头像URL变体，尽可能获取头像字节。"""
@@ -449,29 +493,43 @@ class TmpBotPlugin(Star):
         "akureyri": "阿克雷里",
     }
 
-    def _translate_country_city(self, country: Optional[str], city: Optional[str]) -> Tuple[str, str]:
+    LOCATION_FIX_MAP = {}
+
+    async def _translate_country_city(self, country: Optional[str], city: Optional[str]) -> Tuple[str, str]:
         country_en = (country or "").strip()
         city_en = (city or "").strip()
         country_key = country_en.lower()
         city_key = city_en.lower()
-        country_cn = self.COUNTRY_MAP_EN_TO_CN.get(country_key, country_en)
-        city_cn = self.CITY_MAP_EN_TO_CN.get(city_key, city_en)
-        return country_cn, city_cn
+        country_cn = self.COUNTRY_MAP_EN_TO_CN.get(country_key)
+        city_cn = self.CITY_MAP_EN_TO_CN.get(city_key)
+        if country_en:
+            translated_country = await self._translate_text(country_en, cache=True)
+            if translated_country:
+                country_cn = translated_country
+        if city_en:
+            translated_city = await self._translate_text(city_en, cache=True)
+            if translated_city:
+                city_cn = translated_city
+        fix_country = self.LOCATION_FIX_MAP.get(country_key)
+        fix_city = self.LOCATION_FIX_MAP.get(city_key)
+        if fix_country:
+            country_cn = fix_country
+        if fix_city:
+            city_cn = fix_city
+        return country_cn or country_en, city_cn or city_en
 
-    def _translate_traffic_name(self, name: Optional[str]) -> str:
+    async def _translate_traffic_name(self, name: Optional[str]) -> str:
         s = (name or "").strip()
         if not s:
             return s
-        normalized = s.replace("—", "-")
-        parts = [p.strip() for p in normalized.split("-")]
-        if len(parts) <= 1:
-            key = s.lower()
-            return self.CITY_MAP_EN_TO_CN.get(key, s)
-        translated_parts = []
-        for p in parts:
-            key = p.lower()
-            translated_parts.append(self.CITY_MAP_EN_TO_CN.get(key, p))
-        return " - ".join(translated_parts)
+        key = s.lower()
+        fix = self.LOCATION_FIX_MAP.get(key)
+        if fix:
+            return fix
+        translated = await self._translate_text(s, cache=True)
+        if translated:
+            return translated
+        return s
 
     # --- API请求方法 ---
 
@@ -710,7 +768,7 @@ class TmpBotPlugin(Star):
                         if not real_name:
                             real_name = location_data.get('realName')
 
-                        country_cn, city_cn = self._translate_country_city(country, real_name)
+                        country_cn, city_cn = await self._translate_country_city(country, real_name)
 
                         formatted_location = '未知位置'
                         if country_cn and city_cn:
@@ -1221,6 +1279,82 @@ class TmpBotPlugin(Star):
 
     
     
+    # 额外 AstrBot 正式指令包装（用于行为统计，保留无前缀用法）
+
+    @filter.command("查询")
+    async def cmd_tmp_query(self, event: AstrMessageEvent, tmp_id: str | None = None):
+        orig = getattr(event, "message_str", "") or ""
+        try:
+            if tmp_id:
+                event.message_str = f"查询 {tmp_id}"
+            else:
+                event.message_str = "查询"
+            async for r in self.tmpquery(event):
+                yield r
+        finally:
+            try:
+                event.message_str = orig
+            except Exception:
+                pass
+
+    @filter.command("定位")
+    async def cmd_tmp_locate(self, event: AstrMessageEvent, tmp_id: str | None = None):
+        orig = getattr(event, "message_str", "") or ""
+        try:
+            if tmp_id:
+                event.message_str = f"定位 {tmp_id}"
+            else:
+                event.message_str = "定位"
+            async for r in self.tmplocate(event):
+                yield r
+        finally:
+            try:
+                event.message_str = orig
+            except Exception:
+                pass
+
+    @filter.command("路况")
+    async def cmd_tmp_traffic(self, event: AstrMessageEvent, server: str | None = None):
+        orig = getattr(event, "message_str", "") or ""
+        try:
+            if server:
+                event.message_str = f"路况 {server}"
+            else:
+                event.message_str = "路况"
+            async for r in self.tmptraffic(event):
+                yield r
+        finally:
+            try:
+                event.message_str = orig
+            except Exception:
+                pass
+
+    @filter.command("总里程排行")
+    async def cmd_tmp_rank_total(self, event: AstrMessageEvent):
+        async for r in self.tmprank_total(event):
+            yield r
+
+    @filter.command("今日里程排行")
+    async def cmd_tmp_rank_today(self, event: AstrMessageEvent):
+        async for r in self.tmprank_today(event):
+            yield r
+
+    @filter.command("服务器")
+    async def cmd_tmp_server(self, event: AstrMessageEvent):
+        async for r in self.tmpserver(event):
+            yield r
+
+    @filter.command("插件版本")
+    async def cmd_tmp_plugin_version(self, event: AstrMessageEvent):
+        async for r in self.tmpversion(event):
+            yield r
+
+    @filter.command("帮助")
+    async def cmd_tmp_help(self, event: AstrMessageEvent):
+        async for r in self.tmphelp(event):
+            yield r
+
+
     # 具体功能实现
 
     async def tmpquery(self, event: AstrMessageEvent):
@@ -1323,8 +1457,7 @@ class TmpBotPlugin(Star):
         # 将“上次在线”统一显示为北京时间 (UTC+8)
         last_online_formatted = _format_timestamp_to_readable(last_online_raw)
         
-        # 完整的回复消息构建：标题与正文分离，便于控制发送顺序
-        header = "TMP玩家详细信息\r\n" + "=" * 20 + "\r\n"
+        # 完整的回复消息正文构建
         body = ""
         body += f"🆔 TMP ID: {tmp_id}\n"
         if steam_id_to_display:
@@ -1337,9 +1470,8 @@ class TmpBotPlugin(Star):
             or player_info.get('registrationDate')
             or None
         )
-        join_date_formatted = _format_timestamp_to_readable(join_date_raw) if join_date_raw else '未知'
+        join_date_formatted = _format_timestamp_to_beijing(join_date_raw) if join_date_raw else '未知'
         body += f"📑注册日期: {join_date_formatted}\n"
-        body += f"📶上次在线: {last_online_formatted}\n"
 
         # 权限/分组信息
         perms_str = "玩家"
@@ -1451,9 +1583,20 @@ class TmpBotPlugin(Star):
         total_rank = stats_info.get('total_rank')
         daily_rank = stats_info.get('daily_rank')
         logger.info(f"查询详情: 里程输出值 total_km={total_km:.2f}, daily_km={daily_km:.2f}, total_rank={total_rank}, daily_rank={daily_rank}")
-        
-        body += f"🚩历史里程: {total_km:.2f}公里/km\n"
-        body += f"🚩今日里程: {daily_km:.2f}公里/km\n"
+
+        try:
+            total_val = float(total_km)
+        except Exception:
+            total_val = 0.0
+        try:
+            daily_val = float(daily_km)
+        except Exception:
+            daily_val = 0.0
+
+        if total_val > 0:
+            body += f"🚩历史里程: {total_val:.2f}公里/km\n"
+        if daily_val > 0:
+            body += f"🚩今日里程: {daily_val:.2f}公里/km\n"
         if total_rank:
             body += f"🏆总里程排行: 第{total_rank}名\n"
         if daily_rank:
@@ -1497,12 +1640,13 @@ class TmpBotPlugin(Star):
             game_mode_code = online_status.get('game', 0)
             game_mode = "欧卡2" if game_mode_code == 1 else "美卡" if game_mode_code == 2 else "未知游戏"
             city = online_status.get('city', {}).get('name', '未知位置') 
-            
+
             body += f"📶在线状态: 在线\n"
             body += f"📶所在服务器: {server_name}\n"
             body += f"📶所在位置: {city} ({game_mode})\n"
         else:
             body += f"📶在线状态: 离线\n"
+            body += f"📶上次在线: {last_online_formatted}\n"
         
         # 头像（强制按组件发送）
         show_avatar_cfg = self._cfg_bool('query_show_avatar_enable', True)
@@ -1512,13 +1656,12 @@ class TmpBotPlugin(Star):
         components = []
         # 发送顺序控制：当头像关闭时，将标题与正文合并为一个文本组件以保证换行在同一组件内生效
         if not show_avatar_cfg:
-            logger.info("查询详情: 头像开关为OFF，合并标题与正文为单个文本组件")
-            components.append(Plain(header + "\r\n" + body))
+            logger.info("查询详情: 头像开关为OFF，直接发送正文文本组件")
+            components.append(Plain(body))
             yield event.chain_result(components)
             return
         else:
-            # 头像开启：标题 -> 头像 -> 空行 -> 正文
-            components.append(Plain(header))
+            # 头像开启：头像 -> 空行 -> 正文
             if avatar_url:
                 try:
                     logger.info("查询详情: 组合消息链添加 Image(URL) 组件")
@@ -2248,7 +2391,7 @@ class TmpBotPlugin(Star):
         lines: List[str] = []
         for t in items:
             country_raw = str(t.get("country") or "").strip()
-            country_cn, _ = self._translate_country_city(country_raw, None)
+            country_cn, _ = await self._translate_country_city(country_raw, None)
             country = country_cn or "未知区域"
             raw_name = str(t.get("name") or "").strip()
             name = raw_name
@@ -2258,7 +2401,7 @@ class TmpBotPlugin(Star):
             if idx1 > 0 and idx2 > idx1:
                 name = raw_name[:idx1].strip()
                 place_type = raw_name[idx1 + 1:idx2].strip()
-            translated_name = self._translate_traffic_name(name)
+            translated_name = await self._translate_traffic_name(name)
             severity_key = str(t.get("newSeverity") or "").strip()
             severity_text = severity_map.get(severity_key) or severity_key or "未知"
             players = t.get("players")
@@ -2399,7 +2542,7 @@ class TmpBotPlugin(Star):
 1. 绑定 [ID]
 2. 查询 [ID]
 3. 定位 [ID]
-4. DLC列表
+4. 地图DLC
 5. 总里程排行
 6. 今日里程排行
 7. 路况
