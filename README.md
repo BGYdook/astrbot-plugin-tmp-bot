@@ -1,5 +1,5 @@
  # astrbot-plugin-tmp-bot
-[![npm](https://img.shields.io/badge/npm-v1.6.8-blue)](https://github.com/BGYdook/astrbot-plugin-tmp-bot)
+[![npm](https://img.shields.io/badge/npm-v1.6.9-blue)](https://github.com/BGYdook/astrbot-plugin-tmp-bot)
 
 ![:astrbot_plugin_tmp_bot](https://count.getloli.com/@:astrbot_plugin_tmp-bot?theme=minecraft)
 
@@ -25,6 +25,18 @@ API 文档与数据来源：https://apifox.com/apidoc/shared/38508a88-5ff4-4b29-
 https://truckersmp.com/developers/api
 
 ## 非常感谢[晚安](https://github.com/nulijiazaizhong)提供的帮助
+
+
+## 版本v1.6.9
+- 修复历史里程/今日里程为O时不显示
+- 修复astrbot里行为为1的问题
+- 添加对城市和其他的翻译
+- 调整了上次在线的顺序
+- 调整注册时间为UTC+8
+- 调整当检测到在线不显示上次在线
+- 删除查询时显示的TMP玩家详细信息
+- 为位置翻译增加一层可配置修正表
+- 给astrbot的描述添加上了详细信息
 
 ## 版本v1.6.8
 - 修复定位地图在游戏更新后显示异常的问题
