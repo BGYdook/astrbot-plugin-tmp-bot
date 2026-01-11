@@ -141,48 +141,6 @@ def _cleanup_cn_location_text(text: str) -> str:
     except Exception:
         return text
 
-# --- 辅助函数：获取 DLC 列表 (优化后) ---
-def _get_dlc_info(player_info: Dict) -> Dict[str, List[str]]:
-    """从玩家信息中提取并分组主要的地图 DLC 列表。"""
-    dlc_list = player_info.get('dlc', [])
-    
-    ets2_dlc: List[str] = []
-    ats_dlc: List[str] = []
-
-    ETS2_MAP_PREFIX = "Euro Truck Simulator 2 - "
-    ATS_MAP_PREFIX = "American Truck Simulator - "
-    
-    MAP_KEYWORDS = [
-        "Going East!", "Scandinavia", "Vive la France !", "Italia", "Beyond the Baltic Sea", 
-        "Road to the Black Sea", "Iberia", "West Balkans", "Heart of Russia", 
-        "New Mexico", "Oregon", "Washington", "Utah", "Idaho", "Colorado", 
-        "Wyoming", "Montana", "Texas", "Oklahoma", "Kansas", "Nebraska"
-    ]
-
-    if isinstance(dlc_list, list):
-        for dlc in dlc_list:
-            dlc_name_full = dlc.get('name', '').strip()
-            
-            # 1. ETS2 DLC
-            if dlc_name_full.startswith(ETS2_MAP_PREFIX):
-                name = dlc_name_full[len(ETS2_MAP_PREFIX):].strip()
-                if name in MAP_KEYWORDS:
-                    ets2_dlc.append(name)
-                elif "Germany Rework" in name:
-                    ets2_dlc.append("Germany Rework")
-                        
-            # 2. ATS DLC
-            elif dlc_name_full.startswith(ATS_MAP_PREFIX):
-                name = dlc_name_full[len(ATS_MAP_PREFIX):].strip()
-                if name not in ["Arizona", "Nevada"] and name in MAP_KEYWORDS: 
-                    ats_dlc.append(name)
-                elif name in ["Arizona", "Nevada"]: 
-                    ats_dlc.append(f"{name} (基础地图)")
-
-    return {
-        'ets2': sorted(list(set(ets2_dlc))), 
-        'ats': sorted(list(set(ats_dlc)))
-    }
 # -----------------------------
 
 
@@ -510,7 +468,9 @@ class TmpBotPlugin(Star):
         "akureyri": "阿克雷里",
     }
 
-    LOCATION_FIX_MAP = {}
+    LOCATION_FIX_MAP = {
+        "kirkenes": "希尔克内斯",
+    }
 
     async def _translate_country_city(self, country: Optional[str], city: Optional[str]) -> Tuple[str, str]:
         country_en = (country or "").strip()
@@ -1245,16 +1205,12 @@ class TmpBotPlugin(Star):
             except Exception:
                 has_at = False
 
-        if re.match(r'^查询(\s*\d+)?\s*$', msg) or (msg.startswith("查询") and has_at):
+        if re.match(r'^(查询|查)(\s*\d+)?\s*$', msg) or (re.match(r'^(查询|查)(\s|$)', msg) and has_at):
             async for r in self.tmpquery(event):
                 yield r
             return
-        if msg == "DLC列表" or msg == "地图DLC":
+        if msg == "地图dlc" or msg == "地图DLC":
             async for r in self.tmpdlc_list(event):
-                yield r
-            return
-        if re.match(r'^DLC(\s*\d+)?\s*$', msg):
-            async for r in self.tmpdlc(event):
                 yield r
             return
         if re.match(r'^绑定\s*\d+\s*$', msg):
@@ -1301,6 +1257,22 @@ class TmpBotPlugin(Star):
     @filter.command("查询")
     async def cmd_tmp_query(self, event: AstrMessageEvent, tmp_id: str | None = None):
         """查询玩家详细信息，支持绑定ID与@他人。"""
+        orig = getattr(event, "message_str", "") or ""
+        try:
+            if tmp_id:
+                event.message_str = f"查询 {tmp_id}"
+            else:
+                event.message_str = "查询"
+            async for r in self.tmpquery(event):
+                yield r
+        finally:
+            try:
+                event.message_str = orig
+            except Exception:
+                pass
+
+    @filter.command("查")
+    async def cmd_tmp_query_alias(self, event: AstrMessageEvent, tmp_id: str | None = None):
         orig = getattr(event, "message_str", "") or ""
         try:
             if tmp_id:
@@ -1594,11 +1566,9 @@ class TmpBotPlugin(Star):
         current_pledge = (_to_int(current_pledge_raw) // 100) if is_patron else 0
         lifetime_pledge = (_to_int(lifetime_pledge_raw) // 100) if is_patron else 0
 
-        if is_patron:
+        if is_patron and lifetime_pledge > 0:
             if current_pledge > 0:
                 body += f"🎁当前赞助金额: {current_pledge}美元\n"
-            else:
-                body += f"🎁当前赞助金额: 0美元\n"
             body += f"🎁历史赞助金额: {lifetime_pledge}美元\n"
         # --- 赞助信息结束 ---
 
@@ -1623,10 +1593,6 @@ class TmpBotPlugin(Star):
             body += f"🚩历史里程: {total_val:.2f}公里/km\n"
         if daily_val > 0:
             body += f"🚩今日里程: {daily_val:.2f}公里/km\n"
-        if total_rank:
-            body += f"🏆总里程排行: 第{total_rank}名\n"
-        if daily_rank:
-            body += f"🏁今日里程排行: 第{daily_rank}名\n"
         
         # --- 封禁信息 (不变) ---
         body += f"🚫是否封禁: {'是' if is_banned else '否'}\n"
@@ -1666,6 +1632,7 @@ class TmpBotPlugin(Star):
             game_mode_code = online_status.get('game', 0)
             game_mode = "欧卡2" if game_mode_code == 1 else "美卡" if game_mode_code == 2 else "未知游戏"
             city = online_status.get('city', {}).get('name', '未知位置') 
+            city = await self._translate_text(city, cache=True)
 
             body += f"📶在线状态: 在线\n"
             body += f"📶所在服务器: {server_name}\n"
@@ -1701,73 +1668,6 @@ class TmpBotPlugin(Star):
             components.append(Plain(body))
             yield event.chain_result(components)
     
-    async def tmpdlc(self, event: AstrMessageEvent):
-        """[命令: DLC] 查询玩家拥有的地图 DLC 列表。支持输入 TMP ID。"""
-        message_str = event.message_str.strip()
-        user_id = event.get_sender_id()
-        
-        match = re.search(r'DLC\s*(\d+)', message_str) 
-        input_id = match.group(1) if match else None
-        
-        tmp_id = None
-        
-        if input_id:
-            if len(input_id) == 17 and input_id.startswith('7'):
-                try:
-                    tmp_id = await self._get_tmp_id_from_steam_id(input_id)
-                except SteamIdNotFoundException as e:
-                    yield event.plain_result(str(e))
-                    return
-                except NetworkException as e:
-                    yield event.plain_result(f"查询失败: {str(e)}")
-                    return
-            else:
-                tmp_id = input_id
-        else:
-            tmp_id = self._get_bound_tmp_id(user_id)
-        
-        if not tmp_id:
-            yield event.plain_result("请输入正确的玩家编号TMP ID")
-            return
-
-        try:
-            player_info = await self._get_player_info(tmp_id)
-        except PlayerNotFoundException as e:
-            yield event.plain_result(str(e))
-            return
-        except Exception as e:
-            yield event.plain_result(f"查询失败: {str(e)}")
-            return
-            
-        player_name = player_info.get('name', '未知')
-        dlc_data = _get_dlc_info(player_info)
-        
-        message = f"📦 玩家 {player_name} (ID: {tmp_id}) 的主要地图 DLC 列表\n"
-        message += "=" * 30 + "\n"
-        
-        ets2_dlc = dlc_data.get('ets2', [])
-        ats_dlc = dlc_data.get('ats', [])
-
-        message += f"🚛 Euro Truck Simulator 2 (数量: {len(ets2_dlc)}):\n"
-        if ets2_dlc:
-            chunks = [ets2_dlc[i:i + 3] for i in range(0, len(ets2_dlc), 3)]
-            for chunk in chunks:
-                message += "  " + " | ".join(chunk) + "\n"
-        else:
-            message += "  无 ETS2 地图 DLC 记录\n"
-            
-        message += f"\n🇺🇸 American Truck Simulator (数量: {len(ats_dlc)}):\n"
-        if ats_dlc:
-            chunks = [ats_dlc[i:i + 3] for i in range(0, len(ats_dlc), 3)]
-            for chunk in chunks:
-                message += "  " + " | ".join(chunk) + "\n"
-        else:
-            message += "  无 ATS 地图 DLC 记录\n"
-
-        message += "\n(此列表仅展示主要地图扩展包)"
-
-        yield event.plain_result(message)
-
     async def tmpdlc_list(self, event: AstrMessageEvent):
         logger.info("DLC列表: 开始处理命令")
         try:
@@ -2430,6 +2330,10 @@ class TmpBotPlugin(Star):
             translated_name = await self._translate_traffic_name(name)
             severity_key = str(t.get("newSeverity") or "").strip()
             severity_text = severity_map.get(severity_key) or severity_key or "未知"
+            if severity_text and severity_text == severity_key:
+                translated_severity = await self._translate_text(severity_text, cache=True)
+                if translated_severity:
+                    severity_text = translated_severity
             players = t.get("players")
             players_str = ""
             if isinstance(players, (int, float)):
@@ -2438,7 +2342,12 @@ class TmpBotPlugin(Star):
                 players_str = str(players)
             line = f"{country} - {translated_name}"
             if place_type:
-                line += f" ({type_map.get(place_type, place_type)})"
+                type_text = type_map.get(place_type, place_type)
+                if type_text and type_text == place_type:
+                    translated_type = await self._translate_text(type_text, cache=True)
+                    if translated_type:
+                        type_text = translated_type
+                line += f" ({type_text})"
             line += f"\n路况: {severity_text}"
             if players_str:
                 line += f" | 人数: {players_str}"
