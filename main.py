@@ -16,6 +16,7 @@ import base64
 import socket
 import hashlib
 import random
+import time
 from typing import Optional, List, Dict, Tuple, Any
 from datetime import datetime, timedelta
 
@@ -176,6 +177,8 @@ class TmpBotPlugin(Star):
         self._ready = False
         self.config = config or {}
         self._translate_cache: Dict[str, str] = {}
+        self._ets2_cities_cache: Optional[List[Dict[str, Any]]] = None
+        self._ets2_cities_cache_ts: float = 0.0
         try:
             bind_path = self.config.get('bind_file')
             if not bind_path:
@@ -470,6 +473,16 @@ class TmpBotPlugin(Star):
 
     LOCATION_FIX_MAP = {
         "kirkenes": "希尔克内斯",
+        "c-d road": "C-D路",
+        "calais-duisburg road": "C-D路",
+        "dortmund": "多特蒙德",
+        "hannover": "汉诺威",
+        "hamburg": "汉堡",
+        "strasbourg": "斯特拉斯堡",
+        "dijon": "第戎",
+        "reims": "兰斯",
+        "zürich": "苏黎世",
+        "zurich": "苏黎世",
     }
 
     async def _translate_country_city(self, country: Optional[str], city: Optional[str]) -> Tuple[str, str]:
@@ -479,11 +492,11 @@ class TmpBotPlugin(Star):
         city_key = city_en.lower()
         country_cn = self.COUNTRY_MAP_EN_TO_CN.get(country_key)
         city_cn = self.CITY_MAP_EN_TO_CN.get(city_key)
-        if country_en:
+        if country_en and not country_cn:
             translated_country = await self._translate_text(country_en, cache=True)
             if translated_country:
                 country_cn = translated_country
-        if city_en:
+        if city_en and not city_cn:
             translated_city = await self._translate_text(city_en, cache=True)
             if translated_city:
                 city_cn = translated_city
@@ -500,9 +513,18 @@ class TmpBotPlugin(Star):
         if not s:
             return s
         key = s.lower()
+        
+        # 1. 查修正表
         fix = self.LOCATION_FIX_MAP.get(key)
         if fix:
             return fix
+            
+        # 2. 查城市表 (路况里的 name 经常是城市名)
+        city_fix = self.CITY_MAP_EN_TO_CN.get(key)
+        if city_fix:
+            return city_fix
+            
+        # 3. 百度翻译
         translated = await self._translate_text(s, cache=True)
         if translated:
             return translated
@@ -1209,6 +1231,10 @@ class TmpBotPlugin(Star):
             async for r in self.tmpquery(event):
                 yield r
             return
+        if re.match(r'^欧卡地点(\s*\d+)?\s*$', msg):
+            async for r in self.tmpets2_locations(event):
+                yield r
+            return
         if msg == "地图dlc" or msg == "地图DLC":
             async for r in self.tmpdlc_list(event):
                 yield r
@@ -1280,6 +1306,22 @@ class TmpBotPlugin(Star):
             else:
                 event.message_str = "查询"
             async for r in self.tmpquery(event):
+                yield r
+        finally:
+            try:
+                event.message_str = orig
+            except Exception:
+                pass
+
+    @filter.command("欧卡地点")
+    async def cmd_tmp_ets2_locations(self, event: AstrMessageEvent, page: str | None = None):
+        orig = getattr(event, "message_str", "") or ""
+        try:
+            if page:
+                event.message_str = f"欧卡地点 {page}"
+            else:
+                event.message_str = "欧卡地点"
+            async for r in self.tmpets2_locations(event):
                 yield r
         finally:
             try:
@@ -1631,12 +1673,22 @@ class TmpBotPlugin(Star):
             server_name = online_status.get('serverName', '未知服务器')
             game_mode_code = online_status.get('game', 0)
             game_mode = "欧卡2" if game_mode_code == 1 else "美卡" if game_mode_code == 2 else "未知游戏"
-            city = online_status.get('city', {}).get('name', '未知位置') 
-            city = await self._translate_text(city, cache=True)
+            
+            raw_city = online_status.get('city', {}).get('name', '未知位置')
+            raw_country = online_status.get('country', '')
+            
+            # 使用更准确的翻译函数
+            country_cn, city_cn = await self._translate_country_city(raw_country, raw_city)
+            
+            location_display = city_cn
+            if country_cn and country_cn != city_cn:
+                 location_display = f"{country_cn} - {city_cn}"
+            elif not location_display:
+                 location_display = raw_city
 
             body += f"📶在线状态: 在线\n"
             body += f"📶所在服务器: {server_name}\n"
-            body += f"📶所在位置: {city}\n"
+            body += f"📶所在位置: {location_display}\n"
         else:
             body += f"📶在线状态: 离线\n"
             body += f"📶上次在线: {last_online_formatted}\n"
@@ -1667,6 +1719,112 @@ class TmpBotPlugin(Star):
             components.append(Plain("\r\n"))
             components.append(Plain(body))
             yield event.chain_result(components)
+            return
+
+    async def _get_ets2_cities(self) -> List[Dict[str, Any]]:
+        now = time.monotonic()
+        ttl_sec = 10 * 60
+        cached = self._ets2_cities_cache
+        if cached and (now - (self._ets2_cities_cache_ts or 0.0)) < ttl_sec:
+            return cached
+        if not self.session:
+            return []
+        url = "https://api.truckyapp.com/v3/map/cities?game=ets2"
+        try:
+            timeout_sec = self._cfg_int('api_timeout_seconds', 10)
+            async with self.session.get(url, timeout=timeout_sec) as resp:
+                if resp.status != 200:
+                    return []
+                j = await resp.json()
+                items = j.get('response') if isinstance(j, dict) else None
+                if not isinstance(items, list):
+                    return []
+                self._ets2_cities_cache = items
+                self._ets2_cities_cache_ts = now
+                return items
+        except Exception:
+            return []
+
+    async def tmpets2_locations(self, event: AstrMessageEvent):
+        message_str = (getattr(event, "message_str", "") or "").strip()
+        m = re.match(r'^欧卡地点\s*(\d+)?\s*$', message_str)
+        page = 1
+        if m and m.group(1):
+            try:
+                page = int(m.group(1))
+            except Exception:
+                page = 1
+        if page <= 0:
+            page = 1
+
+        if not self.session:
+            yield event.plain_result("插件初始化中，请稍后重试")
+            return
+
+        items = await self._get_ets2_cities()
+        if not items:
+            yield event.plain_result("当前无法获取欧卡2地点数据")
+            return
+
+        rows: List[Tuple[str, str]] = []
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            city_en = str(it.get('realName') or '').strip()
+            country_obj = it.get('country') if isinstance(it.get('country'), dict) else {}
+            country_en = str(country_obj.get('realName') or '').strip()
+            dlc_obj = it.get('dlc') if isinstance(it.get('dlc'), dict) else {}
+            dlc_name = str(dlc_obj.get('name') or '').strip()
+
+            if not city_en:
+                continue
+
+            country_key = country_en.lower()
+            city_key = city_en.lower()
+
+            country_cn = (
+                self.LOCATION_FIX_MAP.get(country_key)
+                or self.COUNTRY_MAP_EN_TO_CN.get(country_key)
+                or country_en
+            )
+            city_cn = (
+                self.LOCATION_FIX_MAP.get(city_key)
+                or self.CITY_MAP_EN_TO_CN.get(city_key)
+                or city_en
+            )
+
+            display = f"{country_cn} - {city_cn}" if country_cn else city_cn
+            if dlc_name:
+                display = f"{display} ({dlc_name})"
+
+            sort_key = f"{country_cn}\u0000{city_cn}\u0000{dlc_name}".lower()
+            rows.append((sort_key, display))
+
+        rows.sort(key=lambda x: x[0])
+
+        per_page = 30
+        total = len(rows)
+        total_pages = (total + per_page - 1) // per_page
+        if total_pages <= 0:
+            total_pages = 1
+        if page > total_pages:
+            page = total_pages
+
+        start = (page - 1) * per_page
+        end = start + per_page
+        sliced = rows[start:end]
+
+        lines: List[str] = []
+        for i, (_, display) in enumerate(sliced, start=start + 1):
+            lines.append(f"{i}. {display}")
+
+        text = (
+            f"🗺️ 欧卡2地点列表（ETS2）\n"
+            f"共{total}个 | 第{page}/{total_pages}页 | 每页{per_page}\n"
+            f"用法：欧卡地点 2\n"
+            + "\n".join(lines)
+        )
+        yield event.plain_result(text)
     
     async def tmpdlc_list(self, event: AstrMessageEvent):
         logger.info("DLC列表: 开始处理命令")
@@ -1917,6 +2075,24 @@ class TmpBotPlugin(Star):
         # 3) 构造 HTML 渲染数据（玩家 + 位置，周边玩家留作后续扩展）
         server_name = online.get('serverName', '未知服务器')
         location_name = online.get('city', {}).get('name') or '未知位置'
+        
+        # 增加翻译逻辑
+        raw_country = online.get('country')
+        raw_city = online.get('realName')
+        
+        # 如果 raw_country/raw_city 为空，尝试从 location_name 解析
+        if not raw_country and ' ' in location_name:
+             parts = location_name.split(' ', 1)
+             if len(parts) == 2:
+                 # 假设格式为 "Country City"
+                 pass 
+
+        country_cn, city_cn = await self._translate_country_city(raw_country, location_name)
+        
+        # 修正显示名称
+        display_country = country_cn or raw_country or '未知国家'
+        display_city = city_cn or location_name
+        
         player_name = player_info.get('name') or '未知'
 
         avatar_url = self._normalize_avatar_url(player_info.get('avatar'))
@@ -2039,7 +2215,7 @@ class TmpBotPlugin(Star):
             min_y, max_y = by, ay  # 注意坐标系方向
             map_data = {
                 'server_name': server_name,
-                'location_name': location_name,
+                'location_name': f"{display_country} - {display_city}",
                 'player_name': player_name,
                 'me_id': str(tmp_id),
                 'players': area_players,
@@ -2048,8 +2224,8 @@ class TmpBotPlugin(Star):
                 'min_y': min_y,
                 'max_y': max_y,
                 'avatar': avatar_url or '',
-                'country': (online.get('country') or (location_name.split(' ')[0] if ' ' in location_name else '')),
-                'city': (online.get('realName') or (location_name.split(' ')[1] if ' ' in location_name else location_name)),
+                'country': display_country,
+                'city': display_city,
                 'server_id': int(online.get('serverId') or 0),
                 'center_x': float(cx),
                 'center_y': float(cy)
@@ -2063,7 +2239,7 @@ class TmpBotPlugin(Star):
             pass
 
         # 最终回退文本
-        msg = f"玩家实时定位\n玩家名称: {player_name}\nTMP编号: {tmp_id}\n服务器: {server_name}\n位置: {location_name}"
+        msg = f"玩家实时定位\n玩家名称: {player_name}\nTMP编号: {tmp_id}\n服务器: {server_name}\n位置: {display_country} - {display_city}"
         yield event.plain_result(msg)
     # --- 定位命令结束 ---
     
