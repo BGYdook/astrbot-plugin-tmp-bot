@@ -6,6 +6,9 @@
 
 欧洲卡车模拟2 TMP 查询机器人，用于查询玩家信息、位置、服务器路况及排行榜等。
 
+> [!WARNING]
+> 插件中所有输出为图片的命令均使用文转图服务来实现，如您的请求量很大，请自建[文转图服务](https://docs.astrbot.app/others/self-host-t2i.html)
+
 ### 指令
 | 指令 | 功能 | 示例 |
 |------|------|------|
@@ -27,6 +30,9 @@ https://truckersmp.com/developers/api
 ## 非常感谢[晚安](https://github.com/nulijiazaizhong)提供的帮助
 
 ## 历史更新
+
+## 版本v1.7.0
+- 修复今日历程排行和总里程排行 出现黑色背景的问题
 
 ## 版本v1.6.9
 - 修复历史里程/今日里程为O时不显示
