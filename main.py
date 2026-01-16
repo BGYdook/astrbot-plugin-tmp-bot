@@ -3,7 +3,7 @@
 
 """
 astrbot-plugin-tmp-bot
-欧卡2TMP查询插件 (版本 1.6.9)
+欧卡2TMP查询插件 (版本 1.7.0)
 """
 
 import re
@@ -183,7 +183,7 @@ class ApiResponseException(TmpApiException):
     pass
 
 # 版本号更新为 1.3.59
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.6.8", "https://github.com/BGYdook/astrBot-plugin-tmp-bot")
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.7.0", "https://github.com/BGYdook/astrbot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context, config=None):  # 接收 context 和 config
         super().__init__(context)              # 将 context 传给父类
@@ -433,36 +433,64 @@ class TmpBotPlugin(Star):
 
     COUNTRY_MAP_EN_TO_CN = {
         "germany": "德国",
+        "de": "德国",
         "france": "法国",
+        "fr": "法国",
         "united kingdom": "英国",
         "uk": "英国",
+        "gb": "英国",
         "netherlands": "荷兰",
+        "nl": "荷兰",
         "belgium": "比利时",
+        "be": "比利时",
         "poland": "波兰",
+        "pl": "波兰",
         "czech republic": "捷克",
         "czechia": "捷克",
+        "cz": "捷克",
         "slovakia": "斯洛伐克",
+        "sk": "斯洛伐克",
         "italy": "意大利",
+        "it": "意大利",
         "spain": "西班牙",
+        "es": "西班牙",
         "portugal": "葡萄牙",
+        "pt": "葡萄牙",
         "switzerland": "瑞士",
+        "ch": "瑞士",
         "austria": "奥地利",
+        "at": "奥地利",
         "hungary": "匈牙利",
+        "hu": "匈牙利",
         "denmark": "丹麦",
+        "dk": "丹麦",
         "sweden": "瑞典",
+        "se": "瑞典",
         "norway": "挪威",
+        "no": "挪威",
         "finland": "芬兰",
+        "fi": "芬兰",
         "estonia": "爱沙尼亚",
+        "ee": "爱沙尼亚",
         "latvia": "拉脱维亚",
+        "lv": "拉脱维亚",
         "lithuania": "立陶宛",
+        "lt": "立陶宛",
         "russia": "俄罗斯",
+        "ru": "俄罗斯",
         "turkey": "土耳其",
+        "tr": "土耳其",
         "romania": "罗马尼亚",
+        "ro": "罗马尼亚",
         "bulgaria": "保加利亚",
+        "bg": "保加利亚",
         "greece": "希腊",
+        "gr": "希腊",
         "united states": "美国",
         "usa": "美国",
+        "us": "美国",
         "iceland": "冰岛",
+        "is": "冰岛",
     }
 
     CITY_MAP_EN_TO_CN = {
@@ -586,6 +614,37 @@ class TmpBotPlugin(Star):
     async def _translate_country_city(self, country: Optional[str], city: Optional[str]) -> Tuple[str, str]:
         country_en = (country or "").strip()
         city_en = (city or "").strip()
+
+        def _normalize_city_input(raw_city: str, raw_country: str) -> str:
+            s = (raw_city or "").strip()
+            if not s:
+                return s
+            s = _re_local.sub(r"\s+", " ", s).strip()
+            c = (raw_country or "").strip()
+            if c:
+                c_norm = _re_local.sub(r"\s+", " ", c).strip()
+                if s.lower().startswith((c_norm + " - ").lower()):
+                    s = s[len(c_norm) + 3 :].strip()
+                elif s.lower().startswith((c_norm + " ").lower()):
+                    s = s[len(c_norm) + 1 :].strip()
+            if " - " in s:
+                left, right = s.split(" - ", 1)
+                left_k = left.strip().lower()
+                if left_k in self.COUNTRY_MAP_EN_TO_CN:
+                    s = right.strip()
+            low = s.lower()
+            for k in sorted(self.COUNTRY_MAP_EN_TO_CN.keys(), key=len, reverse=True):
+                if not k:
+                    continue
+                if low.startswith(k + " - "):
+                    s = s[len(k) + 3 :].strip()
+                    break
+                if low.startswith(k + " "):
+                    s = s[len(k) + 1 :].strip()
+                    break
+            return s
+
+        city_en = _normalize_city_input(city_en, country_en)
         country_key = country_en.lower()
         city_key = city_en.lower()
         country_cn = self.COUNTRY_MAP_EN_TO_CN.get(country_key)
