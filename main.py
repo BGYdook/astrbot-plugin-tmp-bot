@@ -144,6 +144,7 @@ def _cleanup_cn_location_text(text: str) -> str:
         s = _re_local.sub(r"^<[^>]+>\s*", "", s)
         s = _re_local.sub(r"^(?:&\s*)?(?:n|v|adj|adv|vt|vi|prep|pron|conj|abbr)[\.．]\s*", "", s, flags=_re_local.IGNORECASE)
         s = _re_local.sub(r"^(?:\s*(?:&\s*)?(?:n|v|adj|adv|vt|vi|prep|pron|conj|abbr)[\.．]\s*)+", "", s, flags=_re_local.IGNORECASE)
+        s = _re_local.sub(r"^(?:\s*(?:名|动|形|副|介|代|连|数|量|叹|助|冠)(?:词)?[\.．:：]\s*)+", "", s)
         s = _re_local.sub(r"（[^）]*）", "", s)
         s = _re_local.sub(r"\([^)]*\)", "", s)
         for sep in ["；", ";", "，"]:
@@ -152,7 +153,7 @@ def _cleanup_cn_location_text(text: str) -> str:
         s = s.strip(" 、，。.；;")
         if _re_local.search(r"\s", s):
             head = _re_local.split(r"\s+", s, 1)[0]
-            if _re_local.search(r"[\u4e00-\u9fff]", head):
+            if _re_local.search(r"[\u4e00-\u9fff]", head) and not _re_local.fullmatch(r"(?:名|动|形|副|介|代|连|数|量|叹|助|冠)(?:词)?[\.．:：]?", head):
                 s = head
         return s or text
     except Exception:
@@ -302,40 +303,7 @@ class TmpBotPlugin(Star):
             return None
 
     async def _translate_text(self, content: str, cache: bool = True) -> str:
-        s = (content or "").strip()
-        if not s:
-            return content
-        if not self._cfg_bool('baidu_translate_enable', False):
-            return content
-        if not self.session:
-            return content
-        use_cache = self._cfg_bool('baidu_translate_cache_enable', False)
-        if use_cache and cache:
-            cached = self._translate_cache.get(s)
-            if cached:
-                return cached
-        try:
-            timeout_sec = self._cfg_int('api_timeout_seconds', 10)
-            url = 'https://fanyi.baidu.com/sug'
-            data = {'kw': s}
-            headers = {'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'}
-            async with self.session.post(url, data=data, headers=headers, timeout=timeout_sec) as resp:
-                if resp.status != 200:
-                    return content
-                j = await resp.json()
-                if not isinstance(j, dict):
-                    return content
-                items = j.get('data')
-                if not items or not isinstance(items, list):
-                    return content
-                first = items[0]
-                raw_dst = first.get('v') or content if isinstance(first, dict) else content
-                dst = _cleanup_cn_location_text(raw_dst)
-                if use_cache and cache:
-                    self._translate_cache[s] = dst
-                return dst
-        except Exception:
-            return content
+        return content
 
     async def _get_avatar_bytes_with_fallback(self, url: str, tmp_id: Optional[str]) -> Optional[bytes]:
         """尝试多种 TruckersMP 头像URL变体，尽可能获取头像字节。"""
