@@ -32,7 +32,15 @@ try:
 except ImportError:
     # 最小化兼容回退 
     class _DummyFilter:
+        class EventMessageType:
+            ALL = "ALL"
+
         def command(self, pattern, **kwargs): 
+            def decorator(func):
+                return func
+            return decorator
+
+        def event_message_type(self, _type, **kwargs):
             def decorator(func):
                 return func
             return decorator
@@ -131,13 +139,21 @@ def _cleanup_cn_location_text(text: str) -> str:
     if not s:
         return s
     try:
-        s = _re_local.sub(r"^(n\.|v\.|adj\.|adv\.|vt\.|vi\.|prep\.|pron\.|conj\.|abbr\.)\s*", "", s, flags=_re_local.IGNORECASE)
+        s = _re_local.sub(r"\s+", " ", s).strip()
+        s = _re_local.sub(r"^(?:[\[［][^\]］]+[\]］]\s*)+", "", s)
+        s = _re_local.sub(r"^<[^>]+>\s*", "", s)
+        s = _re_local.sub(r"^(?:&\s*)?(?:n|v|adj|adv|vt|vi|prep|pron|conj|abbr)[\.．]\s*", "", s, flags=_re_local.IGNORECASE)
+        s = _re_local.sub(r"^(?:\s*(?:&\s*)?(?:n|v|adj|adv|vt|vi|prep|pron|conj|abbr)[\.．]\s*)+", "", s, flags=_re_local.IGNORECASE)
         s = _re_local.sub(r"（[^）]*）", "", s)
         s = _re_local.sub(r"\([^)]*\)", "", s)
         for sep in ["；", ";", "，"]:
             if sep in s:
                 s = s.split(sep, 1)[0]
         s = s.strip(" 、，。.；;")
+        if _re_local.search(r"\s", s):
+            head = _re_local.split(r"\s+", s, 1)[0]
+            if _re_local.search(r"[\u4e00-\u9fff]", head):
+                s = head
         return s or text
     except Exception:
         return text
@@ -179,6 +195,8 @@ class TmpBotPlugin(Star):
         self._translate_cache: Dict[str, str] = {}
         self._ets2_cities_cache: Optional[List[Dict[str, Any]]] = None
         self._ets2_cities_cache_ts: float = 0.0
+        self._location_maps_loaded: bool = False
+        self._load_location_maps()
         try:
             bind_path = self.config.get('bind_file')
             if not bind_path:
@@ -484,6 +502,86 @@ class TmpBotPlugin(Star):
         "zürich": "苏黎世",
         "zurich": "苏黎世",
     }
+
+    def _load_location_maps(self) -> None:
+        if getattr(self, "_location_maps_loaded", False):
+            return
+
+        def _strip_cn_city_suffix(cn: str) -> str:
+            t = (cn or "").strip()
+            if t.endswith("（城市）"):
+                t = t[:-4]
+            return t.strip()
+
+        def _parse_table(file_path: str) -> List[Tuple[str, str]]:
+            try:
+                if not os.path.exists(file_path):
+                    return []
+                rows: List[Tuple[str, str]] = []
+                with open(file_path, "r", encoding="utf-8") as f:
+                    for raw in f:
+                        line = raw.strip()
+                        if not line.startswith("|"):
+                            continue
+                        if line.startswith("| English |"):
+                            continue
+                        if line.startswith("|---"):
+                            continue
+                        parts = [p.strip() for p in line.strip("|").split("|")]
+                        if len(parts) < 2:
+                            continue
+                        en = parts[0].strip()
+                        cn = parts[1].strip()
+                        if not en or not cn:
+                            continue
+                        rows.append((en, cn))
+                return rows
+            except Exception:
+                return []
+
+        def _add_mapping(en: str, cn: str) -> None:
+            en_raw = (en or "").strip()
+            cn_raw = (cn or "").strip()
+            if not en_raw or not cn_raw:
+                return
+            if cn_raw == en_raw:
+                return
+
+            en_key = en_raw.lower()
+            cn_clean = _cleanup_cn_location_text(cn_raw)
+
+            status_m = _re_local.search(r"\s*-\s*(?P<status>[A-Za-z]+)\s*\((?P<num>\d+)\)\s*$", en_raw)
+            en_base = en_raw
+            if status_m:
+                en_base = en_raw[: status_m.start()].strip()
+
+            city_m = _re_local.search(r"\s*\(City\)\s*$", en_base, flags=_re_local.IGNORECASE)
+            if city_m:
+                city_en_base = en_base[: city_m.start()].strip()
+                city_cn_base = _strip_cn_city_suffix(cn_clean)
+                if city_en_base:
+                    self.CITY_MAP_EN_TO_CN[city_en_base.lower()] = city_cn_base or cn_clean
+                    self.LOCATION_FIX_MAP[city_en_base.lower()] = city_cn_base or cn_clean
+                self.LOCATION_FIX_MAP[en_base.lower()] = city_cn_base or cn_clean
+                self.LOCATION_FIX_MAP[en_key] = city_cn_base or cn_clean
+                return
+
+            self.COUNTRY_MAP_EN_TO_CN[en_base.lower()] = cn_clean
+            self.LOCATION_FIX_MAP[en_base.lower()] = cn_clean
+            self.LOCATION_FIX_MAP[en_key] = cn_clean
+
+        try:
+            root = os.path.dirname(__file__)
+        except Exception:
+            root = os.getcwd()
+
+        data_dir = os.path.join(root, "TruckersMP-citties-name")
+        for name in ("s1-cities.md", "promods-cities.md"):
+            path = os.path.join(data_dir, name)
+            for en, cn in _parse_table(path):
+                _add_mapping(en, cn)
+
+        self._location_maps_loaded = True
 
     async def _translate_country_city(self, country: Optional[str], city: Optional[str]) -> Tuple[str, str]:
         country_en = (country or "").strip()
