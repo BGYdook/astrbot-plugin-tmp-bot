@@ -1839,7 +1839,7 @@ class TmpBotPlugin(Star):
             
             location_display = city_cn
             if country_cn and country_cn != city_cn:
-                 location_display = f"{country_cn} - {city_cn}"
+                 location_display = f"{country_cn} {city_cn}"
             elif not location_display:
                  location_display = raw_city
 
@@ -1950,7 +1950,7 @@ class TmpBotPlugin(Star):
                 or city_en
             )
 
-            display = f"{country_cn} - {city_cn}" if country_cn else city_cn
+            display = f"{country_cn} {city_cn}" if country_cn else city_cn
             if dlc_name:
                 display = f"{display} ({dlc_name})"
 
@@ -2372,7 +2372,7 @@ class TmpBotPlugin(Star):
             min_y, max_y = by, ay  # 注意坐标系方向
             map_data = {
                 'server_name': server_name,
-                'location_name': f"{display_country} - {display_city}",
+                'location_name': f"{display_country} {display_city}",
                 'player_name': player_name,
                 'me_id': str(tmp_id),
                 'players': area_players,
@@ -2396,7 +2396,7 @@ class TmpBotPlugin(Star):
             pass
 
         # 最终回退文本
-        msg = f"玩家实时定位\n玩家名称: {player_name}\nTMP编号: {tmp_id}\n服务器: {server_name}\n位置: {display_country} - {display_city}"
+        msg = f"玩家实时定位\n玩家名称: {player_name}\nTMP编号: {tmp_id}\n服务器: {server_name}\n位置: {display_country} {display_city}"
         yield event.plain_result(msg)
     # --- 定位命令结束 ---
     
@@ -2661,7 +2661,7 @@ class TmpBotPlugin(Star):
                 players_str = str(int(players))
             elif players is not None:
                 players_str = str(players)
-            line = f"{country} - {translated_name}"
+            line = f"{country} {translated_name}"
             if place_type:
                 type_text = type_map.get(place_type, place_type)
                 if type_text and type_text == place_type:
