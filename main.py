@@ -194,8 +194,6 @@ class TmpBotPlugin(Star):
         self._ready = False
         self.config = config or {}
         self._translate_cache: Dict[str, str] = {}
-        self._ets2_cities_cache: Optional[List[Dict[str, Any]]] = None
-        self._ets2_cities_cache_ts: float = 0.0
         self._location_maps_loaded: bool = False
         self._load_location_maps()
         try:
@@ -459,6 +457,7 @@ class TmpBotPlugin(Star):
         "us": "美国",
         "iceland": "冰岛",
         "is": "冰岛",
+        "svalbard": "斯瓦尔巴群岛",
     }
 
     CITY_MAP_EN_TO_CN = {
@@ -483,18 +482,43 @@ class TmpBotPlugin(Star):
         "warsaw": "华沙",
         "krakow": "克拉科夫",
         "akureyri": "阿克雷里",
+        "burgos": "布尔戈斯",
+        "praha": "布拉格",
+        "steinkjer": "斯泰恩谢尔",
+        "valmiera": "瓦尔米耶拉",
+        "umeå": "于默奥",
+        "umea": "于默奥",
+        "longyearbyen": "朗伊尔城",
+        "napoli": "那不勒斯",
+        "sundsvall": "松兹瓦尔",
     }
 
     LOCATION_FIX_MAP = {
         "kirkenes": "希尔克内斯",
+        "kirkenes quarry": "希尔克内斯 采石场",
         "c-d road": "C-D路",
+        "cd road": "C-D路",
         "calais-duisburg road": "C-D路",
+        "calais - duisburg": "C-D路",
+        "calais–duisburg": "C-D路",
+        "calais-duisburg": "C-D路",
+        "calais intersection": "加来 交叉口",
         "dortmund": "多特蒙德",
         "hannover": "汉诺威",
         "hamburg": "汉堡",
         "strasbourg": "斯特拉斯堡",
         "dijon": "第戎",
         "reims": "兰斯",
+        "brussel": "布鲁塞尔",
+        "aalborg": "奥尔堡",
+        "kiruna": "基律纳",
+        "skellefteå": "谢莱夫特奥",
+        "skelleftea": "谢莱夫特奥",
+        "ljubjana": "卢布尔雅那",
+        "ljubljana": "卢布尔雅那",
+        "nikel": "尼克尔",
+        "travemünde": "特拉弗明德",
+        "travemunde": "特拉弗明德",
         "zürich": "苏黎世",
         "zurich": "苏黎世",
     }
@@ -545,16 +569,22 @@ class TmpBotPlugin(Star):
 
             en_key = en_raw.lower()
             cn_clean = _cleanup_cn_location_text(cn_raw)
+            if not cn_clean:
+                return
 
             status_m = _re_local.search(r"\s*-\s*(?P<status>[A-Za-z]+)\s*\((?P<num>\d+)\)\s*$", en_raw)
             en_base = en_raw
             if status_m:
                 en_base = en_raw[: status_m.start()].strip()
+            if cn_clean.lower() == en_base.lower():
+                return
 
             city_m = _re_local.search(r"\s*\(City\)\s*$", en_base, flags=_re_local.IGNORECASE)
             if city_m:
                 city_en_base = en_base[: city_m.start()].strip()
                 city_cn_base = _strip_cn_city_suffix(cn_clean)
+                if city_en_base and (city_cn_base or cn_clean).lower() == city_en_base.lower():
+                    return
                 if city_en_base:
                     self.CITY_MAP_EN_TO_CN[city_en_base.lower()] = city_cn_base or cn_clean
                     self.LOCATION_FIX_MAP[city_en_base.lower()] = city_cn_base or cn_clean
@@ -637,6 +667,7 @@ class TmpBotPlugin(Star):
         s = (name or "").strip()
         if not s:
             return s
+        s = _re_local.sub(r"\s+", " ", s).strip()
         key = s.lower()
         
         # 1. 查修正表
@@ -648,6 +679,34 @@ class TmpBotPlugin(Star):
         city_fix = self.CITY_MAP_EN_TO_CN.get(key)
         if city_fix:
             return city_fix
+
+        m_suffix = _re_local.search(r"^(?P<base>.+?)\s+(?P<suffix>intersection|quarry)\s*$", s, flags=_re_local.IGNORECASE)
+        if m_suffix:
+            base = (m_suffix.group("base") or "").strip()
+            suffix = (m_suffix.group("suffix") or "").strip().lower()
+            base_cn = await self._translate_traffic_name(base)
+            suffix_cn = "交叉口" if suffix == "intersection" else "采石场"
+            merged_key = f"{base} {suffix}".strip().lower()
+            merged_fix = self.LOCATION_FIX_MAP.get(merged_key)
+            if merged_fix:
+                return merged_fix
+            if base_cn and base_cn != base:
+                return f"{base_cn} {suffix_cn}".strip()
+
+        for sep in (" - ", "–", "-", "/"):
+            if sep in s:
+                parts = [p.strip() for p in s.split(sep) if p.strip()]
+                if len(parts) >= 2:
+                    translated_parts: List[str] = []
+                    for p in parts:
+                        pk = p.lower()
+                        translated_parts.append(
+                            self.LOCATION_FIX_MAP.get(pk)
+                            or self.CITY_MAP_EN_TO_CN.get(pk)
+                            or p
+                        )
+                    joiner = " - " if sep.strip() in ("-", "–") else sep
+                    return joiner.join(translated_parts)
             
         # 3. 百度翻译
         translated = await self._translate_text(s, cache=True)
@@ -1356,10 +1415,6 @@ class TmpBotPlugin(Star):
             async for r in self.tmpquery(event):
                 yield r
             return
-        if re.match(r'^欧卡地点(\s*\d+)?\s*$', msg):
-            async for r in self.tmpets2_locations(event):
-                yield r
-            return
         if msg == "地图dlc" or msg == "地图DLC":
             async for r in self.tmpdlc_list(event):
                 yield r
@@ -1431,22 +1486,6 @@ class TmpBotPlugin(Star):
             else:
                 event.message_str = "查询"
             async for r in self.tmpquery(event):
-                yield r
-        finally:
-            try:
-                event.message_str = orig
-            except Exception:
-                pass
-
-    @filter.command("欧卡地点")
-    async def cmd_tmp_ets2_locations(self, event: AstrMessageEvent, page: str | None = None):
-        orig = getattr(event, "message_str", "") or ""
-        try:
-            if page:
-                event.message_str = f"欧卡地点 {page}"
-            else:
-                event.message_str = "欧卡地点"
-            async for r in self.tmpets2_locations(event):
                 yield r
         finally:
             try:
@@ -1846,111 +1885,6 @@ class TmpBotPlugin(Star):
             yield event.chain_result(components)
             return
 
-    async def _get_ets2_cities(self) -> List[Dict[str, Any]]:
-        now = time.monotonic()
-        ttl_sec = 10 * 60
-        cached = self._ets2_cities_cache
-        if cached and (now - (self._ets2_cities_cache_ts or 0.0)) < ttl_sec:
-            return cached
-        if not self.session:
-            return []
-        url = "https://api.truckyapp.com/v3/map/cities?game=ets2"
-        try:
-            timeout_sec = self._cfg_int('api_timeout_seconds', 10)
-            async with self.session.get(url, timeout=timeout_sec) as resp:
-                if resp.status != 200:
-                    return []
-                j = await resp.json()
-                items = j.get('response') if isinstance(j, dict) else None
-                if not isinstance(items, list):
-                    return []
-                self._ets2_cities_cache = items
-                self._ets2_cities_cache_ts = now
-                return items
-        except Exception:
-            return []
-
-    async def tmpets2_locations(self, event: AstrMessageEvent):
-        message_str = (getattr(event, "message_str", "") or "").strip()
-        m = re.match(r'^欧卡地点\s*(\d+)?\s*$', message_str)
-        page = 1
-        if m and m.group(1):
-            try:
-                page = int(m.group(1))
-            except Exception:
-                page = 1
-        if page <= 0:
-            page = 1
-
-        if not self.session:
-            yield event.plain_result("插件初始化中，请稍后重试")
-            return
-
-        items = await self._get_ets2_cities()
-        if not items:
-            yield event.plain_result("当前无法获取欧卡2地点数据")
-            return
-
-        rows: List[Tuple[str, str]] = []
-        for it in items:
-            if not isinstance(it, dict):
-                continue
-            city_en = str(it.get('realName') or '').strip()
-            country_obj = it.get('country') if isinstance(it.get('country'), dict) else {}
-            country_en = str(country_obj.get('realName') or '').strip()
-            dlc_obj = it.get('dlc') if isinstance(it.get('dlc'), dict) else {}
-            dlc_name = str(dlc_obj.get('name') or '').strip()
-
-            if not city_en:
-                continue
-
-            country_key = country_en.lower()
-            city_key = city_en.lower()
-
-            country_cn = (
-                self.LOCATION_FIX_MAP.get(country_key)
-                or self.COUNTRY_MAP_EN_TO_CN.get(country_key)
-                or country_en
-            )
-            city_cn = (
-                self.LOCATION_FIX_MAP.get(city_key)
-                or self.CITY_MAP_EN_TO_CN.get(city_key)
-                or city_en
-            )
-
-            display = f"{country_cn} {city_cn}" if country_cn else city_cn
-            if dlc_name:
-                display = f"{display} ({dlc_name})"
-
-            sort_key = f"{country_cn}\u0000{city_cn}\u0000{dlc_name}".lower()
-            rows.append((sort_key, display))
-
-        rows.sort(key=lambda x: x[0])
-
-        per_page = 30
-        total = len(rows)
-        total_pages = (total + per_page - 1) // per_page
-        if total_pages <= 0:
-            total_pages = 1
-        if page > total_pages:
-            page = total_pages
-
-        start = (page - 1) * per_page
-        end = start + per_page
-        sliced = rows[start:end]
-
-        lines: List[str] = []
-        for i, (_, display) in enumerate(sliced, start=start + 1):
-            lines.append(f"{i}. {display}")
-
-        text = (
-            f"🗺️ 欧卡2地点列表（ETS2）\n"
-            f"共{total}个 | 第{page}/{total_pages}页 | 每页{per_page}\n"
-            f"用法：欧卡地点 2\n"
-            + "\n".join(lines)
-        )
-        yield event.plain_result(text)
-    
     async def tmpdlc_list(self, event: AstrMessageEvent):
         logger.info("DLC列表: 开始处理命令")
         try:
@@ -2392,6 +2326,51 @@ class TmpBotPlugin(Star):
         message = "🏆 TruckersMP 玩家总里程排行榜 (前10名)\n"
         message += "=" * 35 + "\n"
         items: List[Dict[str, Any]] = []
+        me_data: Optional[Dict[str, Any]] = None
+
+        me_user_id = event.get_sender_id()
+        me_tmp_id = None
+        me_name = None
+        me_total_km = None
+        me_total_rank = None
+        me_vtc_role = None
+        try:
+            bindings = self._load_bindings()
+            b = bindings.get(me_user_id)
+            if isinstance(b, dict):
+                me_tmp_id = b.get("tmp_id")
+                me_name = b.get("player_name")
+            else:
+                me_tmp_id = b
+        except Exception:
+            me_tmp_id = None
+
+        if me_tmp_id:
+            try:
+                stats = await self._get_player_stats(str(me_tmp_id))
+                me_total_km = stats.get("total_km")
+                me_total_rank = stats.get("total_rank")
+                me_vtc_role = stats.get("vtcRole")
+                if isinstance(me_total_km, (int, float)):
+                    km_str = f"{float(me_total_km):,.2f}".replace(",", " ")
+                    display_name = (str(me_name).strip() if me_name is not None else "") or "你"
+                    message += f"🙋 个人信息: {display_name} (ID:{me_tmp_id})\n"
+                    message += f"里程: {km_str} km"
+                    if me_total_rank is not None:
+                        message += f" | 排名: No.{me_total_rank}"
+                    message += "\n"
+                    if me_vtc_role:
+                        message += f"车队职位: {str(me_vtc_role).strip()}\n"
+                    message += "-" * 35 + "\n"
+                    me_data = {
+                        "name": display_name,
+                        "tmp_id": me_tmp_id,
+                        "rank": me_total_rank,
+                        "km": float(me_total_km),
+                        "vtc_role": (str(me_vtc_role).strip() if me_vtc_role else ""),
+                    }
+            except Exception:
+                pass
         
         for idx, player in enumerate(rank_list):
             rank = player.get('ranking', idx + 1)
@@ -2430,6 +2409,9 @@ class TmpBotPlugin(Star):
   * { box-sizing: border-box; }
   .wrap { width:600px; margin:0 auto; padding:14px; background:#222d33; color:#fff; font-family:system-ui,Segoe UI,Helvetica,Arial,sans-serif; }
   .header { font-size:20px; font-weight:600; margin:0 0 8px 0; text-align:center; }
+  .me { background:#1f2a31; border:1px solid rgba(255,255,255,0.10); border-radius:8px; padding:10px 12px; margin:0 0 10px 0; }
+  .me .t1 { font-size:14px; font-weight:700; margin:0 0 4px 0; }
+  .me .t2 { font-size:13px; opacity:0.92; }
   .list { margin:0; padding:0; }
   .item { display:flex; align-items:center; background:#24313a; margin:0 0 8px 0; padding:8px 12px; border-radius:6px; border:1px solid rgba(255,255,255,0.08); }
   .item.top3 { background:linear-gradient(135deg,rgba(255,215,0,0.18),rgba(255,215,0,0.06)); border-color:rgba(255,215,0,0.35); }
@@ -2439,6 +2421,12 @@ class TmpBotPlugin(Star):
 </style>
 <div class="wrap">
   <div class="header">{{ title }}</div>
+  {% if me %}
+  <div class="me">
+    <div class="t1">🙋 个人信息：{{ me.name }} (ID:{{ me.tmp_id }})</div>
+    <div class="t2">里程：{{ '%.2f' % me.km }} km{% if me.rank is not none %} | 排名：No.{{ me.rank }}{% endif %}{% if me.vtc_role %} | 车队职位：{{ me.vtc_role }}{% endif %}</div>
+  </div>
+  {% endif %}
   <div class="list">
     {% for it in items %}
     <div class="item{% if it.rank <= 3 %} top3{% endif %}">
@@ -2453,7 +2441,7 @@ class TmpBotPlugin(Star):
 
         try:
             options = { 'type': 'jpeg', 'quality': 92, 'full_page': True, 'omit_background': False }
-            url = await self.html_render(rank_tmpl, { 'title': '- 总行驶里程排行榜 -', 'items': items }, options=options)
+            url = await self.html_render(rank_tmpl, { 'title': '- 总行驶里程排行榜 -', 'items': items, 'me': me_data }, options=options)
             if isinstance(url, str) and url:
                 yield event.chain_result([Image.fromURL(url)])
                 return
@@ -2493,6 +2481,51 @@ class TmpBotPlugin(Star):
         message = "🏁 TruckersMP 玩家今日里程排行榜 (前10名)\n"
         message += "=" * 35 + "\n"
         items: List[Dict[str, Any]] = []
+        me_data: Optional[Dict[str, Any]] = None
+
+        me_user_id = event.get_sender_id()
+        me_tmp_id = None
+        me_name = None
+        me_daily_km = None
+        me_daily_rank = None
+        me_vtc_role = None
+        try:
+            bindings = self._load_bindings()
+            b = bindings.get(me_user_id)
+            if isinstance(b, dict):
+                me_tmp_id = b.get("tmp_id")
+                me_name = b.get("player_name")
+            else:
+                me_tmp_id = b
+        except Exception:
+            me_tmp_id = None
+
+        if me_tmp_id:
+            try:
+                stats = await self._get_player_stats(str(me_tmp_id))
+                me_daily_km = stats.get("daily_km")
+                me_daily_rank = stats.get("daily_rank")
+                me_vtc_role = stats.get("vtcRole")
+                if isinstance(me_daily_km, (int, float)):
+                    km_str = f"{float(me_daily_km):,.2f}".replace(",", " ")
+                    display_name = (str(me_name).strip() if me_name is not None else "") or "你"
+                    message += f"🙋 个人信息: {display_name} (ID:{me_tmp_id})\n"
+                    message += f"里程: {km_str} km"
+                    if me_daily_rank is not None:
+                        message += f" | 排名: No.{me_daily_rank}"
+                    message += "\n"
+                    if me_vtc_role:
+                        message += f"车队职位: {str(me_vtc_role).strip()}\n"
+                    message += "-" * 35 + "\n"
+                    me_data = {
+                        "name": display_name,
+                        "tmp_id": me_tmp_id,
+                        "rank": me_daily_rank,
+                        "km": float(me_daily_km),
+                        "vtc_role": (str(me_vtc_role).strip() if me_vtc_role else ""),
+                    }
+            except Exception:
+                pass
         
         for idx, player in enumerate(rank_list):
             rank = player.get('ranking', idx + 1)
@@ -2531,6 +2564,9 @@ class TmpBotPlugin(Star):
   * { box-sizing: border-box; }
   .wrap { width:600px; margin:0 auto; padding:14px; background:#222d33; color:#fff; font-family:system-ui,Segoe UI,Helvetica,Arial,sans-serif; }
   .header { font-size:20px; font-weight:600; margin:0 0 8px 0; text-align:center; }
+  .me { background:#1f2a31; border:1px solid rgba(255,255,255,0.10); border-radius:8px; padding:10px 12px; margin:0 0 10px 0; }
+  .me .t1 { font-size:14px; font-weight:700; margin:0 0 4px 0; }
+  .me .t2 { font-size:13px; opacity:0.92; }
   .list { margin:0; padding:0; }
   .item { display:flex; align-items:center; background:#24313a; margin:0 0 8px 0; padding:8px 12px; border-radius:6px; border:1px solid rgba(255,255,255,0.08); }
   .item.top3 { background:linear-gradient(135deg,rgba(255,215,0,0.18),rgba(255,215,0,0.06)); border-color:rgba(255,215,0,0.35); }
@@ -2540,6 +2576,12 @@ class TmpBotPlugin(Star):
 </style>
 <div class="wrap">
   <div class="header">{{ title }}</div>
+  {% if me %}
+  <div class="me">
+    <div class="t1">🙋 个人信息：{{ me.name }} (ID:{{ me.tmp_id }})</div>
+    <div class="t2">里程：{{ '%.2f' % me.km }} km{% if me.rank is not none %} | 排名：No.{{ me.rank }}{% endif %}{% if me.vtc_role %} | 车队职位：{{ me.vtc_role }}{% endif %}</div>
+  </div>
+  {% endif %}
   <div class="list">
     {% for it in items %}
     <div class="item{% if it.rank <= 3 %} top3{% endif %}">
@@ -2554,7 +2596,7 @@ class TmpBotPlugin(Star):
 
         try:
             options = { 'type': 'jpeg', 'quality': 92, 'full_page': True, 'omit_background': False }
-            url = await self.html_render(rank_tmpl, { 'title': '- 今日行驶里程排行榜 -', 'items': items }, options=options)
+            url = await self.html_render(rank_tmpl, { 'title': '- 今日行驶里程排行榜 -', 'items': items, 'me': me_data }, options=options)
             if isinstance(url, str) and url:
                 yield event.chain_result([Image.fromURL(url)])
                 return
