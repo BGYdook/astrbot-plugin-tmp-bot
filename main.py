@@ -2354,12 +2354,14 @@ class TmpBotPlugin(Star):
                 if isinstance(me_total_km, (int, float)):
                     km_str = f"{float(me_total_km):,.2f}".replace(",", " ")
                     display_name = (str(me_name).strip() if me_name is not None else "") or "你"
-                    message += f"🙋 个人信息: {display_name}\n"
+                    message += f"🙋 个人信息: {display_name} (ID:{me_tmp_id})\n"
                     message += f"里程: {km_str} km"
                     if me_total_rank is not None:
                         message += f" | 排名: No.{me_total_rank}"
                     message += "\n"
-                    
+                    if me_vtc_role:
+                        message += f"车队职位: {str(me_vtc_role).strip()}\n"
+                    message += "-" * 35 + "\n"
                     me_data = {
                         "name": display_name,
                         "tmp_id": me_tmp_id,
@@ -2421,8 +2423,8 @@ class TmpBotPlugin(Star):
   <div class="header">{{ title }}</div>
   {% if me %}
   <div class="me">
-    <div class="t1">🙋 个人信息：{{ me.name }}</div>
-    <div class="t2">里程：{{ '%.2f' % me.km }} km{% if me.rank is not none %} | 排名：No.{{ me.rank }}{% endif %}{% if me.vtc_role %}</div>
+    <div class="t1">🙋 个人信息：{{ me.name }} (ID:{{ me.tmp_id }})</div>
+    <div class="t2">里程：{{ '%.2f' % me.km }} km{% if me.rank is not none %} | 排名：No.{{ me.rank }}{% endif %}{% if me.vtc_role %} | 车队职位：{{ me.vtc_role }}{% endif %}</div>
   </div>
   {% endif %}
   <div class="list">
@@ -2507,12 +2509,13 @@ class TmpBotPlugin(Star):
                 if isinstance(me_daily_km, (int, float)):
                     km_str = f"{float(me_daily_km):,.2f}".replace(",", " ")
                     display_name = (str(me_name).strip() if me_name is not None else "") or "你"
-                    message += f"🙋 个人信息: {display_name}\n"
+                    message += f"🙋 个人信息: {display_name} (ID:{me_tmp_id})\n"
                     message += f"里程: {km_str} km"
                     if me_daily_rank is not None:
                         message += f" | 排名: No.{me_daily_rank}"
                     message += "\n"
-
+                    if me_vtc_role:
+                        message += f"车队职位: {str(me_vtc_role).strip()}\n"
                     message += "-" * 35 + "\n"
                     me_data = {
                         "name": display_name,
@@ -2575,8 +2578,8 @@ class TmpBotPlugin(Star):
   <div class="header">{{ title }}</div>
   {% if me %}
   <div class="me">
-    <div class="t1">🙋 个人信息：{{ me.name }}</div>
-    <div class="t2">里程：{{ '%.2f' % me.km }} km{% if me.rank is not none %} | 排名：No.{{ me.rank }}{% endif %}{% if me.vtc_role %}</div>
+    <div class="t1">🙋 个人信息：{{ me.name }} (ID:{{ me.tmp_id }})</div>
+    <div class="t2">里程：{{ '%.2f' % me.km }} km{% if me.rank is not none %} | 排名：No.{{ me.rank }}{% endif %}{% if me.vtc_role %} | 车队职位：{{ me.vtc_role }}{% endif %}</div>
   </div>
   {% endif %}
   <div class="list">
