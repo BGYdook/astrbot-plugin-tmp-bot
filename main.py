@@ -2250,30 +2250,59 @@ class TmpBotPlugin(Star):
 <link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css\">
 <script src=\"https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js\"></script>
 <style>
-  html, body { margin:0; padding:0; width:100vw; height:100vh; background:#1f2328; overflow:hidden; }
-  * { box-sizing: border-box; }
-  .wrap { width: 100vw; height: 100vh; position: relative; color:#f2f4f8; font-family: system-ui, Segoe UI, Helvetica, Arial, sans-serif; }
-  #map { width: 100vw; height: calc(100vh - 150px); background:#2a2f36; filter: contrast(1.08) saturate(1.15) brightness(1.18); }
-  .panel { width:100vw; height:150px; background:rgba(28,28,28,.75); display:flex; align-items:center; padding:16px 20px; color:#eaeaea; backdrop-filter: blur(4px); }
-  .avatar { width:64px; height:64px; border-radius:50%; background:#808080; object-fit:cover; margin-right:16px; }
-  .col { flex:1; }
-  .name { font-size:22px; font-weight:600; letter-spacing:.3px; color:#f0f3f5; }
-  .sub { font-size:16px; color:#d8d8d8; margin-top:6px; }
-  .right { width:240px; text-align:right; color:#f0f3f5; font-size:16px; }
-  .hud { position:absolute; top:12px; left:12px; padding:6px 10px; background:rgba(25,25,25,.65); border:1px solid rgba(255,255,255,.12); border-radius:6px; font-size:14px; color:#eaeaea; backdrop-filter: blur(3px); }
+  html, body { margin:0; padding:0; background:#4b4b4b; }
+  * { box-sizing: border-box; font-family: system-ui, Segoe UI, Helvetica, Arial, sans-serif; }
+  #container { width: 500px; height: 320px; position: relative; overflow: hidden; }
+  #map { width: 100%; height: 100%; background:#5d5d5d; }
+  .nearby { position:absolute; top:10px; left:10px; background:rgba(120,180,255,.92); color:#0b1a2a; padding:4px 8px; border-radius:4px; font-size:13px; font-weight:700; z-index: 500; }
+  .user-info-box {
+    width: 100%;
+    height: 76px;
+    position: absolute;
+    bottom: 0;
+    z-index: 600;
+    background-color: rgba(30, 30, 30, 0.55);
+    backdrop-filter: blur(6px);
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    padding: 0 14px;
+  }
+  .avatar { width: 56px; height: 56px; border-radius: 8px; background:#808080; object-fit: cover; }
+  .user { height: 56px; width: 240px; display: flex; flex-direction: column; justify-content: center; margin-left: 10px; color:#eeeeee; font-size: 16px; }
+  .username { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 700; }
+  .server-name-box { display:flex; align-items:center; margin-top: 4px; font-size: 14px; opacity: .95; }
+  .server-name { display:inline-block; max-width: 156px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 4px; }
+  .location-box {
+    flex-grow: 1;
+    color: #eeeeee;
+    font-size: 16px;
+    height: 56px;
+    border-right: 4px solid #54d354;
+    text-align: right;
+    padding-right: 6px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .location-box > * { width: 190px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .country { font-weight: 700; }
+  .real-name { margin-top: 4px; font-size: 14px; opacity: .95; }
 </style>
-<div class=\"wrap\">
-  <div class=\"hud\">附近玩家: {{ nearby_count }}</div>
+<div id=\"container\">
   <div id=\"map\"></div>
-  <div class=\"panel\">
+  <div class=\"nearby\">附近玩家: {{ nearby_count }}</div>
+  <div class=\"user-info-box\">
     <img class=\"avatar\" src=\"{{ avatar }}\" />
-    <div class=\"col\"> 
-      <div class=\"name\">{{ player_name }}</div>
-      <div class=\"sub\">{{ server_name }} 游戏中</div>
+    <div class=\"user\">
+      <div class=\"username\">{{ player_name }}</div>
+      <div class=\"server-name-box\">
+        <span class=\"server-name\">{{ server_name }}</span>游戏中
+      </div>
     </div>
-    <div class=\"right\">
-      <div>{{ country or '未知' }}</div>
-      <div>{{ city }}</div>
+    <div class=\"location-box\">
+      <div class=\"country\">{{ country or '未知' }}</div>
+      <div class=\"real-name\">{{ city }}</div>
     </div>
   </div>
 </div>
@@ -2338,8 +2367,8 @@ class TmpBotPlugin(Star):
     L.circleMarker(latlng, { color:'#2f2f2f', weight:2, fillColor:(p.tmpId === '{{ me_id }}' ? '#57bd00' : '#3ca7ff'), fillOpacity:1, radius:(p.tmpId === '{{ me_id }}' ? 6 : 5) }).addTo(map);
   }
   var centerLL = map.unproject(c.calc(centerX, centerY+80), c.maxZoom);
-  map.setView(centerLL, 7);
-  setTimeout(function(){}, 800); // 轻微延时确保瓦片加载
+  map.setView(centerLL, 8);
+  setTimeout(function(){}, 700); // 轻微延时确保瓦片加载
 </script>
 """
             min_x, max_x = ax, bx
