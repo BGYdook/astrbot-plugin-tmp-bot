@@ -23,7 +23,7 @@
 | 今日里程排行 | 今日里程排行榜（每日 0 点重置） | 今日里程排行 |
 
 ### 接口与数据
-API 文档与数据来源：https://apifox.com/apidoc/shared/38508a88-5ff4-4b29-b724-41f9d3d3336a
+API 文档与数据来源：https://s.apifox.cn/38508a88-5ff4-4b29-b724-41f9d3d3336a
 
 和
 

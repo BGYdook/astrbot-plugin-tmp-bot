@@ -43,7 +43,7 @@
 | Šibenik (City) | 希贝尼克（城市） |
 | Slavonski Brod (City) | 斯拉沃尼亚布罗德（城市） |
 | Split (City) | 斯普利特（城市） |
-| Virovitica (City) | Virovitica（城市） |
+| Virovitica (City) | 维罗维蒂卡（城市） |
 | Zadar (City) | 扎达尔（城市） |
 | Zagreb (City) | 萨格勒布（城市） |
 | Cyprus | 塞浦路斯 |
@@ -308,7 +308,7 @@
 | Latvia | 拉脱维亚 |
 | Balvi (City) | 巴尔维（城市） |
 | Daugavpils (City) | 陶格夫皮尔斯（城市） |
-| Jēkabpils (City) | Jekabpils（城市） |
+| Jēkabpils (City) | 叶卡布皮尔斯（城市） |
 | Kolka (City) | 科尔卡（城市） |
 | Liepāja (City) | 利耶帕亚（城市） |
 | Rēzekne (City) | 雷泽克内（城市） |
@@ -395,9 +395,9 @@
 | Nowogard (City) | 诺沃加德（城市） |
 | Olsztyn (City) | 奥尔什丁（城市） |
 | Opole (City) | 奥波莱（城市） |
-| Ostrołęka (City) | Ostrołęka（城市） |
+| Ostrołęka (City) | 奥斯特罗文卡（城市） |
 | Ostrów Mazowiecka (City) | 马佐夫舍地区奥斯特鲁夫（城市） |
-| Płock (City) | Płock（城市） |
+| Płock (City) | 普里洛克（城市） |
 | Poznań (City) | 波茲南（城市） |
 | Przemyśl (City) | 普热梅希尔（城市） |
 | Radom (City) | 拉多姆（城市） |
