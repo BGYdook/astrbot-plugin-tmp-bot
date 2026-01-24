@@ -1916,62 +1916,29 @@ class TmpBotPlugin(Star):
         logger.info(f"DLC列表: 聚合文本长度={len(text)} 行数={len(lines)}")
         if self._cfg_bool('dlc_list_image', False):
             logger.info("DLC列表: 尝试进行图片渲染(html_render)")
-            item_count = len(items)
-            cols = 2 if item_count > 6 else 1
-            wrap_w = 860 if cols == 2 else 720
-            if item_count <= 3:
-                list_img_w = 280
-            elif item_count <= 6:
-                list_img_w = 240
-            elif item_count <= 10:
-                list_img_w = 220
-            else:
-                list_img_w = 200
             tmpl = """
 <style>
   html, body { margin:0; padding:0; background:#222d33; width:auto; }
   * { box-sizing: border-box; }
 </style>
-<style>
-  .wrap { width: {{ wrap_w }}px; margin: 0 auto; padding: 14px; background:#222d33; color:#fff; font-family:system-ui,Segoe UI,Helvetica,Arial,sans-serif; }
-  .title { font-size:20px; font-weight:700; margin: 0 0 12px 0; text-align:center; letter-spacing:.2px; }
-  .grid { display:grid; grid-template-columns: repeat({{ cols }}, 1fr); gap: 12px; }
-  .card { background:#24313a; border:1px solid rgba(255,255,255,0.08); border-radius:10px; overflow:hidden; }
-  .card-inner { display:flex; padding:12px; gap:12px; }
-  .meta { flex:1; min-width:0; }
-  .name { font-size:16px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .desc { margin-top:6px; font-size:13px; color:#e5e5e5; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; text-overflow:ellipsis; }
-  .price { margin-top:10px; display:flex; align-items:baseline; gap:6px; flex-wrap:wrap; }
-  .price .now { color:#BEEE11; font-size:15px; font-weight:700; }
-  .price .old { color:#cbcbcb; font-size:14px; text-decoration:line-through; }
-  .price .off { font-size:13px; color:#BEEE11; background:#4c6b22; padding:2px 6px; border-radius:6px; }
-  .wrap.cols-1 .card-inner { flex-direction:row; }
-  .wrap.cols-1 .img { width: {{ list_img_w }}px; flex: 0 0 {{ list_img_w }}px; height:auto; border-radius:8px; object-fit:cover; }
-  .wrap.cols-2 .card-inner { flex-direction:column; padding:10px; gap:10px; }
-  .wrap.cols-2 .img { width:100%; height:auto; border-radius:8px; object-fit:cover; }
-</style>
-<div class="wrap cols-{{ cols }}">
-  <div class="title">DLC 列表</div>
-  <div class="grid">
-    {% for it in items %}
-    <div class="card">
-      <div class="card-inner">
-        <img class="img" src="{{ it.headerImageUrl }}" />
-        <div class="meta">
-          <div class="name">{{ it.name }}</div>
-          <div class="desc">{{ it.desc }}</div>
-          <div class="price">
-            <span class="now">{{ it.price_str }}</span>
-            {% if it.discount and it.discount > 0 %}
-            <span class="old">{{ it.original_price_str }}</span>
-            <span class="off">-{{ it.discount }}%</span>
-            {% endif %}
-          </div>
-        </div>
+<div style=\"width:100vw;background:#222d33;color:#fff;font-family:system-ui,Segoe UI,Helvetica,Arial,sans-serif;\">
+  <div style=\"font-size:20px;font-weight:600;margin:0;padding:12px 0 8px 0;\">DLC 列表</div>
+  {% for it in items %}
+  <div style=\"display:flex;flex-direction:row;background:#24313a;margin:0 0 12px 0;padding:12px;\">
+    <img src=\"{{ it.headerImageUrl }}\" style=\"width:210px;height:auto;object-fit:cover;\"/>
+    <div style=\"flex:1;padding:0 12px;\">
+      <div style=\"font-size:18px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;\">{{ it.name }}</div>
+      <div style=\"font-size:14px;color:#e5e5e5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-overflow:ellipsis;\">{{ it.desc }}</div>
+      <div style=\"margin-top:8px;\">
+        <span style=\"display:inline-block;color:#BEEE11;font-size:16px;\">{{ it.price_str }}</span>
+        {% if it.discount and it.discount > 0 %}
+        <span style=\"display:inline-block;color:#cbcbcb;font-size:16px;text-decoration:line-through;margin-left:6px;\">{{ it.original_price_str }}</span>
+        <span style=\"font-size:14px;color:#BEEE11;background:#4c6b22;padding:2px 6px;margin-left:4px;\">-{{ it.discount }}%</span>
+        {% endif %}
       </div>
     </div>
-    {% endfor %}
   </div>
+  {% endfor %}
 </div>
 """
             mapped: List[Dict[str, Any]] = []
@@ -1997,7 +1964,7 @@ class TmpBotPlugin(Star):
                 })
             try:
                 options = { 'type': 'jpeg', 'quality': 92, 'full_page': True, 'omit_background': False }
-                url = await self.html_render(tmpl, { 'items': mapped, 'cols': cols, 'wrap_w': wrap_w, 'list_img_w': list_img_w }, options=options)
+                url = await self.html_render(tmpl, { 'items': mapped }, options=options)
                 if isinstance(url, str) and url:
                     logger.info(f"DLC列表: html_render 成功 -> {url}")
                     yield event.chain_result([Image.fromURL(url)])
@@ -2436,32 +2403,23 @@ class TmpBotPlugin(Star):
 
         message += "=" * 35 + "\n"
 
-        item_count = len(items)
-        cols = 2 if item_count > 6 else 1
-        rows = (item_count + cols - 1) // cols if cols > 0 else 1
-        wrap_w = 920 if cols == 2 else 640
-
         rank_tmpl = """
 <style>
   html, body { margin:0; padding:0; background:#222d33; width:auto; }
   * { box-sizing: border-box; }
-  .wrap { width: {{ wrap_w }}px; margin:0 auto; padding:14px; background:#222d33; color:#fff; font-family:system-ui,Segoe UI,Helvetica,Arial,sans-serif; }
+  .wrap { width:600px; margin:0 auto; padding:14px; background:#222d33; color:#fff; font-family:system-ui,Segoe UI,Helvetica,Arial,sans-serif; }
   .header { font-size:20px; font-weight:600; margin:0 0 8px 0; text-align:center; }
   .me { background:#1f2a31; border:1px solid rgba(255,255,255,0.10); border-radius:8px; padding:10px 12px; margin:0 0 10px 0; }
   .me .t1 { font-size:14px; font-weight:700; margin:0 0 4px 0; }
   .me .t2 { font-size:13px; opacity:0.92; }
-  .grid { display:grid; grid-template-columns: repeat({{ cols }}, 1fr); grid-auto-flow: column; grid-template-rows: repeat({{ rows }}, auto); gap: 8px; }
-  .item { display:flex; align-items:center; background:#24313a; margin:0; padding:8px 12px; border-radius:6px; border:1px solid rgba(255,255,255,0.08); }
+  .list { margin:0; padding:0; }
+  .item { display:flex; align-items:center; background:#24313a; margin:0 0 8px 0; padding:8px 12px; border-radius:6px; border:1px solid rgba(255,255,255,0.08); }
   .item.top3 { background:linear-gradient(135deg,rgba(255,215,0,0.18),rgba(255,215,0,0.06)); border-color:rgba(255,215,0,0.35); }
   .rank { width:40px; font-size:15px; font-weight:bold; text-align:center; }
   .name { flex:1; padding:0 10px; min-width:0; font-size:14px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .km { min-width:90px; font-size:14px; font-weight:700; text-align:right; white-space:nowrap; }
-  .wrap.cols-2 { padding: 12px; }
-  .wrap.cols-2 .item { padding:7px 10px; }
-  .wrap.cols-2 .name { font-size:13px; }
-  .wrap.cols-2 .km { font-size:13px; min-width:82px; }
 </style>
-<div class="wrap cols-{{ cols }}">
+<div class="wrap">
   <div class="header">{{ title }}</div>
   {% if me %}
   <div class="me">
@@ -2469,7 +2427,7 @@ class TmpBotPlugin(Star):
     <div class="t2">里程：{{ '%.2f' % me.km }} km{% if me.rank is not none %} | 排名：No.{{ me.rank }}{% endif %}{% if me.vtc_role %} | 车队职位：{{ me.vtc_role }}{% endif %}</div>
   </div>
   {% endif %}
-  <div class="grid">
+  <div class="list">
     {% for it in items %}
     <div class="item{% if it.rank <= 3 %} top3{% endif %}">
       <div class="rank">#{{ it.rank }}</div>
@@ -2483,7 +2441,7 @@ class TmpBotPlugin(Star):
 
         try:
             options = { 'type': 'jpeg', 'quality': 92, 'full_page': True, 'omit_background': False }
-            url = await self.html_render(rank_tmpl, { 'title': '- 总行驶里程排行榜 -', 'items': items, 'me': me_data, 'cols': cols, 'rows': rows, 'wrap_w': wrap_w }, options=options)
+            url = await self.html_render(rank_tmpl, { 'title': '- 总行驶里程排行榜 -', 'items': items, 'me': me_data }, options=options)
             if isinstance(url, str) and url:
                 yield event.chain_result([Image.fromURL(url)])
                 return
@@ -2600,32 +2558,23 @@ class TmpBotPlugin(Star):
 
         message += "=" * 35 + "\n"
 
-        item_count = len(items)
-        cols = 2 if item_count > 6 else 1
-        rows = (item_count + cols - 1) // cols if cols > 0 else 1
-        wrap_w = 920 if cols == 2 else 640
-
         rank_tmpl = """
 <style>
   html, body { margin:0; padding:0; background:#222d33; width:auto; }
   * { box-sizing: border-box; }
-  .wrap { width: {{ wrap_w }}px; margin:0 auto; padding:14px; background:#222d33; color:#fff; font-family:system-ui,Segoe UI,Helvetica,Arial,sans-serif; }
+  .wrap { width:600px; margin:0 auto; padding:14px; background:#222d33; color:#fff; font-family:system-ui,Segoe UI,Helvetica,Arial,sans-serif; }
   .header { font-size:20px; font-weight:600; margin:0 0 8px 0; text-align:center; }
   .me { background:#1f2a31; border:1px solid rgba(255,255,255,0.10); border-radius:8px; padding:10px 12px; margin:0 0 10px 0; }
   .me .t1 { font-size:14px; font-weight:700; margin:0 0 4px 0; }
   .me .t2 { font-size:13px; opacity:0.92; }
-  .grid { display:grid; grid-template-columns: repeat({{ cols }}, 1fr); grid-auto-flow: column; grid-template-rows: repeat({{ rows }}, auto); gap: 8px; }
-  .item { display:flex; align-items:center; background:#24313a; margin:0; padding:8px 12px; border-radius:6px; border:1px solid rgba(255,255,255,0.08); }
+  .list { margin:0; padding:0; }
+  .item { display:flex; align-items:center; background:#24313a; margin:0 0 8px 0; padding:8px 12px; border-radius:6px; border:1px solid rgba(255,255,255,0.08); }
   .item.top3 { background:linear-gradient(135deg,rgba(255,215,0,0.18),rgba(255,215,0,0.06)); border-color:rgba(255,215,0,0.35); }
   .rank { width:40px; font-size:15px; font-weight:bold; text-align:center; }
   .name { flex:1; padding:0 10px; min-width:0; font-size:14px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .km { min-width:90px; font-size:14px; font-weight:700; text-align:right; white-space:nowrap; }
-  .wrap.cols-2 { padding: 12px; }
-  .wrap.cols-2 .item { padding:7px 10px; }
-  .wrap.cols-2 .name { font-size:13px; }
-  .wrap.cols-2 .km { font-size:13px; min-width:82px; }
 </style>
-<div class="wrap cols-{{ cols }}">
+<div class="wrap">
   <div class="header">{{ title }}</div>
   {% if me %}
   <div class="me">
@@ -2633,7 +2582,7 @@ class TmpBotPlugin(Star):
     <div class="t2">里程：{{ '%.2f' % me.km }} km{% if me.rank is not none %} | 排名：No.{{ me.rank }}{% endif %}{% if me.vtc_role %} | 车队职位：{{ me.vtc_role }}{% endif %}</div>
   </div>
   {% endif %}
-  <div class="grid">
+  <div class="list">
     {% for it in items %}
     <div class="item{% if it.rank <= 3 %} top3{% endif %}">
       <div class="rank">#{{ it.rank }}</div>
@@ -2647,7 +2596,7 @@ class TmpBotPlugin(Star):
 
         try:
             options = { 'type': 'jpeg', 'quality': 92, 'full_page': True, 'omit_background': False }
-            url = await self.html_render(rank_tmpl, { 'title': '- 今日行驶里程排行榜 -', 'items': items, 'me': me_data, 'cols': cols, 'rows': rows, 'wrap_w': wrap_w }, options=options)
+            url = await self.html_render(rank_tmpl, { 'title': '- 今日行驶里程排行榜 -', 'items': items, 'me': me_data }, options=options)
             if isinstance(url, str) and url:
                 yield event.chain_result([Image.fromURL(url)])
                 return
