@@ -18,7 +18,7 @@
     }
 
     #container {
-      width: var(--wrap-w, 340px);
+      width: 340px;
       background: linear-gradient(135deg, #1f2f54, #0f2c2a);
       overflow: hidden;
       padding-bottom: 12px;
@@ -44,21 +44,6 @@
 
     .leaderboard-container {
       padding: 12px 16px 0 16px;
-    }
-
-    #container.cols-2 .leaderboard-container {
-      padding: 12px 12px 0 12px;
-    }
-
-    #container.cols-2 #top-rankings {
-      display: grid;
-      grid-auto-flow: column;
-      grid-template-rows: repeat(var(--rows, 5), auto);
-      gap: 4px;
-    }
-
-    #container.cols-2 #top-rankings .leaderboard-item {
-      margin-bottom: 0;
     }
 
     .leaderboard-item {
@@ -275,30 +260,15 @@
       currentPlayerContainer.innerHTML = '';
 
       // 渲染前10名排行榜
-      let shown = [];
       if (apiData.mileageRankingList && Array.isArray(apiData.mileageRankingList)) {
-        shown = apiData.mileageRankingList
-          .slice(0, 10)
-          .filter((player) => player && player.tmpName && typeof player.distance !== 'undefined' && typeof player.ranking !== 'undefined');
+        apiData.mileageRankingList.slice(0, 10).forEach((player) => {
+          if (player && player.tmpName && typeof player.distance !== 'undefined' && typeof player.ranking !== 'undefined') {
+            const isTop3 = player.ranking <= 3;
+            const item = createLeaderboardItem(player.ranking, player.tmpName, player.distance, false, isTop3);
+            topRankings.appendChild(item);
+          }
+        });
       }
-
-      const count = shown.length;
-      const cols = count > 6 ? 2 : 1;
-      const rows = Math.max(1, Math.ceil(count / cols));
-      const container = document.getElementById('container');
-      if (container) {
-        container.classList.remove('cols-1', 'cols-2');
-        container.classList.add(`cols-${cols}`);
-        const wrapW = cols === 2 ? 700 : 340;
-        container.style.setProperty('--wrap-w', `${wrapW}px`);
-        container.style.setProperty('--rows', `${rows}`);
-      }
-
-      shown.forEach((player) => {
-        const isTop3 = player.ranking <= 3;
-        const item = createLeaderboardItem(player.ranking, player.tmpName, player.distance, false, isTop3);
-        topRankings.appendChild(item);
-      });
 
       // 渲染当前玩家排名
       if (apiData.playerMileageRanking && apiData.playerMileageRanking.tmpName && typeof apiData.playerMileageRanking.ranking !== 'undefined') {
