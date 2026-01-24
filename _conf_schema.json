@@ -53,6 +53,18 @@
     "default": false,
     "title": "DLC列表使用图片输出",
     "description": "开启后，DLC列表将调用文本转图像服务以图片形式发送。"
+  },
+  "map_tile_ets_url": {
+    "type": "string",
+    "default": "https://map-cdn.krashnz.com/ets2map/ets2/v1.57/{x}_{y}.png",
+    "title": "ETS2底图瓦片URL",
+    "description": "定位/地图渲染用的 ETS2 地图瓦片地址模板，需包含 {x} 与 {y}，可选包含 {z}。留空可禁用底图。"
+  },
+  "map_tile_promods_url": {
+    "type": "string",
+    "default": "https://map-cdn.krashnz.com/ets2map/promods/v2.80/{x}_{y}.png",
+    "title": "ProMods底图瓦片URL",
+    "description": "定位/地图渲染用的 ProMods 地图瓦片地址模板，需包含 {x} 与 {y}，可选包含 {z}。留空可禁用底图。"
   }
   
 }

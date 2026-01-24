@@ -93,7 +93,9 @@ module.exports = async (ctx, cfg, serverName) => {
   let data = {
     mapType: serverInfo.mapType,
     trafficList: [],
-    playerCoordinateList: mapData.error && mapData.data ? [] : mapData.data.map(item => [item.axisX, item.axisY])
+    playerCoordinateList: mapData.error && mapData.data ? [] : mapData.data.map(item => [item.axisX, item.axisY]),
+    mapTileEts: cfg && typeof cfg.map_tile_ets_url === 'string' ? cfg.map_tile_ets_url : null,
+    mapTilePromods: cfg && typeof cfg.map_tile_promods_url === 'string' ? cfg.map_tile_promods_url : null
   }
   for (const traffic of trafficData.data) {
     data.trafficList.push({

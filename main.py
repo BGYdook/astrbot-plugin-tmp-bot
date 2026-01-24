@@ -2158,7 +2158,30 @@ class TmpBotPlugin(Star):
 
         # 4) 周边玩家查询并绘制简易地图（基于 da.vtcm.link）
         try:
+            tile_ets = self._cfg_str(
+                "map_tile_ets_url",
+                "https://map-cdn.krashnz.com/ets2map/ets2/v1.57/{x}_{y}.png",
+            )
+            tile_promods = self._cfg_str(
+                "map_tile_promods_url",
+                "https://map-cdn.krashnz.com/ets2map/promods/v2.80/{x}_{y}.png",
+            )
+            def _norm_tile_url(v: Any) -> str:
+                s = str(v or "").strip()
+                if not s:
+                    return ""
+                if s.lower() in ("none", "off", "disable", "disabled", "false", "0"):
+                    return ""
+                return s
+            tile_ets = _norm_tile_url(tile_ets)
+            tile_promods = _norm_tile_url(tile_promods)
             server_id = online.get('serverId')
+            is_promods = False
+            try:
+                is_promods = int(server_id or 0) in (50, 51)
+            except Exception:
+                is_promods = False
+            map_type_num = 2 if is_promods else 1
             cx = float(online.get('x') or 0)
             cy = float(online.get('y') or 0)
             ax, ay = cx - 4000, cy + 2500
@@ -2175,6 +2198,33 @@ class TmpBotPlugin(Star):
             # 将当前玩家追加
             area_players = [p for p in area_players if str(p.get('tmpId')) != str(tmp_id)]
             area_players.append({'tmpId': str(tmp_id), 'axisX': cx, 'axisY': cy})
+
+            marker_list: List[Dict[str, float]] = []
+            try:
+                marker_url = f"https://da.vtcm.link/map/marker?mapType={map_type_num}"
+                if self.session:
+                    async with self.session.get(marker_url, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
+                        if resp.status == 200:
+                            j = await resp.json()
+                            raw = j.get("data") or []
+                            cand: List[Tuple[float, Dict[str, float]]] = []
+                            for m in raw:
+                                if not isinstance(m, dict):
+                                    continue
+                                if m.get("type") != 2:
+                                    continue
+                                mx = m.get("axisX")
+                                my = m.get("axisY")
+                                if not isinstance(mx, (int, float)) or not isinstance(my, (int, float)):
+                                    continue
+                                if mx < ax or mx > bx or my < by or my > ay:
+                                    continue
+                                d = (float(mx) - cx) * (float(mx) - cx) + (float(my) - cy) * (float(my) - cy)
+                                cand.append((d, {"axisX": float(mx), "axisY": float(my)}))
+                            cand.sort(key=lambda t: t[0])
+                            marker_list = [m for _, m in cand[:120]]
+            except Exception:
+                marker_list = []
 
             map_tmpl = """
 <link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css\">
@@ -2211,7 +2261,7 @@ class TmpBotPlugin(Star):
   var mapType = promodsIds.indexOf(serverId) !== -1 ? 'promods' : 'ets';
   var cfg = {
     ets: {
-      tileUrl: 'https://ets2.online/map/ets2map_157/{z}/{x}/{y}.png',
+      tileUrl: '{{ tile_ets }}',
       bounds: { x:65536, y:65536 },
       maxZoom: 8, minZoom: 2,
       calc: function(xx, yy) {
@@ -2229,7 +2279,7 @@ class TmpBotPlugin(Star):
       }
     },
     promods: {
-      tileUrl: 'https://ets2.online/map/ets2mappromods_156/{z}/{x}/{y}.png',
+      tileUrl: '{{ tile_promods }}',
       bounds: { x:65536, y:65536 },
       maxZoom: 8, minZoom: 2,
       calc: function(xx, yy) {
@@ -2254,11 +2304,19 @@ class TmpBotPlugin(Star):
     map.unproject([0, c.bounds.y], c.maxZoom),
     map.unproject([c.bounds.x, 0], c.maxZoom)
   );
- L.tileLayer(c.tileUrl, { minZoom: c.minZoom, maxZoom: 10, maxNativeZoom: c.maxZoom, tileSize: 256, bounds: b, reuseTiles: true }).addTo(map);
+  if (c.tileUrl && String(c.tileUrl).trim()) {
+    L.tileLayer(c.tileUrl, { minZoom: c.minZoom, maxZoom: 10, maxNativeZoom: c.maxZoom, tileSize: 256, bounds: b, reuseTiles: true }).addTo(map);
+  }
   map.setMaxBounds(b);
   var centerX = {{ center_x }};
   var centerY = {{ center_y }};
+  var markers = [ {% for m in markers %}{ axisX: {{ m.axisX }}, axisY: {{ m.axisY }} }{% if not loop.last %}, {% endif %}{% endfor %} ];
   var players = [ {% for p in players %}{ axisX: {{ p.axisX }}, axisY: {{ p.axisY }}, tmpId: "{{ p.tmpId }}" }{% if not loop.last %}, {% endif %}{% endfor %} ];
+  for (var j=0;j<markers.length;j++){
+    var mk = markers[j];
+    var mkLL = map.unproject(c.calc(mk.axisX, mk.axisY), c.maxZoom);
+    L.circleMarker(mkLL, { color:'rgba(0,0,0,0)', weight:0, fillColor:'#ffcc00', fillOpacity:0.45, radius:2 }).addTo(map);
+  }
   for (var i=0;i<players.length;i++){
     var p = players[i];
     var xy = c.calc(p.axisX, p.axisY);
@@ -2285,9 +2343,12 @@ class TmpBotPlugin(Star):
                 'avatar': avatar_url or '',
                 'country': display_country,
                 'city': display_city,
+                'tile_ets': tile_ets,
+                'tile_promods': tile_promods,
                 'server_id': int(online.get('serverId') or 0),
                 'center_x': float(cx),
-                'center_y': float(cy)
+                'center_y': float(cy),
+                'markers': marker_list
             }
             logger.info(f"定位: 渲染底图 mapType={'promods' if int(online.get('serverId') or 0) in [50,51] else 'ets'} players={len(area_players)}")
             url2 = await self.html_render(map_tmpl, map_data, options={'type': 'jpeg', 'quality': 92, 'full_page': True, 'timeout': 8000, 'animations': 'disabled'})
