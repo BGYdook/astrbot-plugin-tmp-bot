@@ -35,12 +35,6 @@
     "title": "API 请求超时秒数",
     "description": "TruckersMP/Trucky/VTCM 接口的请求超时时间。"
   },
-  "locate_nearby_marker_limit": {
-    "type": "int",
-    "default": 40,
-    "title": "定位附近玩家最大显示数",
-    "description": "定位图片中最多绘制多少个玩家点（包含自己），避免人多时渲染过慢。"
-  },
   "prefer_vtcm_mileage": {
     "type": "bool",
     "default": true,
