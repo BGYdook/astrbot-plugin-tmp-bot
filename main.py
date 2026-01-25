@@ -276,6 +276,11 @@ class TmpBotPlugin(Star):
             return
         interval = self._get_fullmap_interval()
         async with self._fullmap_fetch_lock:
+            now_wall = time.time()
+            if now_wall - self._fullmap_last_fetch_ts < interval:
+                if not self._fullmap_cache:
+                    logger.info(f"fullmap 拉取跳过(限频): interval={interval}s")
+                return
             now_mono = time.monotonic()
             if now_mono < self._fullmap_next_fetch_ts:
                 if not self._fullmap_cache:
@@ -300,9 +305,6 @@ class TmpBotPlugin(Star):
 
     def _get_fullmap_tile_url(self, map_type: str) -> Optional[str]:
         data = self._fullmap_cache or {}
-        payload = data.get('Data') if isinstance(data, dict) else data
-        if not payload:
-            return None
         candidates: List[str] = []
         def walk(v: Any) -> None:
             if isinstance(v, dict):
@@ -317,9 +319,24 @@ class TmpBotPlugin(Star):
                 s = v.strip()
                 if s.startswith("http") and "{z}" in s and "{x}" in s and "{y}" in s:
                     candidates.append(s)
-        walk(payload)
+        if isinstance(data, dict):
+            if data.get('Data'):
+                walk(data.get('Data'))
+            if data.get('data'):
+                walk(data.get('data'))
+            walk(data)
+        else:
+            walk(data)
         if not candidates:
             return None
+        seen = set()
+        uniq = []
+        for c in candidates:
+            if c in seen:
+                continue
+            seen.add(c)
+            uniq.append(c)
+        candidates = uniq
         if map_type == "promods":
             for c in candidates:
                 if "promods" in c.lower():
