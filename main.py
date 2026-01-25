@@ -254,7 +254,7 @@ class TmpBotPlugin(Star):
             trust_env=True
         )
         logger.info(f"TMP Bot 插件HTTP会话已创建，超时 {timeout_sec}s")
-        self._start_fullmap_task()
+        self._fullmap_task = None
 
     def _get_fullmap_interval(self) -> int:
         v = self._cfg_int('ets2map_fullmap_interval_seconds', 60)
@@ -2936,12 +2936,7 @@ class TmpBotPlugin(Star):
         
     async def terminate(self):
         """插件卸载时的清理工作：关闭HTTP会话。"""
-        if self._fullmap_task and not self._fullmap_task.done():
-            self._fullmap_task.cancel()
-            try:
-                await self._fullmap_task
-            except Exception:
-                pass
+        self._fullmap_task = None
         if self.session:
             await self.session.close()
             self.session = None
