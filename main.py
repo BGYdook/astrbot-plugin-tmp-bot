@@ -264,6 +264,7 @@ class TmpBotPlugin(Star):
         self._fullmap_task = asyncio.create_task(self._fullmap_loop())
 
     async def _fullmap_loop(self) -> None:
+        await asyncio.sleep(self._get_fullmap_interval())
         while True:
             await self._fetch_fullmap()
             await asyncio.sleep(self._get_fullmap_interval())
@@ -2256,12 +2257,15 @@ class TmpBotPlugin(Star):
             if not self._fullmap_cache:
                 await self._fetch_fullmap()
 
-            default_tile_ets = "https://ets2.online/map/ets2map_157/{z}/{x}/{y}.png"
-            default_tile_promods = "https://ets2.online/map/ets2mappromods_156/{z}/{x}/{y}.png"
-            tile_url_ets = self._get_fullmap_tile_url("ets") or default_tile_ets
-            tile_url_promods = self._get_fullmap_tile_url("promods") or default_tile_promods
-            logger.info(f"定位: tile_ets={'fullmap' if tile_url_ets != default_tile_ets else 'fallback'}")
-            logger.info(f"定位: tile_promods={'fullmap' if tile_url_promods != default_tile_promods else 'fallback'}")
+            map_type = 'promods' if int(server_id or 0) in [50, 51] else 'ets'
+            tile_url_ets = self._get_fullmap_tile_url("ets")
+            tile_url_promods = self._get_fullmap_tile_url("promods")
+            logger.info(f"定位: tile_ets={'fullmap' if tile_url_ets else 'missing'}")
+            logger.info(f"定位: tile_promods={'fullmap' if tile_url_promods else 'missing'}")
+            if map_type == 'ets' and not tile_url_ets:
+                raise RuntimeError("fullmap 缓存未包含 ETS 瓦片地址")
+            if map_type == 'promods' and not tile_url_promods:
+                raise RuntimeError("fullmap 缓存未包含 ProMods 瓦片地址")
 
             map_tmpl = """
 <link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css\">
