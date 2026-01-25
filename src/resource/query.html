@@ -221,42 +221,9 @@
     </div>
   </div>
   <script>
-    function addTileLayerWithFallback (map, urlTemplate, options) {
-      if (!urlTemplate || !String(urlTemplate).trim()) {
-        return null
-      }
-
-      const tileLayer = L.tileLayer(urlTemplate, options)
-
-      let tileErrorCount = 0
-      tileLayer.on('tileerror', function () {
-        tileErrorCount += 1
-        if (tileErrorCount === 12) {
-          tileLayer.remove()
-          const control = L.control({ position: 'topleft' })
-          control.onAdd = function () {
-            const div = L.DomUtil.create('div')
-            div.style.padding = '6px 8px'
-            div.style.margin = '8px'
-            div.style.borderRadius = '6px'
-            div.style.background = 'rgba(0,0,0,0.45)'
-            div.style.color = '#ffffff'
-            div.style.fontSize = '12px'
-            div.style.lineHeight = '16px'
-            div.innerText = '底图加载失败'
-            return div
-          }
-          control.addTo(map)
-        }
-      })
-
-      tileLayer.addTo(map)
-      return tileLayer
-    }
-
     let mapConfig = {
       ets: {
-          tileUrl: 'https://map-cdn.krashnz.com/ets2map/ets2/v1.57/{x}_{y}.png',
+        tileUrl: 'https://ets2.online/map/ets2map_157/{z}/{x}/{y}.png',
         bounds: {
           y: 65536,
           x: 65536
@@ -285,7 +252,7 @@
         }
       },
       promods: {
-        tileUrl: 'https://map-cdn.krashnz.com/ets2map/promods/v2.80/{x}_{y}.png',
+        tileUrl: 'https://ets2.online/map/ets2mappromods_156/{z}/{x}/{y}.png',
         bounds: {
           y: 65536,
           x: 65536
@@ -316,9 +283,6 @@
     }
 
     function init(data) {
-      if (data && data.mapTileEts) mapConfig.ets.tileUrl = data.mapTileEts
-      if (data && data.mapTilePromods) mapConfig.promods.tileUrl = data.mapTilePromods
-
       document.getElementById('tmp-name').innerText = data.name
       document.getElementById('tmp-avatar').src = data.avatarUrl
         document.getElementById('tmp-id').innerHTML = `TMP#${data.tmpId} <span class="group" style="background-color: #${data.groupColor}">${data.groupName}</span>`
@@ -340,14 +304,7 @@
       }
       if (data.isOnline) {
         document.getElementById('position-title').innerText = `${data.onlineServerName} · ${data.onlineCountry}-${data.onlineCity}`
-        map({
-          mapType: data.onlineMapType,
-          x: data.onlineX,
-          y: data.onlineY,
-          currentPlayerId: data.tmpId,
-          playerList: data.playerList,
-          markerList: data.markerList
-        })
+        map(data.onlineMapType, data.onlineX, data.onlineY)
       } else {
         document.getElementById('position-box').remove()
       }
@@ -365,10 +322,7 @@
       }
     }
 
-    function map(info) {
-      const mapType = info.mapType
-      const x = info.x
-      const y = info.y
+    function map(mapType, x, y) {
       // 定义地图
       let map = L.map('map', {
         attributionControl: false,
@@ -383,13 +337,14 @@
       );
 
       // 瓦片地图
-      addTileLayerWithFallback(map, mapConfig[mapType].tileUrl, {
+      L.tileLayer(mapConfig[mapType].tileUrl, {
+        minZoom: 2,
         maxZoom: 10,
         maxNativeZoom: 8,
         tileSize: 256,
         bounds: bounds,
         reuseTiles: true
-      })
+      }).addTo(map);
       map.setMaxBounds(
         new L.LatLngBounds(
           map.unproject([0, mapConfig[mapType].bounds.y], mapConfig[mapType].maxZoom),
@@ -397,43 +352,14 @@
         )
       );
 
-      if (Array.isArray(info.markerList)) {
-        for (let marker of info.markerList) {
-          if (!marker || typeof marker.axisX !== 'number' || typeof marker.axisY !== 'number') continue
-          L.circleMarker(map.unproject(mapConfig[mapType].calculateMapCoordinate(marker.axisX, marker.axisY), 8), {
-            color: 'rgba(0,0,0,0)',
-            weight: 0,
-            fillColor: '#ffcc00',
-            fillOpacity: 0.45,
-            radius: 2
-          }).addTo(map)
-        }
-      }
-
-      if (Array.isArray(info.playerList)) {
-        for (let player of info.playerList) {
-          if (!player || typeof player.axisX !== 'number' || typeof player.axisY !== 'number') continue
-          L.circleMarker(map.unproject(mapConfig[mapType].calculateMapCoordinate(player.axisX, player.axisY), 8), {
-            color: '#2f2f2f',
-            weight: 2,
-            fillColor: info.currentPlayerId && player.tmpId && info.currentPlayerId.toString() === player.tmpId.toString() ? '#1cb715' : '#158cfb',
-            fillOpacity: 1,
-            radius: 5,
-            zIndex: info.currentPlayerId && player.tmpId && info.currentPlayerId.toString() === player.tmpId.toString() ? 1000 : undefined
-          }).addTo(map)
-        }
-      }
-
-      if (!Array.isArray(info.playerList) || info.playerList.length === 0) {
-        L.circleMarker(map.unproject(mapConfig[mapType].calculateMapCoordinate(x, y), 8), {
-          color: '#2f2f2f',       // 标记点边框颜色
-          weight: 2,              // 标记点边框大小
-          fillColor: '#1cb715',   // 标记点填充颜色
-          fillOpacity: 1,         // 标记点填充不透明度（0到1之间的值）
-          radius: 5,              // 标记点半径（以像素为单位）
-          zIndex: 1000
-        }).addTo(map);
-      }
+      L.circleMarker(map.unproject(mapConfig[mapType].calculateMapCoordinate(x, y), 8), {
+        color: '#2f2f2f',       // 标记点边框颜色
+        weight: 2,              // 标记点边框大小
+        fillColor: '#1cb715',   // 标记点填充颜色
+        fillOpacity: 1,         // 标记点填充不透明度（0到1之间的值）
+        radius: 5,              // 标记点半径（以像素为单位）
+        zIndex: 1000
+      }).addTo(map);
 
       // 设置中心点
       map.setView(map.unproject(mapConfig[mapType].calculateMapCoordinate(x, y), 8), 5);

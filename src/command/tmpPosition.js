@@ -40,11 +40,11 @@ module.exports = async (ctx, cfg, session, tmpId) => {
     }
 
     // 查询周边玩家，并处理数据
-    const ax = playerMapInfo.data.x - 4000
-    const ay = playerMapInfo.data.y + 2500
-    const bx = playerMapInfo.data.x + 4000
-    const by = playerMapInfo.data.y - 2500
-    let areaPlayersData = await evmOpenApi.mapPlayerList(ctx.http, playerMapInfo.data.server, ax, ay, bx, by)
+    let areaPlayersData = await evmOpenApi.mapPlayerList(ctx.http, playerMapInfo.data.server,
+        playerMapInfo.data.x - 4000,
+        playerMapInfo.data.y + 2500,
+        playerMapInfo.data.x + 4000,
+        playerMapInfo.data.y - 2500)
     let areaPlayerList = []
     if (!areaPlayersData.error) {
       areaPlayerList = areaPlayersData.data
@@ -63,31 +63,10 @@ module.exports = async (ctx, cfg, session, tmpId) => {
 
     // promods服ID集合
     let promodsServerIdList = [50, 51]
-    const mapType = promodsServerIdList.indexOf(playerMapInfo.data.server) !== -1 ? 'promods' : 'ets'
-    const mapTypeNum = mapType === 'promods' ? 2 : 1
-
-    let markerList = []
-    try {
-      let markerResult = await evmOpenApi.mapMarkerList(ctx.http, mapTypeNum)
-      if (!markerResult.error && Array.isArray(markerResult.data)) {
-        markerList = markerResult.data
-          .filter((m) => m && m.type === 2 && typeof m.axisX === 'number' && typeof m.axisY === 'number')
-          .filter((m) => m.axisX >= ax && m.axisX <= bx && m.axisY >= by && m.axisY <= ay)
-          .sort((a, b) => {
-            const da = (a.axisX - playerMapInfo.data.x) * (a.axisX - playerMapInfo.data.x) + (a.axisY - playerMapInfo.data.y) * (a.axisY - playerMapInfo.data.y)
-            const db = (b.axisX - playerMapInfo.data.x) * (b.axisX - playerMapInfo.data.x) + (b.axisY - playerMapInfo.data.y) * (b.axisY - playerMapInfo.data.y)
-            return da - db
-          })
-          .slice(0, 120)
-          .map((m) => ({ axisX: m.axisX, axisY: m.axisY }))
-      }
-    } catch (e) {
-      markerList = []
-    }
 
     // 构建地图数据
     let data = {
-      mapType,
+      mapType: promodsServerIdList.indexOf(playerMapInfo.data.server) !== -1 ? 'promods' : 'ets',
       avatar: playerInfo.data.smallAvatar,
       username: playerInfo.data.name,
       serverName: playerMapInfo.data.serverDetails.name,
@@ -96,10 +75,7 @@ module.exports = async (ctx, cfg, session, tmpId) => {
       currentPlayerId: tmpId,
       centerX: playerMapInfo.data.x,
       centerY: playerMapInfo.data.y,
-      playerList: areaPlayerList,
-      markerList,
-      mapTileEts: cfg && typeof cfg.map_tile_ets_url === 'string' ? cfg.map_tile_ets_url : null,
-      mapTilePromods: cfg && typeof cfg.map_tile_promods_url === 'string' ? cfg.map_tile_promods_url : null
+      playerList: areaPlayerList
     }
 
     let page

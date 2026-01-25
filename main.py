@@ -195,6 +195,11 @@ class TmpBotPlugin(Star):
         self.config = config or {}
         self._translate_cache: Dict[str, str] = {}
         self._location_maps_loaded: bool = False
+        self._fullmap_cache: Optional[Dict[str, Any]] = None
+        self._fullmap_cache_ts: float = 0.0
+        self._fullmap_last_fetch_ts: float = 0.0
+        self._fullmap_task: Optional[asyncio.Task] = None
+        self._fullmap_lock = asyncio.Lock()
         self._load_location_maps()
         try:
             bind_path = self.config.get('bind_file')
@@ -247,6 +252,75 @@ class TmpBotPlugin(Star):
             trust_env=True
         )
         logger.info(f"TMP Bot 插件HTTP会话已创建，超时 {timeout_sec}s")
+        self._start_fullmap_task()
+
+    def _get_fullmap_interval(self) -> int:
+        v = self._cfg_int('ets2map_fullmap_interval_seconds', 60)
+        return 60 if v < 60 else v
+
+    def _start_fullmap_task(self) -> None:
+        if self._fullmap_task and not self._fullmap_task.done():
+            return
+        self._fullmap_task = asyncio.create_task(self._fullmap_loop())
+
+    async def _fullmap_loop(self) -> None:
+        while True:
+            await self._fetch_fullmap()
+            await asyncio.sleep(self._get_fullmap_interval())
+
+    async def _fetch_fullmap(self) -> None:
+        if not self.session:
+            return
+        now = time.time()
+        interval = self._get_fullmap_interval()
+        if now - self._fullmap_last_fetch_ts < interval:
+            return
+        self._fullmap_last_fetch_ts = now
+        url = "https://tracker.ets2map.com/v3/fullmap"
+        try:
+            async with self.session.get(url, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    if isinstance(data, dict):
+                        async with self._fullmap_lock:
+                            self._fullmap_cache = data
+                            self._fullmap_cache_ts = time.time()
+                        return
+                logger.info(f"fullmap 拉取失败 status={resp.status}")
+        except Exception as e:
+            logger.error(f"fullmap 拉取异常: {e}")
+
+    def _get_fullmap_tile_url(self, map_type: str) -> Optional[str]:
+        data = self._fullmap_cache or {}
+        payload = data.get('Data') if isinstance(data, dict) else data
+        if not payload:
+            return None
+        candidates: List[str] = []
+        def walk(v: Any) -> None:
+            if isinstance(v, dict):
+                for val in v.values():
+                    walk(val)
+                return
+            if isinstance(v, list):
+                for val in v:
+                    walk(val)
+                return
+            if isinstance(v, str):
+                s = v.strip()
+                if s.startswith("http") and "{z}" in s and "{x}" in s and "{y}" in s:
+                    candidates.append(s)
+        walk(payload)
+        if not candidates:
+            return None
+        if map_type == "promods":
+            for c in candidates:
+                if "promods" in c.lower():
+                    return c
+        for c in candidates:
+            lc = c.lower()
+            if "ets" in lc and "promods" not in lc:
+                return c
+        return candidates[0]
 
     # --- 工具：头像处理 ---
     def _normalize_avatar_url(self, url: Optional[str]) -> Optional[str]:
@@ -2158,30 +2232,7 @@ class TmpBotPlugin(Star):
 
         # 4) 周边玩家查询并绘制简易地图（基于 da.vtcm.link）
         try:
-            tile_ets = self._cfg_str(
-                "map_tile_ets_url",
-                "https://map-cdn.krashnz.com/ets2map/ets2/v1.57/{x}_{y}.png",
-            )
-            tile_promods = self._cfg_str(
-                "map_tile_promods_url",
-                "https://map-cdn.krashnz.com/ets2map/promods/v2.80/{x}_{y}.png",
-            )
-            def _norm_tile_url(v: Any) -> str:
-                s = str(v or "").strip()
-                if not s:
-                    return ""
-                if s.lower() in ("none", "off", "disable", "disabled", "false", "0"):
-                    return ""
-                return s
-            tile_ets = _norm_tile_url(tile_ets)
-            tile_promods = _norm_tile_url(tile_promods)
             server_id = online.get('serverId')
-            is_promods = False
-            try:
-                is_promods = int(server_id or 0) in (50, 51)
-            except Exception:
-                is_promods = False
-            map_type_num = 2 if is_promods else 1
             cx = float(online.get('x') or 0)
             cy = float(online.get('y') or 0)
             ax, ay = cx - 4000, cy + 2500
@@ -2199,32 +2250,10 @@ class TmpBotPlugin(Star):
             area_players = [p for p in area_players if str(p.get('tmpId')) != str(tmp_id)]
             area_players.append({'tmpId': str(tmp_id), 'axisX': cx, 'axisY': cy})
 
-            marker_list: List[Dict[str, float]] = []
-            try:
-                marker_url = f"https://da.vtcm.link/map/marker?mapType={map_type_num}"
-                if self.session:
-                    async with self.session.get(marker_url, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
-                        if resp.status == 200:
-                            j = await resp.json()
-                            raw = j.get("data") or []
-                            cand: List[Tuple[float, Dict[str, float]]] = []
-                            for m in raw:
-                                if not isinstance(m, dict):
-                                    continue
-                                if m.get("type") != 2:
-                                    continue
-                                mx = m.get("axisX")
-                                my = m.get("axisY")
-                                if not isinstance(mx, (int, float)) or not isinstance(my, (int, float)):
-                                    continue
-                                if mx < ax or mx > bx or my < by or my > ay:
-                                    continue
-                                d = (float(mx) - cx) * (float(mx) - cx) + (float(my) - cy) * (float(my) - cy)
-                                cand.append((d, {"axisX": float(mx), "axisY": float(my)}))
-                            cand.sort(key=lambda t: t[0])
-                            marker_list = [m for _, m in cand[:120]]
-            except Exception:
-                marker_list = []
+            default_tile_ets = "https://ets2.online/map/ets2map_157/{z}/{x}/{y}.png"
+            default_tile_promods = "https://ets2.online/map/ets2mappromods_156/{z}/{x}/{y}.png"
+            tile_url_ets = self._get_fullmap_tile_url("ets") or default_tile_ets
+            tile_url_promods = self._get_fullmap_tile_url("promods") or default_tile_promods
 
             map_tmpl = """
 <link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css\">
@@ -2261,7 +2290,7 @@ class TmpBotPlugin(Star):
   var mapType = promodsIds.indexOf(serverId) !== -1 ? 'promods' : 'ets';
   var cfg = {
     ets: {
-      tileUrl: '{{ tile_ets }}',
+      tileUrl: '{{ tile_url_ets }}',
       bounds: { x:65536, y:65536 },
       maxZoom: 8, minZoom: 2,
       calc: function(xx, yy) {
@@ -2279,7 +2308,7 @@ class TmpBotPlugin(Star):
       }
     },
     promods: {
-      tileUrl: '{{ tile_promods }}',
+      tileUrl: '{{ tile_url_promods }}',
       bounds: { x:65536, y:65536 },
       maxZoom: 8, minZoom: 2,
       calc: function(xx, yy) {
@@ -2304,19 +2333,11 @@ class TmpBotPlugin(Star):
     map.unproject([0, c.bounds.y], c.maxZoom),
     map.unproject([c.bounds.x, 0], c.maxZoom)
   );
-  if (c.tileUrl && String(c.tileUrl).trim()) {
-    L.tileLayer(c.tileUrl, { minZoom: c.minZoom, maxZoom: 10, maxNativeZoom: c.maxZoom, tileSize: 256, bounds: b, reuseTiles: true }).addTo(map);
-  }
+ L.tileLayer(c.tileUrl, { minZoom: c.minZoom, maxZoom: 10, maxNativeZoom: c.maxZoom, tileSize: 256, bounds: b, reuseTiles: true }).addTo(map);
   map.setMaxBounds(b);
   var centerX = {{ center_x }};
   var centerY = {{ center_y }};
-  var markers = [ {% for m in markers %}{ axisX: {{ m.axisX }}, axisY: {{ m.axisY }} }{% if not loop.last %}, {% endif %}{% endfor %} ];
   var players = [ {% for p in players %}{ axisX: {{ p.axisX }}, axisY: {{ p.axisY }}, tmpId: "{{ p.tmpId }}" }{% if not loop.last %}, {% endif %}{% endfor %} ];
-  for (var j=0;j<markers.length;j++){
-    var mk = markers[j];
-    var mkLL = map.unproject(c.calc(mk.axisX, mk.axisY), c.maxZoom);
-    L.circleMarker(mkLL, { color:'rgba(0,0,0,0)', weight:0, fillColor:'#ffcc00', fillOpacity:0.45, radius:2 }).addTo(map);
-  }
   for (var i=0;i<players.length;i++){
     var p = players[i];
     var xy = c.calc(p.axisX, p.axisY);
@@ -2343,12 +2364,11 @@ class TmpBotPlugin(Star):
                 'avatar': avatar_url or '',
                 'country': display_country,
                 'city': display_city,
-                'tile_ets': tile_ets,
-                'tile_promods': tile_promods,
                 'server_id': int(online.get('serverId') or 0),
                 'center_x': float(cx),
                 'center_y': float(cy),
-                'markers': marker_list
+                'tile_url_ets': tile_url_ets,
+                'tile_url_promods': tile_url_promods
             }
             logger.info(f"定位: 渲染底图 mapType={'promods' if int(online.get('serverId') or 0) in [50,51] else 'ets'} players={len(area_players)}")
             url2 = await self.html_render(map_tmpl, map_data, options={'type': 'jpeg', 'quality': 92, 'full_page': True, 'timeout': 8000, 'animations': 'disabled'})
@@ -2883,6 +2903,12 @@ class TmpBotPlugin(Star):
         
     async def terminate(self):
         """插件卸载时的清理工作：关闭HTTP会话。"""
+        if self._fullmap_task and not self._fullmap_task.done():
+            self._fullmap_task.cancel()
+            try:
+                await self._fullmap_task
+            except Exception:
+                pass
         if self.session:
             await self.session.close()
             self.session = None

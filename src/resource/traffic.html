@@ -81,42 +81,9 @@
     <div class="traffic-box"></div>
   </div>
   <script>
-    function addTileLayerWithFallback (map, urlTemplate, options) {
-      if (!urlTemplate || !String(urlTemplate).trim()) {
-        return null
-      }
-
-      const tileLayer = L.tileLayer(urlTemplate, options)
-
-      let tileErrorCount = 0
-      tileLayer.on('tileerror', function () {
-        tileErrorCount += 1
-        if (tileErrorCount === 12) {
-          tileLayer.remove()
-          const control = L.control({ position: 'topleft' })
-          control.onAdd = function () {
-            const div = L.DomUtil.create('div')
-            div.style.padding = '6px 8px'
-            div.style.margin = '8px'
-            div.style.borderRadius = '6px'
-            div.style.background = 'rgba(0,0,0,0.45)'
-            div.style.color = '#ffffff'
-            div.style.fontSize = '12px'
-            div.style.lineHeight = '16px'
-            div.innerText = '底图加载失败'
-            return div
-          }
-          control.addTo(map)
-        }
-      })
-
-      tileLayer.addTo(map)
-      return tileLayer
-    }
-
     let mapConfig = {
       ets: {
-        tileUrl: 'https://map-cdn.krashnz.com/ets2map/ets2/v1.57/{x}_{y}.png',
+        tileUrl: 'https://ets2.online/map/ets2map_157/{z}/{x}/{y}.png',
         bounds: {
           y: 65536,
           x: 65536
@@ -145,7 +112,7 @@
         }
       },
       promods: {
-        tileUrl: 'https://map-cdn.krashnz.com/ets2map/promods/v2.80/{x}_{y}.png',
+        tileUrl: 'https://ets2.online/map/ets2mappromods_156/{z}/{x}/{y}.png',
         bounds: {
           y: 65536,
           x: 65536
@@ -181,12 +148,8 @@
       crs: L.CRS.Simple,
       zoomControl: false
     });
-    let tileLayer = null
 
     function setData(data) {
-      if (data && data.mapTileEts) mapConfig.ets.tileUrl = data.mapTileEts
-      if (data && data.mapTilePromods) mapConfig.promods.tileUrl = data.mapTilePromods
-
       // 边界
       let bounds = L.latLngBounds(
         map.unproject([0, mapConfig[data.mapType].bounds.y], mapConfig[data.mapType].maxZoom),
@@ -194,20 +157,13 @@
       );
 
       // 瓦片地图
-      if (tileLayer) {
-        try {
-          tileLayer.remove()
-        } catch {}
-        tileLayer = null
-      }
-      tileLayer = addTileLayerWithFallback(map, mapConfig[data.mapType].tileUrl, {
+      L.tileLayer(mapConfig[data.mapType].tileUrl, {
         minZoom: 1,
-        maxZoom: 10,
-        maxNativeZoom: mapConfig[data.mapType].maxZoom,
+        maxZoom: 8,
         tileSize: 256,
         bounds: bounds,
         reuseTiles: true
-      })
+      }).addTo(map);
       map.setMaxBounds(
         new L.LatLngBounds(
           map.unproject([0, mapConfig[data.mapType].bounds.y], mapConfig[data.mapType].maxZoom),

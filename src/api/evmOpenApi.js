@@ -46,24 +46,6 @@ module.exports = {
     }
     return data
   },
-  async mapMarkerList (http, mapType) {
-    let result = null
-    try {
-      result = await http.get(`${BASE_API}/map/marker?mapType=${mapType}`)
-    } catch {
-      return {
-        error: true
-      }
-    }
-
-    let data = {
-      error: result.code !== 200
-    }
-    if (!data.error) {
-      data.data = result.data
-    }
-    return data
-  },
   /**
    * 查询玩家信息
    */

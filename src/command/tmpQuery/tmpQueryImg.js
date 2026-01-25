@@ -75,57 +75,7 @@ module.exports = async (ctx, cfg, session, tmpId) => {
       data.onlineCity = await baiduTranslate(ctx, cfg, playerMapInfo.data.location.poi.realName)
       data.onlineX = playerMapInfo.data.x
       data.onlineY = playerMapInfo.data.y
-      let promodsServerIdList = [50, 51]
-      const serverDetailsId = playerMapInfo.data.serverDetails && typeof playerMapInfo.data.serverDetails.id === 'number'
-        ? playerMapInfo.data.serverDetails.id
-        : null
-      const mapType = promodsServerIdList.indexOf(serverDetailsId) !== -1 ? 'promods' : 'ets'
-      data.onlineMapType = mapType
-
-      const ax = data.onlineX - 4000
-      const ay = data.onlineY + 2500
-      const bx = data.onlineX + 4000
-      const by = data.onlineY - 2500
-
-      let areaPlayersData = await evmOpenApi.mapPlayerList(ctx.http, playerMapInfo.data.server, ax, ay, bx, by)
-      let areaPlayerList = []
-      if (!areaPlayersData.error) {
-        areaPlayerList = areaPlayersData.data
-        let index = areaPlayerList.findIndex((player) => {
-          return player.tmpId.toString() === tmpId.toString()
-        })
-        if (index !== -1) {
-          areaPlayerList.splice(index, 1)
-        }
-      }
-      areaPlayerList.push({
-        axisX: data.onlineX,
-        axisY: data.onlineY,
-        tmpId
-      })
-
-      const mapTypeNum = mapType === 'promods' ? 2 : 1
-      let markerList = []
-      try {
-        let markerResult = await evmOpenApi.mapMarkerList(ctx.http, mapTypeNum)
-        if (!markerResult.error && Array.isArray(markerResult.data)) {
-          markerList = markerResult.data
-            .filter((m) => m && m.type === 2 && typeof m.axisX === 'number' && typeof m.axisY === 'number')
-            .filter((m) => m.axisX >= ax && m.axisX <= bx && m.axisY >= by && m.axisY <= ay)
-            .sort((a, b) => {
-              const da = (a.axisX - data.onlineX) * (a.axisX - data.onlineX) + (a.axisY - data.onlineY) * (a.axisY - data.onlineY)
-              const db = (b.axisX - data.onlineX) * (b.axisX - data.onlineX) + (b.axisY - data.onlineY) * (b.axisY - data.onlineY)
-              return da - db
-            })
-            .slice(0, 120)
-            .map((m) => ({ axisX: m.axisX, axisY: m.axisY }))
-        }
-      } catch (e) {
-        markerList = []
-      }
-
-      data.playerList = areaPlayerList
-      data.markerList = markerList
+      data.onlineMapType = playerMapInfo.data.serverDetails.id === 50 ? 'promods' : 'ets'
     }
   }
   data.isBan = playerInfo.data.isBan
@@ -134,8 +84,6 @@ module.exports = async (ctx, cfg, session, tmpId) => {
   data.banReasonZh = playerInfo.data.banReasonZh
   data.banCount = playerInfo.data.banCount
   data.banHide = playerInfo.data.banHide
-  data.mapTileEts = cfg && typeof cfg.map_tile_ets_url === 'string' ? cfg.map_tile_ets_url : null
-  data.mapTilePromods = cfg && typeof cfg.map_tile_promods_url === 'string' ? cfg.map_tile_promods_url : null
 
   let page
   try {
