@@ -198,8 +198,10 @@ class TmpBotPlugin(Star):
         self._fullmap_cache: Optional[Dict[str, Any]] = None
         self._fullmap_cache_ts: float = 0.0
         self._fullmap_last_fetch_ts: float = 0.0
+        self._fullmap_next_fetch_ts: float = 0.0
         self._fullmap_task: Optional[asyncio.Task] = None
         self._fullmap_lock = asyncio.Lock()
+        self._fullmap_fetch_lock = asyncio.Lock()
         self._load_location_maps()
         try:
             bind_path = self.config.get('bind_file')
@@ -272,13 +274,15 @@ class TmpBotPlugin(Star):
     async def _fetch_fullmap(self) -> None:
         if not self.session:
             return
-        now = time.time()
         interval = self._get_fullmap_interval()
-        if now - self._fullmap_last_fetch_ts < interval:
-            if not self._fullmap_cache:
-                logger.info(f"fullmap 拉取跳过(限频): interval={interval}s")
-            return
-        self._fullmap_last_fetch_ts = now
+        async with self._fullmap_fetch_lock:
+            now_mono = time.monotonic()
+            if now_mono < self._fullmap_next_fetch_ts:
+                if not self._fullmap_cache:
+                    logger.info(f"fullmap 拉取跳过(限频): interval={interval}s")
+                return
+            self._fullmap_next_fetch_ts = now_mono + interval
+            self._fullmap_last_fetch_ts = time.time()
         url = "https://tracker.ets2map.com/v3/fullmap"
         try:
             async with self.session.get(url, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
@@ -1459,7 +1463,7 @@ class TmpBotPlugin(Star):
     # ******************************************************
 
     @filter.event_message_type(filter.EventMessageType.ALL)
-    async def _on_any_message_dispatch(self, event: AstrMessageEvent):
+    async def _on_any_message_dispatch(self, event: AstrMessageEvent, *args, **kwargs):
         msg = (event.message_str or "").strip()
         if not msg:
             return
