@@ -274,6 +274,8 @@ class TmpBotPlugin(Star):
         now = time.time()
         interval = self._get_fullmap_interval()
         if now - self._fullmap_last_fetch_ts < interval:
+            if not self._fullmap_cache:
+                logger.info(f"fullmap 拉取跳过(限频): interval={interval}s")
             return
         self._fullmap_last_fetch_ts = now
         url = "https://tracker.ets2map.com/v3/fullmap"
@@ -285,6 +287,7 @@ class TmpBotPlugin(Star):
                         async with self._fullmap_lock:
                             self._fullmap_cache = data
                             self._fullmap_cache_ts = time.time()
+                        logger.info("fullmap 拉取成功")
                         return
                 logger.info(f"fullmap 拉取失败 status={resp.status}")
         except Exception as e:
@@ -2250,10 +2253,15 @@ class TmpBotPlugin(Star):
             area_players = [p for p in area_players if str(p.get('tmpId')) != str(tmp_id)]
             area_players.append({'tmpId': str(tmp_id), 'axisX': cx, 'axisY': cy})
 
+            if not self._fullmap_cache:
+                await self._fetch_fullmap()
+
             default_tile_ets = "https://ets2.online/map/ets2map_157/{z}/{x}/{y}.png"
             default_tile_promods = "https://ets2.online/map/ets2mappromods_156/{z}/{x}/{y}.png"
             tile_url_ets = self._get_fullmap_tile_url("ets") or default_tile_ets
             tile_url_promods = self._get_fullmap_tile_url("promods") or default_tile_promods
+            logger.info(f"定位: tile_ets={'fullmap' if tile_url_ets != default_tile_ets else 'fallback'}")
+            logger.info(f"定位: tile_promods={'fullmap' if tile_url_promods != default_tile_promods else 'fallback'}")
 
             map_tmpl = """
 <link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css\">
