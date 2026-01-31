@@ -2361,44 +2361,28 @@ class TmpBotPlugin(Star):
   var mapType = promodsIds.indexOf(serverId) !== -1 ? 'promods' : 'ets';
   var cfg = {
     ets: {
-      tileUrl: '{{ tile_url_ets }}',
-      bounds: { x:65536, y:65536 },
+      tileUrl: 'https://ets-map.oss-cn-beijing.aliyuncs.com/ets2/05102019/{z}/{x}/{y}.png',
+      multipliers: { x: 70272, y: 76157 },
+      breakpoints: { uk: { x: -31056.8, y: -5832.867 } },
+      bounds: { x:131072, y:131072 },
       maxZoom: 8, minZoom: 2,
       calc: function(xx, yy) {
-        var MAX_X = 65536;
-        var MAX_Y = 65536;
-        const x1 = -113177.313;
-        const x2 = 97925.625;
-        const y1 = -122648.086;
-        const y2 = 88454.85;
-        const xtot = x2 - x1;
-        const ytot = y2 - y1;
-        const xrel = (xx - x1) / xtot;
-        const yrel = (yy - y1) / ytot;
-        return [ xrel * MAX_X, yrel * MAX_Y ];
+        return [ xx / 1.609055 + cfg.ets.multipliers.x, yy / 1.609055 + cfg.ets.multipliers.y ];
       }
     },
     promods: {
-      tileUrl: '{{ tile_url_promods }}',
-      bounds: { x:65536, y:65536 },
+      tileUrl: 'https://ets-map.oss-cn-beijing.aliyuncs.com/promods/05102019/{z}/{x}/{y}.png',
+      multipliers: { x: 51953, y: 76024 },
+      breakpoints: { uk: { x: -31056.8, y: -5832.867 } },
+      bounds: { x:131072, y:131072 },
       maxZoom: 8, minZoom: 2,
       calc: function(xx, yy) {
-        var MAX_X = 65536;
-        var MAX_Y = 65536;
-        const x1 = -135110.156;
-        const x2 = 168923.75;
-        const y1 = -190095.016;
-        const y2 = 113938.891;
-        const xtot = x2 - x1;
-        const ytot = y2 - y1;
-        const xrel = (xx - x1) / xtot;
-        const yrel = (yy - y1) / ytot;
-        return [ xrel * MAX_X, yrel * MAX_Y ];
+        return [ xx / 2.598541 + cfg.promods.multipliers.x, yy / 2.598541 + cfg.promods.multipliers.y ];
       }
     }
   };
 
-  var map = L.map('map', { attributionControl: false, crs: L.CRS.Simple, zoomControl: false });
+  var map = L.map('map', { attributionControl: false, crs: L.CRS.Simple, zoomControl: false, zoomSnap: 0.2, zoomDelta: 0.2 });
   var c = cfg[mapType];
   var b = L.latLngBounds(
     map.unproject([0, c.bounds.y], c.maxZoom),
