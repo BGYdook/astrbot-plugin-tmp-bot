@@ -1229,18 +1229,75 @@ class TmpBotPlugin(Star):
             logger.error(f"查询路况时发生未知错误: {e}", exc_info=True)
             raise NetworkException("查询路况失败")
 
-    async def _get_footprint_data(self, server_key: str, tmp_id: str) -> Dict[str, Any]:
+    async def _resolve_server_ids(self, server_key: str) -> List[str]:
+        if not self.session:
+            return []
+        key = str(server_key or "").strip().lower()
+        if not key:
+            return []
+        if key.isdigit():
+            return [key]
+        patterns = []
+        if key in ["sim1", "simulation1", "simulation_1"]:
+            patterns = ["simulation 1", "sim 1", "sim1"]
+        elif key in ["sim2", "simulation2", "simulation_2"]:
+            patterns = ["simulation 2", "sim 2", "sim2"]
+        elif key in ["arc1", "arc", "arcade"]:
+            patterns = ["arcade", "arc 1", "arc1"]
+        elif key in ["eupromods1", "promods", "promods1"]:
+            patterns = ["promods", "pro mods"]
+        else:
+            patterns = [key]
+        url = "https://api.truckersmp.com/v2/servers"
+        try:
+            async with self.session.get(url, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
+                if resp.status != 200:
+                    return []
+                data = await resp.json()
+        except Exception:
+            return []
+        servers = data.get('response') if isinstance(data, dict) else None
+        if not isinstance(servers, list):
+            return []
+        ids = []
+        for s in servers:
+            if not isinstance(s, dict):
+                continue
+            name = str(s.get('name') or "").lower()
+            sid = s.get('id') or s.get('serverId') or s.get('server_id')
+            if not sid:
+                continue
+            for p in patterns:
+                if p and p in name:
+                    ids.append(str(sid))
+                    break
+        seen = set()
+        uniq = []
+        for sid in ids:
+            if sid in seen:
+                continue
+            seen.add(sid)
+            uniq.append(sid)
+        return uniq
+
+    async def _get_footprint_data(self, server_key: str, tmp_id: str, server_ids: Optional[List[str]] = None) -> Dict[str, Any]:
         if not self.session:
             raise NetworkException("插件未初始化，HTTP会话不可用")
         base = self._cfg_str('footprint_api_base', '').strip() or "https://da.vtcm.link"
         base = base[:-1] if base.endswith('/') else base
-        urls = [
-            f"{base}/footprint/today?tmpId={tmp_id}&server={server_key}",
-            f"{base}/footprint/today?tmpId={tmp_id}&serverId={server_key}",
-            f"{base}/footprint/list?tmpId={tmp_id}&server={server_key}",
-            f"{base}/map/footprint?tmpId={tmp_id}&server={server_key}",
-            f"{base}/map/track?tmpId={tmp_id}&server={server_key}",
-        ]
+        urls = []
+        server_ids = server_ids or []
+        server_ids = [str(s).strip() for s in server_ids if str(s).strip()]
+        urls.append(f"{base}/footprint/today?tmpId={tmp_id}&server={server_key}")
+        urls.append(f"{base}/footprint/today?tmpId={tmp_id}&serverId={server_key}")
+        urls.append(f"{base}/footprint/list?tmpId={tmp_id}&server={server_key}")
+        urls.append(f"{base}/map/footprint?tmpId={tmp_id}&server={server_key}")
+        urls.append(f"{base}/map/track?tmpId={tmp_id}&server={server_key}")
+        for sid in server_ids:
+            urls.append(f"{base}/footprint/today?tmpId={tmp_id}&serverId={sid}")
+            urls.append(f"{base}/footprint/list?tmpId={tmp_id}&serverId={sid}")
+            urls.append(f"{base}/map/footprint?tmpId={tmp_id}&serverId={sid}")
+            urls.append(f"{base}/map/track?tmpId={tmp_id}&serverId={sid}")
         last_error = None
         for url in urls:
             try:
@@ -1256,53 +1313,71 @@ class TmpBotPlugin(Star):
             raise NetworkException(f"足迹接口请求失败: {last_error}")
         raise ApiResponseException("足迹接口无可用数据")
 
-    def _extract_footprint_points(self, payload: Any, server_key: str) -> Tuple[List[Dict[str, float]], Dict[str, Any]]:
-        data = payload
-        if isinstance(payload, dict):
-            data = payload.get('data') or payload.get('response') or payload.get('list') or payload.get('tracks') or payload.get('track') or payload.get('points') or payload
-        points: List[Dict[str, float]] = []
-        meta: Dict[str, Any] = {}
-        if isinstance(data, list) and data:
-            if isinstance(data[0], dict) and any(k in data[0] for k in ['server', 'serverId', 'server_id', 'serverName', 'points', 'track', 'list']):
-                match_item = None
-                for it in data:
-                    if not isinstance(it, dict):
-                        continue
-                    sid = str(it.get('serverId') or it.get('server_id') or it.get('server') or '').strip().lower()
-                    if sid and sid == str(server_key).lower():
-                        match_item = it
-                        break
-                if match_item is None:
-                    match_item = data[0]
-                data = match_item
-            if isinstance(data, list):
-                for p in data:
-                    if not isinstance(p, dict):
-                        continue
-                    x = p.get('axisX') or p.get('x') or p.get('posX') or p.get('pos_x')
-                    y = p.get('axisY') or p.get('y') or p.get('posY') or p.get('pos_y')
-                    try:
-                        if x is None or y is None:
-                            continue
-                        points.append({ 'x': float(x), 'y': float(y) })
-                    except Exception:
-                        continue
-                return points, meta
-        if isinstance(data, dict):
-            meta = data
-            candidate = data.get('points') or data.get('track') or data.get('tracks') or data.get('list') or data.get('route') or data.get('path')
-            if isinstance(candidate, list):
-                for p in candidate:
-                    if not isinstance(p, dict):
-                        continue
-                    x = p.get('axisX') or p.get('x') or p.get('posX') or p.get('pos_x')
-                    y = p.get('axisY') or p.get('y') or p.get('posY') or p.get('pos_y')
-                    try:
-                        if x is None or y is None:
-                            continue
-                        points.append({ 'x': float(x), 'y': float(y) })
-                    except Exception:
-                        continue
+    def _extract_footprint_points(self, payload: Any, server_key: str, server_ids: Optional[List[str]] = None) -> Tuple[List[Dict[str, float]], Dict[str, Any]]:
+        ids = [str(s).lower() for s in (server_ids or []) if str(s).strip()]
+        key = str(server_key or "").strip().lower()
+
+        def _point_from_item(item: Any) -> Optional[Dict[str, float]]:
+            if isinstance(item, (list, tuple)) and len(item) >= 2:
+                x, y = item[0], item[1]
+            elif isinstance(item, dict):
+                x = item.get('axisX') or item.get('x') or item.get('posX') or item.get('pos_x')
+                y = item.get('axisY') or item.get('y') or item.get('posY') or item.get('pos_y')
+            else:
+                return None
+            if x is None or y is None:
+                return None
+            try:
+                return { 'x': float(x), 'y': float(y) }
+            except Exception:
+                return None
+
+        def _collect_points_from_list(items: List[Any]) -> List[Dict[str, float]]:
+            pts: List[Dict[str, float]] = []
+            for it in items:
+                p = _point_from_item(it)
+                if p:
+                    pts.append(p)
+            return pts
+
+        def _match_server(item: Dict[str, Any]) -> bool:
+            sid = str(item.get('serverId') or item.get('server_id') or item.get('server') or '').strip().lower()
+            if not sid:
+                return False
+            if sid == key:
+                return True
+            return sid in ids
+
+        def _find_points(obj: Any, depth: int = 0) -> Tuple[List[Dict[str, float]], Dict[str, Any]]:
+            if depth > 5:
+                return [], {}
+            if isinstance(obj, list):
+                pts = _collect_points_from_list(obj)
+                if pts:
+                    return pts, {}
+                for it in obj:
+                    if isinstance(it, dict) and _match_server(it):
+                        pts2, meta2 = _find_points(it, depth + 1)
+                        if pts2:
+                            return pts2, meta2 or it
+                for it in obj:
+                    pts2, meta2 = _find_points(it, depth + 1)
+                    if pts2:
+                        return pts2, meta2
+                return [], {}
+            if isinstance(obj, dict):
+                for k in ['points', 'track', 'tracks', 'list', 'route', 'path', 'data', 'response', 'result', 'items']:
+                    if k in obj:
+                        pts2, meta2 = _find_points(obj.get(k), depth + 1)
+                        if pts2:
+                            return pts2, meta2 or obj
+                for v in obj.values():
+                    pts2, meta2 = _find_points(v, depth + 1)
+                    if pts2:
+                        return pts2, meta2
+            return [], {}
+
+        points, meta = _find_points(payload, 0)
         return points, meta
 
     async def _render_text_to_image(self, text: str) -> Optional[Any]:
@@ -2341,8 +2416,9 @@ class TmpBotPlugin(Star):
         last_online_formatted = _format_timestamp_to_readable(last_online_raw) if last_online_raw else '未知'
 
         try:
-            footprint_resp = await self._get_footprint_data(server_key, tmp_id)
-            points, meta = self._extract_footprint_points(footprint_resp.get('data'), server_key)
+            server_ids = await self._resolve_server_ids(server_key)
+            footprint_resp = await self._get_footprint_data(server_key, tmp_id, server_ids)
+            points, meta = self._extract_footprint_points(footprint_resp.get('data'), server_key, server_ids)
         except Exception as e:
             yield event.plain_result(f"查询足迹失败: {str(e)}")
             return
