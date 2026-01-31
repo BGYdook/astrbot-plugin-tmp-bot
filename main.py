@@ -2534,7 +2534,26 @@ class TmpBotPlugin(Star):
             now_local = datetime.now()
             start_time = now_local.replace(hour=0, minute=0, second=0, microsecond=0).strftime('%Y-%m-%d %H:%M:%S')
             end_time = now_local.replace(hour=23, minute=59, second=59, microsecond=0).strftime('%Y-%m-%d %H:%M:%S')
-            history_points = await self._get_footprint_history(tmp_id, None, start_time, end_time)
+            history_points = []
+            history_candidates = []
+            if server_ids:
+                history_candidates.extend(server_ids)
+            mapped_id = server_id_map.get(server_key)
+            if mapped_id is not None:
+                history_candidates.append(str(mapped_id))
+            history_candidates.append("")
+            seen_hist = set()
+            hist_list = []
+            for sid in history_candidates:
+                s = str(sid or "").strip()
+                if s in seen_hist:
+                    continue
+                seen_hist.add(s)
+                hist_list.append(s)
+            for sid in hist_list:
+                history_points = await self._get_footprint_history(tmp_id, sid or None, start_time, end_time)
+                if history_points:
+                    break
             if history_points:
                 if server_key in ['eupromods1', 'promods', 'promods1']:
                     filtered = [p for p in history_points if str(p.get('serverId') or p.get('server_id') or p.get('server')) in {str(i) for i in PROMODS_SERVER_IDS}]
