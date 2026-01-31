@@ -2362,6 +2362,7 @@ class TmpBotPlugin(Star):
   var cfg = {
     ets: {
       tileUrl: 'https://ets-map.oss-cn-beijing.aliyuncs.com/ets2/05102019/{z}/{x}/{y}.png',
+      fallbackUrl: 'https://ets2.online/map/ets2map_157/{z}/{x}/{y}.png',
       multipliers: { x: 70272, y: 76157 },
       breakpoints: { uk: { x: -31056.8, y: -5832.867 } },
       bounds: { x:131072, y:131072 },
@@ -2372,6 +2373,7 @@ class TmpBotPlugin(Star):
     },
     promods: {
       tileUrl: 'https://ets-map.oss-cn-beijing.aliyuncs.com/promods/05102019/{z}/{x}/{y}.png',
+      fallbackUrl: 'https://ets2.online/map/ets2mappromods_156/{z}/{x}/{y}.png',
       multipliers: { x: 51953, y: 76024 },
       breakpoints: { uk: { x: -31056.8, y: -5832.867 } },
       bounds: { x:131072, y:131072 },
@@ -2388,7 +2390,14 @@ class TmpBotPlugin(Star):
     map.unproject([0, c.bounds.y], c.maxZoom),
     map.unproject([c.bounds.x, 0], c.maxZoom)
   );
- L.tileLayer(c.tileUrl, { minZoom: c.minZoom, maxZoom: 10, maxNativeZoom: c.maxZoom, tileSize: 256, bounds: b, reuseTiles: true }).addTo(map);
+  var tileLayer = L.tileLayer(c.tileUrl, { minZoom: c.minZoom, maxZoom: 10, maxNativeZoom: c.maxZoom, tileSize: 512, bounds: b, reuseTiles: true }).addTo(map);
+  var switched = false;
+  tileLayer.on('tileerror', function(){
+    if (switched || !c.fallbackUrl) return;
+    switched = true;
+    map.removeLayer(tileLayer);
+    tileLayer = L.tileLayer(c.fallbackUrl, { minZoom: c.minZoom, maxZoom: 10, maxNativeZoom: c.maxZoom, tileSize: 512, bounds: b, reuseTiles: true }).addTo(map);
+  });
   map.setMaxBounds(b);
   var centerX = {{ center_x }};
   var centerY = {{ center_y }};
