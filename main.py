@@ -3,7 +3,7 @@
 
 """
 astrbot-plugin-tmp-bot
-欧卡2TMP查询插件 (版本 1.7.1)
+欧卡2TMP查询插件 (版本 1.7.2)
 """
 
 import re
@@ -2597,11 +2597,11 @@ class TmpBotPlugin(Star):
                     fallback_points.append({'axisX': x, 'axisY': y, 'serverId': 0, 'heading': 0, 'ts': 0})
                 points = fallback_points
         except Exception as e:
-            yield event.plain_result(f"查询足迹失败: {str(e)}")
+            yield event.plain_result(f"查询今日足迹失败: {str(e)}")
             return
 
         if not points:
-            yield event.plain_result("暂无足迹数据")
+            yield event.plain_result("今日/输入的对应服务器暂无足迹数据")
             return
 
         def _to_km(val):
