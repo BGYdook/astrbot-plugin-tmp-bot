@@ -1290,20 +1290,29 @@ class TmpBotPlugin(Star):
         base = self._cfg_str('footprint_api_base', '').strip() or "https://da.vtcm.link"
         base = base[:-1] if base.endswith('/') else base
         sid = str(server_id or "").strip()
-        url = f"{base}/map/playerHistory?tmpId={tmp_id}&serverId={sid}&startTime={start_time}&endTime={end_time}"
+        params = {
+            'tmpId': str(tmp_id).strip(),
+            'startTime': str(start_time).strip(),
+            'endTime': str(end_time).strip()
+        }
+        if sid:
+            params['serverId'] = sid
+        url = f"{base}/map/playerHistory"
         try:
-            async with self.session.get(url, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
+            async with self.session.get(url, params=params, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
                 if resp.status != 200:
                     return []
                 data = await resp.json()
         except Exception:
             return []
+        if isinstance(data, list):
+            return data
         if not isinstance(data, dict):
             return []
         code = data.get('code')
         if code is not None and int(code) != 200:
             return []
-        payload = data.get('data')
+        payload = data.get('data') or data.get('response') or data.get('result')
         if not isinstance(payload, list):
             return []
         return payload
