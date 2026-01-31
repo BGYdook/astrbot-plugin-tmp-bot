@@ -1499,11 +1499,22 @@ class TmpBotPlugin(Star):
 
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def _on_any_message_dispatch(self, event: AstrMessageEvent, *args, **kwargs):
-        msg = (event.message_str or "").strip()
+        target_event = event
+        if not hasattr(target_event, "message_str"):
+            if args:
+                candidate = args[0]
+                if hasattr(candidate, "message_str") or hasattr(candidate, "message_obj"):
+                    target_event = candidate
+            if target_event is event:
+                kw_event = kwargs.get("event")
+                if hasattr(kw_event, "message_str") or hasattr(kw_event, "message_obj"):
+                    target_event = kw_event
+
+        msg = (getattr(target_event, "message_str", "") or "").strip()
         if not msg:
             return
 
-        message_obj = getattr(event, "message_obj", None)
+        message_obj = getattr(target_event, "message_obj", None)
         has_at = False
         if message_obj is not None:
             try:
