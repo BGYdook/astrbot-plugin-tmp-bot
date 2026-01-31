@@ -1299,8 +1299,10 @@ class TmpBotPlugin(Star):
             params['serverId'] = sid
         url = f"{base}/map/playerHistory"
         try:
+            logger.info(f"足迹历史: 请求 {url} params={params}")
             async with self.session.get(url, params=params, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
                 if resp.status != 200:
+                    logger.info(f"足迹历史: 返回状态码 {resp.status}")
                     return []
                 data = await resp.json()
         except Exception:
@@ -1381,6 +1383,7 @@ class TmpBotPlugin(Star):
         last_error = None
         for url in urls:
             try:
+                logger.info(f"足迹接口: 请求 {url}")
                 async with self.session.get(url, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
                     if resp.status == 200:
                         data = await resp.json()
@@ -2571,6 +2574,7 @@ class TmpBotPlugin(Star):
                 points = self._normalize_history_points(history_points)
                 meta = {'source': 'playerHistory'}
             else:
+                logger.info("足迹历史为空，开始回退足迹接口")
                 footprint_resp = await self._get_footprint_data(server_key, tmp_id, server_ids)
                 points, meta = self._extract_footprint_points(footprint_resp.get('data'), server_key, server_ids)
                 fallback_points = []
