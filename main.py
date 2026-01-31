@@ -1661,7 +1661,7 @@ class TmpBotPlugin(Star):
             async for r in self.tmprank_today(event):
                 yield r
             return
-        if re.match(r'^足迹(\s*\d+)?\s*$', msg) or (msg.startswith("足迹") and has_at):
+        if re.match(r'^足迹(\s+\S+)?(\s+\d+)?\s*$', msg) or (msg.startswith("足迹") and has_at):
             async for r in self.tmptoday_footprint(event):
                 yield r
             return
@@ -1766,10 +1766,14 @@ class TmpBotPlugin(Star):
             yield r
 
     @filter.command("足迹")
-    async def cmd_tmp_today_footprint(self, event: AstrMessageEvent, tmp_id: str | None = None):
+    async def cmd_tmp_today_footprint(self, event: AstrMessageEvent, server: str | None = None, tmp_id: str | None = None):
         orig = getattr(event, "message_str", "") or ""
         try:
-            if tmp_id:
+            if server and tmp_id:
+                event.message_str = f"足迹 {server} {tmp_id}"
+            elif server:
+                event.message_str = f"足迹 {server}"
+            elif tmp_id:
                 event.message_str = f"足迹 {tmp_id}"
             else:
                 event.message_str = "足迹"
