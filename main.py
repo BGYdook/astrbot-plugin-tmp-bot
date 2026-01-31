@@ -99,6 +99,7 @@ USER_GROUP_MAP = {
     'Add-On Team': '附加组件团队',
     'Game Moderator': '游戏管理员'
 }
+PROMODS_SERVER_IDS = {50, 51}
 
 def _translate_user_groups(groups: List[Any]) -> List[str]:
     translated: List[str] = []
@@ -1283,6 +1284,73 @@ class TmpBotPlugin(Star):
             uniq.append(sid)
         return uniq
 
+    async def _get_footprint_history(self, tmp_id: str, server_id: Optional[str], start_time: str, end_time: str) -> List[Dict[str, Any]]:
+        if not self.session:
+            return []
+        base = self._cfg_str('footprint_api_base', '').strip() or "https://da.vtcm.link"
+        base = base[:-1] if base.endswith('/') else base
+        sid = str(server_id or "").strip()
+        url = f"{base}/map/playerHistory?tmpId={tmp_id}&serverId={sid}&startTime={start_time}&endTime={end_time}"
+        try:
+            async with self.session.get(url, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
+                if resp.status != 200:
+                    return []
+                data = await resp.json()
+        except Exception:
+            return []
+        if not isinstance(data, dict):
+            return []
+        code = data.get('code')
+        if code is not None and int(code) != 200:
+            return []
+        payload = data.get('data')
+        if not isinstance(payload, list):
+            return []
+        return payload
+
+    def _normalize_history_points(self, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        points: List[Dict[str, Any]] = []
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            x = it.get('axisX') or it.get('x') or it.get('posX') or it.get('pos_x')
+            y = it.get('axisY') or it.get('y') or it.get('posY') or it.get('pos_y')
+            if x is None or y is None:
+                continue
+            try:
+                axis_x = float(x)
+                axis_y = float(y)
+            except Exception:
+                continue
+            server_id = it.get('serverId') or it.get('server_id') or it.get('server') or 0
+            heading = it.get('heading') or 0
+            ts_val = None
+            update_time = it.get('updateTime') or it.get('time') or it.get('updatedAt') or it.get('update_time')
+            if update_time:
+                s = str(update_time).strip()
+                try:
+                    dt = datetime.strptime(s, '%Y-%m-%d %H:%M:%S')
+                    ts_val = int(dt.timestamp())
+                except Exception:
+                    try:
+                        dt = datetime.fromisoformat(s.replace('Z', '+00:00'))
+                        ts_val = int(dt.timestamp())
+                    except Exception:
+                        ts_val = None
+            server_id_val = 0
+            try:
+                server_id_val = int(server_id)
+            except Exception:
+                server_id_val = 0
+            points.append({
+                'axisX': axis_x,
+                'axisY': axis_y,
+                'serverId': server_id_val,
+                'heading': heading,
+                'ts': ts_val or 0
+            })
+        return points
+
     async def _get_footprint_data(self, server_key: str, tmp_id: str, server_ids: Optional[List[str]] = None) -> Dict[str, Any]:
         if not self.session:
             raise NetworkException("插件未初始化，HTTP会话不可用")
@@ -2381,6 +2449,12 @@ class TmpBotPlugin(Star):
             "arc1": "arc1"
         }
         server_key = server_alias.get(server_key_raw, server_key_raw)
+        server_id_map = {
+            "sim1": 2,
+            "sim2": 41,
+            "eupromods1": 50,
+            "arc1": 7
+        }
         server_label_map = {
             "sim1": "SIM1",
             "sim2": "SIM2",
@@ -2436,6 +2510,9 @@ class TmpBotPlugin(Star):
                     s = str(v).strip()
                     if s:
                         server_ids.append(s)
+            mapped_id = server_id_map.get(server_key)
+            if mapped_id is not None:
+                server_ids.append(str(mapped_id))
             seen = set()
             uniq = []
             for sid in server_ids:
@@ -2444,8 +2521,38 @@ class TmpBotPlugin(Star):
                 seen.add(sid)
                 uniq.append(sid)
             server_ids = uniq
-            footprint_resp = await self._get_footprint_data(server_key, tmp_id, server_ids)
-            points, meta = self._extract_footprint_points(footprint_resp.get('data'), server_key, server_ids)
+
+            now_local = datetime.now()
+            start_time = now_local.replace(hour=0, minute=0, second=0, microsecond=0).strftime('%Y-%m-%d %H:%M:%S')
+            end_time = now_local.replace(hour=23, minute=59, second=59, microsecond=0).strftime('%Y-%m-%d %H:%M:%S')
+            history_points = await self._get_footprint_history(tmp_id, None, start_time, end_time)
+            if history_points:
+                if server_key in ['eupromods1', 'promods', 'promods1']:
+                    filtered = [p for p in history_points if str(p.get('serverId') or p.get('server_id') or p.get('server')) in {str(i) for i in PROMODS_SERVER_IDS}]
+                elif server_key in server_id_map:
+                    target = str(server_id_map[server_key])
+                    filtered = [p for p in history_points if str(p.get('serverId') or p.get('server_id') or p.get('server')) == target]
+                elif server_ids:
+                    target_set = {str(i) for i in server_ids}
+                    filtered = [p for p in history_points if str(p.get('serverId') or p.get('server_id') or p.get('server')) in target_set]
+                else:
+                    filtered = history_points
+                history_points = filtered
+
+            if history_points:
+                points = self._normalize_history_points(history_points)
+                meta = {'source': 'playerHistory'}
+            else:
+                footprint_resp = await self._get_footprint_data(server_key, tmp_id, server_ids)
+                points, meta = self._extract_footprint_points(footprint_resp.get('data'), server_key, server_ids)
+                fallback_points = []
+                for p in points:
+                    x = p.get('x')
+                    y = p.get('y')
+                    if x is None or y is None:
+                        continue
+                    fallback_points.append({'axisX': x, 'axisY': y, 'serverId': 0, 'heading': 0, 'ts': 0})
+                points = fallback_points
         except Exception as e:
             yield event.plain_result(f"查询足迹失败: {str(e)}")
             return
@@ -2466,6 +2573,13 @@ class TmpBotPlugin(Star):
         distance_km = _to_km(meta.get('distance') or meta.get('mileage') or meta.get('totalDistance') or meta.get('totalMileage'))
         start_time = meta.get('startTime') or meta.get('start_time') or meta.get('beginTime') or meta.get('begin_time')
         end_time = meta.get('endTime') or meta.get('end_time') or meta.get('finishTime') or meta.get('finish_time')
+        if distance_km is None:
+            try:
+                daily_km = float(stats_info.get('daily_km') or 0)
+                if daily_km > 0:
+                    distance_km = round(daily_km, 2)
+            except Exception:
+                distance_km = None
 
         tile_url_ets = "https://ets2.online/map/ets2map_157/{z}/{x}/{y}.png"
         tile_url_promods = "https://ets2.online/map/ets2mappromods_156/{z}/{x}/{y}.png"
@@ -2547,17 +2661,53 @@ class TmpBotPlugin(Star):
     tileLayer = L.tileLayer(c.fallbackUrl, { minZoom: c.minZoom, maxZoom: 10, maxNativeZoom: c.maxZoom, tileSize: 512, bounds: b, reuseTiles: true }).addTo(map);
   });
   map.setMaxBounds(b);
-  var points = [ {% for p in points %}{ x: {{ p.x }}, y: {{ p.y }} }{% if not loop.last %}, {% endif %}{% endfor %} ];
-  var latlngs = [];
-  for (var i=0;i<points.length;i++){
-    var xy = c.calc(points[i].x, points[i].y);
-    latlngs.push(map.unproject(xy, c.maxZoom));
+  function calculateDistance(p1, p2) {
+    return Math.sqrt(Math.pow(p1.axisX - p2.axisX, 2) + Math.pow(p1.axisY - p2.axisY, 2));
   }
-  var line = L.polyline(latlngs, { color:'#3aa3ff', weight:4, opacity:0.9 }).addTo(map);
-  if (latlngs.length > 0) {
-    L.circleMarker(latlngs[0], { color:'#ffffff', weight:2, fillColor:'#21d07a', fillOpacity:1, radius:5 }).addTo(map);
-    L.circleMarker(latlngs[latlngs.length-1], { color:'#ffffff', weight:2, fillColor:'#ff4d4f', fillOpacity:1, radius:5 }).addTo(map);
-    map.fitBounds(line.getBounds(), { padding: [30, 30] });
+  var points = [ {% for p in points %}{ axisX: {{ p.axisX }}, axisY: {{ p.axisY }}, serverId: {{ p.serverId }}, heading: {{ p.heading }}, ts: {{ p.ts }} }{% if not loop.last %}, {% endif %}{% endfor %} ];
+  points = points.filter(function(p){ return !(p.axisX === 0 && p.axisY === 0 && p.heading === 0); });
+  var lines = [];
+  var currentLine = [];
+  if (points.length > 0) {
+    currentLine.push(points[0]);
+    for (var i=1;i<points.length;i++){
+      var prev = points[i-1];
+      var curr = points[i];
+      var dist = calculateDistance(prev, curr) * 19;
+      var isDistJump = dist > 30000;
+      var timeDiff = 0;
+      if (curr.ts && prev.ts) {
+        timeDiff = curr.ts - prev.ts;
+      }
+      var isTimeJump = timeDiff > 90;
+      var isServerJump = prev.serverId !== curr.serverId;
+      if (isDistJump || isTimeJump || isServerJump) {
+        if (currentLine.length > 0) lines.push(currentLine);
+        currentLine = [];
+      }
+      currentLine.push(curr);
+    }
+    if (currentLine.length > 0) lines.push(currentLine);
+  }
+  var allLatlngs = [];
+  for (var li=0; li<lines.length; li++){
+    var linePts = lines[li];
+    if (!linePts || linePts.length === 0) continue;
+    var latlngs = [];
+    for (var j=0;j<linePts.length;j++){
+      var xy = c.calc(linePts[j].axisX, linePts[j].axisY);
+      var ll = map.unproject(xy, c.maxZoom);
+      latlngs.push(ll);
+      allLatlngs.push(ll);
+    }
+    var line = L.polyline(latlngs, { color:'#3aa3ff', weight:4, opacity:0.9 }).addTo(map);
+    if (latlngs.length > 0) {
+      L.circleMarker(latlngs[0], { color:'#ffffff', weight:2, fillColor:'#21d07a', fillOpacity:1, radius:5 }).addTo(map);
+      L.circleMarker(latlngs[latlngs.length-1], { color:'#ffffff', weight:2, fillColor:'#ff4d4f', fillOpacity:1, radius:5 }).addTo(map);
+    }
+  }
+  if (allLatlngs.length > 0) {
+    map.fitBounds(L.latLngBounds(allLatlngs), { padding: [30, 30] });
   }
 </script>
 """
