@@ -2553,10 +2553,21 @@ class TmpBotPlugin(Star):
                     continue
                 seen_hist.add(s)
                 hist_list.append(s)
+            range_start = start_time
+            range_end = end_time
             for sid in hist_list:
                 history_points = await self._get_footprint_history(tmp_id, sid or None, start_time, end_time)
                 if history_points:
                     break
+            if not history_points:
+                extended_start = (now_local - timedelta(days=7)).strftime('%Y-%m-%d %H:%M:%S')
+                extended_end = now_local.strftime('%Y-%m-%d %H:%M:%S')
+                for sid in hist_list:
+                    history_points = await self._get_footprint_history(tmp_id, sid or None, extended_start, extended_end)
+                    if history_points:
+                        range_start = extended_start
+                        range_end = extended_end
+                        break
             if history_points:
                 if server_key in ['eupromods1', 'promods', 'promods1']:
                     filtered = [p for p in history_points if str(p.get('serverId') or p.get('server_id') or p.get('server')) in {str(i) for i in PROMODS_SERVER_IDS}]
@@ -2572,7 +2583,7 @@ class TmpBotPlugin(Star):
 
             if history_points:
                 points = self._normalize_history_points(history_points)
-                meta = {'source': 'playerHistory'}
+                meta = {'source': 'playerHistory', 'startTime': range_start, 'endTime': range_end}
             else:
                 logger.info("足迹历史为空，开始回退足迹接口")
                 footprint_resp = await self._get_footprint_data(server_key, tmp_id, server_ids)
