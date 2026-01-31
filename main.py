@@ -2624,8 +2624,8 @@ class TmpBotPlugin(Star):
             except Exception:
                 distance_km = None
 
-        tile_url_ets = "https://ets2.online/map/ets2map_157/{z}/{x}/{y}.png"
-        tile_url_promods = "https://ets2.online/map/ets2mappromods_156/{z}/{x}/{y}.png"
+        tile_url_ets = "https://ets-map.oss-cn-beijing.aliyuncs.com/ets2/05102019/{z}/{x}/{y}.png"
+        tile_url_promods = "https://ets-map.oss-cn-beijing.aliyuncs.com/promods/05102019/{z}/{x}/{y}.png"
         fullmap_ets = self._get_fullmap_tile_url("ets") if self._fullmap_cache else None
         fullmap_promods = self._get_fullmap_tile_url("promods") if self._fullmap_cache else None
         if fullmap_ets:
