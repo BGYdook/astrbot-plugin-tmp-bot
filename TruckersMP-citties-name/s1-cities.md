@@ -80,7 +80,7 @@
 | Mengíbar (City) | 门希巴尔（城市） |
 | Murcia (City) | 穆尔西亚（城市） |
 | Navia (City) | 船（城市） |
-| O Barco (City) | O Boat（城市） |
+| O Barco (City) | 奥巴尔科（城市） |
 | Pamplona (City) | 潘普洛纳（城市） |
 | Port de Sagunt (City) | 萨贡托港（城市） |
 | Puertollano (City) | 普埃托利亚诺（城市） |
@@ -119,10 +119,10 @@
 | Brest (City) | 布雷斯特（城市） |
 | Calais (City) | 加来（城市） |
 | Calvi (City) | 加尔文（城市） |
-| Civaux (City) | Civals（城市） |
+| Civaux (City) | 西沃（城市） |
 | Clermont-Ferrand (City) | 克莱蒙费朗（城市） |
 | Dijon (City) | 第戎（城市） |
-| Golfech (City) | Golfech（城市） |
+| Golfech (City) | 戈尔费什（城市） |
 | L'Île-Rousse (City) | 鲁斯岛（城市） |
 | La Rochelle (City) | 拉罗谢尔（城市） |
 | Lacq (City) | 拉克（城市） |
@@ -136,9 +136,9 @@
 | Montpellier (City) | 蒙彼利埃（城市） |
 | Nantes (City) | 南特（城市） |
 | Nice (City) | 尼斯（城市） |
-| Paluel (City) | Paluel（城市） |
+| Paluel (City) | 帕吕埃勒（城市） |
 | Paris (City) | 巴黎（城市） |
-| Porto-Vecchio (City) | Vecchio（城市） |
+| Porto-Vecchio (City) | 韦基奥港（城市） |
 | Reims (City) | 兰斯（城市） |
 | Rennes (City) | 雷恩（城市） |
 | Roscoff (City) | 聖馬婁（城市） |
@@ -200,12 +200,12 @@
 | Stockholm (City) | 斯德哥尔摩（城市） |
 | Trelleborg (City) | 特雷勒堡（城市） |
 | Uppsala (City) | 乌普萨拉（城市） |
-| Västerås (City) | Västerås（城市） |
+| Västerås (City) | 瓦斯特罗斯（城市） |
 | Växjö (City) | 韦克舍（城市） |
 | Finland | 芬兰 |
 | Helsinki (City) | 芬兰首都赫尔辛基（城市） |
 | Kotka (City) | 鷹（城市） |
-| Kouvola (City) | Kouvola（城市） |
+| Kouvola (City) | 科沃拉（城市） |
 | Lahti (City) | 拉赫蒂（城市） |
 | Loviisa (City) | 洛维萨（城市） |
 | Olkiluoto (City) | 奥尔基卢奥托（城市） |
@@ -280,7 +280,7 @@
 | Maribor (City) | 马里博尔（城市） |
 | Novo Mesto (City) | 新梅斯托（城市） |
 | Croatia | 克罗地亚 |
-| Osijek (City) | Osijek（城市） |
+| Osijek (City) | 奥西耶克（城市） |
 | Rijeka (City) | 河流（城市） |
 | Split (City) | 斯普利特（城市） |
 | Zadar (City) | 扎达尔（城市） |
@@ -297,7 +297,7 @@
 | Galați (City) | 加拉奇（城市） |
 | Hunedoara (City) | 胡内多阿拉（城市） |
 | Iași (City) | 雅西（城市） |
-| Mangalia (City) | Mangalia（城市） |
+| Mangalia (City) | 曼加利亚（城市） |
 | Pitești (City) | 皮特什蒂（城市） |
 | Reșița (City) | 雷希察（城市） |
 | Târgu Mureș (City) | 特尔古穆列什（城市） |
@@ -305,7 +305,7 @@
 | Bosnia and Herzegovina | 波斯尼亚和黑塞哥维那 |
 | Banja Luka (City) | 巴尼亚卢卡（城市） |
 | Bihać (City) | 比哈奇（城市） |
-| Karakaj (City) | Karakaj（城市） |
+| Karakaj (City) | 卡拉卡伊（城市） |
 | Mostar (City) | 莫斯塔尔（城市） |
 | Sarajevo (City) | 萨拉热窝（城市） |
 | Tuzla (City) | 图兹拉（城市） |
@@ -318,7 +318,7 @@
 | Novi Sad (City) | 诺维萨德（城市） |
 | Montenegro | 黑山共和国 |
 | Bijelo Polje (City) | 比耶洛波列（城市） |
-| Nikšić (City) | Niksic（城市） |
+| Nikšić (City) | 尼克希奇（城市） |
 | Podgorica (City) | 波德戈里察（城市） |
 | Kosovo | 科索沃 |
 | Pristina (City) | 普里什蒂纳（城市） |

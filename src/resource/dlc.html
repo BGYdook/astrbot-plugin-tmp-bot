@@ -5,74 +5,113 @@
   <title>DLC</title>
   <style>
     #dlc-info-container {
-      width: 600px;
       background-color: #222d33;
       padding: 14px;
-    }
-
-    .dlc-box {
-      display: flex;
-      flex-direction: row;
+      margin: 0 auto;
       box-sizing: border-box;
-      padding: 12px;
-      margin-top: 12px;
-      background-size: cover;
-      background-repeat: no-repeat;
-      background-position: center;
-    }
-    .dlc-box:nth-of-type(1) {
-      margin-top: 0;
-    }
-
-    .dlc-box .header-image {
-      width: 210px;
-      display: inline-block;
-    }
-
-    .dlc-box .dlc-info {
-      flex: 1;
-      width: 0;
-      //border: 1px solid red;
-      box-sizing: border-box;
-      padding: 2px 12px;
-    }
-    .dlc-info .name {
       color: #ffffff;
-      font-size: 18px;
-      font-weight: 600;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+      font-family: system-ui, Segoe UI, Helvetica, Arial, sans-serif;
     }
-    .dlc-info .desc {
-      color: #e5e5e5;
-      font-size: 14px;
+
+    #dlc-info-container.cols-1 { width: 720px; }
+    #dlc-info-container.cols-2 { width: 860px; }
+
+    .title {
+      font-size: 20px;
+      font-weight: 700;
+      margin: 0 0 12px 0;
+      text-align: center;
+      letter-spacing: .2px;
+    }
+
+    .grid {
+      display: grid;
+      gap: 12px;
+    }
+
+    .card {
+      background: #24313a;
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    .card-inner {
+      display: flex;
+      padding: 12px;
+      gap: 12px;
+      box-sizing: border-box;
+    }
+
+    .meta {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .name {
+      font-size: 16px;
+      font-weight: 700;
+      white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+    }
+
+    .desc {
+      margin-top: 6px;
+      font-size: 13px;
+      color: #e5e5e5;
       display: -webkit-box;
       -webkit-line-clamp: 2;
       -webkit-box-orient: vertical;
-    }
-    .dlc-info .price-box {
-      margin-top: 8px;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
-    .dlc-info .price-box span {
-      display: inline-block;
-      color: #BEEE11;
-      font-size: 16px;
+    .price {
+      margin-top: 10px;
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+      flex-wrap: wrap;
     }
-    .dlc-info .price-box .discount-price {
+
+    .price .now {
+      color: #BEEE11;
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    .price .old {
       color: #cbcbcb;
+      font-size: 14px;
       text-decoration: line-through;
     }
-    .dlc-info .price-box .discount {
-      font-size: 14px;
+
+    .price .off {
+      font-size: 13px;
       color: #BEEE11;
-      background-color: #4c6b22;
+      background: #4c6b22;
       padding: 2px 6px;
-      margin-left: 4px;
+      border-radius: 6px;
     }
+
+    #dlc-info-container.cols-1 .card-inner { flex-direction: row; }
+    #dlc-info-container.cols-1 .img {
+      width: var(--list-img-w, 240px);
+      flex: 0 0 var(--list-img-w, 240px);
+      height: auto;
+      border-radius: 8px;
+      object-fit: cover;
+    }
+
+    #dlc-info-container.cols-2 .card-inner { flex-direction: column; padding: 10px; gap: 10px; }
+    #dlc-info-container.cols-2 .img {
+      width: 100%;
+      height: auto;
+      border-radius: 8px;
+      object-fit: cover;
+    }
+
   </style>
 </head>
 <body>
@@ -81,33 +120,55 @@
 
   <script>
     function setData(dlcList) {
-      // 遍历渲染DLC列表
-      for (let dlc of dlcList) {
-        let dom = document.createElement(`div`);
-        dom.className = 'dlc-box';
-        dom.style.backgroundImage = `url('${dlc.backgroundImageUrl}')`;
+      let container = document.querySelector('#dlc-info-container');
+      container.innerHTML = '';
+      const count = Array.isArray(dlcList) ? dlcList.length : 0;
+      const cols = count > 6 ? 2 : 1;
+      const wrapW = cols === 2 ? 860 : 720;
+      let listImgW = 240;
+      if (count <= 3) listImgW = 280;
+      else if (count <= 6) listImgW = 240;
+      else if (count <= 10) listImgW = 220;
+      else listImgW = 200;
 
-        let priceDiscountDom = ''
+      container.className = `cols-${cols}`;
+      container.style.width = `${wrapW}px`;
+      container.style.setProperty('--list-img-w', `${listImgW}px`);
+
+      let title = document.createElement('div');
+      title.className = 'title';
+      title.innerText = 'DLC 列表';
+      container.appendChild(title);
+
+      let grid = document.createElement('div');
+      grid.className = 'grid';
+      grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+      container.appendChild(grid);
+
+      for (let dlc of dlcList || []) {
+        let priceDiscountDom = '';
         if (dlc.discount > 0) {
           priceDiscountDom = `
-          <span class="discount-price">￥${Math.ceil(dlc.originalPrice / 100)}</span>
-          <span class="discount">-${dlc.discount}%</span>
-        `;
+            <span class="old">￥${Math.ceil(dlc.originalPrice / 100)}</span>
+            <span class="off">-${dlc.discount}%</span>
+          `;
         }
-
+        let dom = document.createElement('div');
+        dom.className = 'card';
         dom.innerHTML = `
-          <img class="header-image" src="${dlc.headerImageUrl}"/>
-          <div class="dlc-info">
-            <div class="name">${dlc.name}</div>
-            <div class="desc">${dlc.desc}</div>
-            <div class="price-box">
-              <span>￥${Math.ceil(dlc.finalPrice / 100)}</span>
-              ${priceDiscountDom}
+          <div class="card-inner">
+            <img class="img" src="${dlc.headerImageUrl}"/>
+            <div class="meta">
+              <div class="name">${dlc.name}</div>
+              <div class="desc">${dlc.desc}</div>
+              <div class="price">
+                <span class="now">￥${Math.ceil(dlc.finalPrice / 100)}</span>
+                ${priceDiscountDom}
+              </div>
             </div>
           </div>
         `;
-
-        document.querySelector('#dlc-info-container').appendChild(dom);
+        grid.appendChild(dom);
       }
     }
   </script>

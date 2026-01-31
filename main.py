@@ -3,7 +3,7 @@
 
 """
 astrbot-plugin-tmp-bot
-欧卡2TMP查询插件 (版本 1.7.1)
+欧卡2TMP查询插件 (版本 1.7.2)
 """
 
 import re
@@ -90,6 +90,25 @@ except ImportError:
     class Plain:
         def __init__(self, text: str):
             self.text = text
+
+USER_GROUP_MAP = {
+    'Player': '玩家',
+    'Retired Legend': '退役',
+    'Game Developer': '游戏开发者',
+    'Retired Team Member': '退休团队成员',
+    'Add-On Team': '附加组件团队',
+    'Game Moderator': '游戏管理员'
+}
+PROMODS_SERVER_IDS = {50, 51}
+
+def _translate_user_groups(groups: List[Any]) -> List[str]:
+    translated: List[str] = []
+    for g in groups:
+        if g is None:
+            continue
+        key = str(g)
+        translated.append(USER_GROUP_MAP.get(key, key))
+    return translated
 
 
 # --- 辅助函数：格式化时间戳 ---
@@ -195,6 +214,13 @@ class TmpBotPlugin(Star):
         self.config = config or {}
         self._translate_cache: Dict[str, str] = {}
         self._location_maps_loaded: bool = False
+        self._fullmap_cache: Optional[Dict[str, Any]] = None
+        self._fullmap_cache_ts: float = 0.0
+        self._fullmap_last_fetch_ts: float = 0.0
+        self._fullmap_next_fetch_ts: float = 0.0
+        self._fullmap_task: Optional[asyncio.Task] = None
+        self._fullmap_lock = asyncio.Lock()
+        self._fullmap_fetch_lock = asyncio.Lock()
         self._load_location_maps()
         try:
             bind_path = self.config.get('bind_file')
@@ -247,6 +273,98 @@ class TmpBotPlugin(Star):
             trust_env=True
         )
         logger.info(f"TMP Bot 插件HTTP会话已创建，超时 {timeout_sec}s")
+        self._fullmap_task = None
+
+    def _get_fullmap_interval(self) -> int:
+        v = self._cfg_int('ets2map_fullmap_interval_seconds', 60)
+        return 60 if v < 60 else v
+
+    def _start_fullmap_task(self) -> None:
+        if self._fullmap_task and not self._fullmap_task.done():
+            return
+        self._fullmap_task = asyncio.create_task(self._fullmap_loop())
+
+    async def _fullmap_loop(self) -> None:
+        await asyncio.sleep(self._get_fullmap_interval())
+        while True:
+            await self._fetch_fullmap()
+            await asyncio.sleep(self._get_fullmap_interval())
+
+    async def _fetch_fullmap(self) -> None:
+        if not self.session:
+            return
+        interval = self._get_fullmap_interval()
+        async with self._fullmap_fetch_lock:
+            now_wall = time.time()
+            if now_wall - self._fullmap_last_fetch_ts < interval:
+                if not self._fullmap_cache:
+                    logger.info(f"fullmap 拉取跳过(限频): interval={interval}s")
+                return
+            now_mono = time.monotonic()
+            if now_mono < self._fullmap_next_fetch_ts:
+                if not self._fullmap_cache:
+                    logger.info(f"fullmap 拉取跳过(限频): interval={interval}s")
+                return
+            self._fullmap_next_fetch_ts = now_mono + interval
+            self._fullmap_last_fetch_ts = time.time()
+        url = "https://tracker.ets2map.com/v3/fullmap"
+        try:
+            async with self.session.get(url, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    if isinstance(data, dict):
+                        async with self._fullmap_lock:
+                            self._fullmap_cache = data
+                            self._fullmap_cache_ts = time.time()
+                        logger.info("fullmap 拉取成功")
+                        return
+                logger.info(f"fullmap 拉取失败 status={resp.status}")
+        except Exception as e:
+            logger.error(f"fullmap 拉取异常: {e}")
+
+    def _get_fullmap_tile_url(self, map_type: str) -> Optional[str]:
+        data = self._fullmap_cache or {}
+        candidates: List[str] = []
+        def walk(v: Any) -> None:
+            if isinstance(v, dict):
+                for val in v.values():
+                    walk(val)
+                return
+            if isinstance(v, list):
+                for val in v:
+                    walk(val)
+                return
+            if isinstance(v, str):
+                s = v.strip()
+                if s.startswith("http") and "{z}" in s and "{x}" in s and "{y}" in s:
+                    candidates.append(s)
+        if isinstance(data, dict):
+            if data.get('Data'):
+                walk(data.get('Data'))
+            if data.get('data'):
+                walk(data.get('data'))
+            walk(data)
+        else:
+            walk(data)
+        if not candidates:
+            return None
+        seen = set()
+        uniq = []
+        for c in candidates:
+            if c in seen:
+                continue
+            seen.add(c)
+            uniq.append(c)
+        candidates = uniq
+        if map_type == "promods":
+            for c in candidates:
+                if "promods" in c.lower():
+                    return c
+        for c in candidates:
+            lc = c.lower()
+            if "ets" in lc and "promods" not in lc:
+                return c
+        return candidates[0]
 
     # --- 工具：头像处理 ---
     def _normalize_avatar_url(self, url: Optional[str]) -> Optional[str]:
@@ -967,6 +1085,9 @@ class TmpBotPlugin(Star):
                             'game': 1 if server_details.get('game') == 'ETS2' else 2 if server_details.get('game') == 'ATS' else 0,
                             'city': {'name': formatted_location}, 
                             'serverId': online_data.get('server'),
+                            'serverDetailsId': server_details.get('id') or server_details.get('_id'),
+                            'apiServerId': server_details.get('apiserverid') or server_details.get('apiServerId'),
+                            'serverCode': server_details.get('code') or server_details.get('shortname'),
                             'x': online_data.get('x'),
                             'y': online_data.get('y'),
                             'country': country_cn,
@@ -991,6 +1112,24 @@ class TmpBotPlugin(Star):
         except Exception as e:
             logger.error(f"Trucky V3 API 解析失败: {e.__class__.__name__}", exc_info=True)
             return {'online': False, 'debug_error': f'Trucky V3 API 发生意外错误: {e.__class__.__name__}。'}
+
+    def _get_fullmap_player(self, tmp_id: str) -> Optional[Dict[str, Any]]:
+        data = self._fullmap_cache or {}
+        payload = None
+        if isinstance(data, dict):
+            payload = data.get('Data') or data.get('data') or data.get('players')
+        if not isinstance(payload, list):
+            return None
+        tid = str(tmp_id)
+        for p in payload:
+            if not isinstance(p, dict):
+                continue
+            mp_id = p.get('MpId') or p.get('mp_id') or p.get('tmpId') or p.get('tmp_id')
+            if mp_id is None:
+                continue
+            if str(mp_id) == tid:
+                return p
+        return None
     
     async def _get_rank_list(self, ranking_type: str = "total", limit: int = 10) -> Optional[List[Dict]]:
         """获取 TruckersMP 里程排行榜列表 (使用 da.vtcm.link API)。
@@ -1093,6 +1232,246 @@ class TmpBotPlugin(Star):
         except Exception as e:
             logger.error(f"查询路况时发生未知错误: {e}", exc_info=True)
             raise NetworkException("查询路况失败")
+
+    async def _resolve_server_ids(self, server_key: str) -> List[str]:
+        if not self.session:
+            return []
+        key = str(server_key or "").strip().lower()
+        if not key:
+            return []
+        if key.isdigit():
+            return [key]
+        patterns = []
+        if key in ["sim1", "simulation1", "simulation_1"]:
+            patterns = ["simulation 1", "sim 1", "sim1"]
+        elif key in ["sim2", "simulation2", "simulation_2"]:
+            patterns = ["simulation 2", "sim 2", "sim2"]
+        elif key in ["arc1", "arc", "arcade"]:
+            patterns = ["arcade", "arc 1", "arc1"]
+        elif key in ["eupromods1", "promods", "promods1"]:
+            patterns = ["promods", "pro mods"]
+        else:
+            patterns = [key]
+        url = "https://api.truckersmp.com/v2/servers"
+        try:
+            async with self.session.get(url, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
+                if resp.status != 200:
+                    return []
+                data = await resp.json()
+        except Exception:
+            return []
+        servers = data.get('response') if isinstance(data, dict) else None
+        if not isinstance(servers, list):
+            return []
+        ids = []
+        for s in servers:
+            if not isinstance(s, dict):
+                continue
+            name = str(s.get('name') or "").lower()
+            sid = s.get('id') or s.get('serverId') or s.get('server_id')
+            if not sid:
+                continue
+            for p in patterns:
+                if p and p in name:
+                    ids.append(str(sid))
+                    break
+        seen = set()
+        uniq = []
+        for sid in ids:
+            if sid in seen:
+                continue
+            seen.add(sid)
+            uniq.append(sid)
+        return uniq
+
+    async def _get_footprint_history(self, tmp_id: str, server_id: Optional[str], start_time: str, end_time: str) -> List[Dict[str, Any]]:
+        if not self.session:
+            return []
+        base = self._cfg_str('footprint_api_base', '').strip() or "https://da.vtcm.link"
+        base = base[:-1] if base.endswith('/') else base
+        sid = str(server_id or "").strip()
+        params = {
+            'tmpId': str(tmp_id).strip(),
+            'startTime': str(start_time).strip(),
+            'endTime': str(end_time).strip()
+        }
+        if sid:
+            params['serverId'] = sid
+        url = f"{base}/map/playerHistory"
+        try:
+            logger.info(f"足迹历史: 请求 {url} params={params}")
+            async with self.session.get(url, params=params, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
+                if resp.status != 200:
+                    logger.info(f"足迹历史: 返回状态码 {resp.status}")
+                    return []
+                data = await resp.json()
+        except Exception:
+            return []
+        if isinstance(data, list):
+            return data
+        if not isinstance(data, dict):
+            return []
+        code = data.get('code')
+        if code is not None and int(code) != 200:
+            return []
+        payload = data.get('data') or data.get('response') or data.get('result')
+        if not isinstance(payload, list):
+            return []
+        return payload
+
+    def _normalize_history_points(self, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        points: List[Dict[str, Any]] = []
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            x = it.get('axisX') or it.get('x') or it.get('posX') or it.get('pos_x')
+            y = it.get('axisY') or it.get('y') or it.get('posY') or it.get('pos_y')
+            if x is None or y is None:
+                continue
+            try:
+                axis_x = float(x)
+                axis_y = float(y)
+            except Exception:
+                continue
+            server_id = it.get('serverId') or it.get('server_id') or it.get('server') or 0
+            heading = it.get('heading') or 0
+            ts_val = None
+            update_time = it.get('updateTime') or it.get('time') or it.get('updatedAt') or it.get('update_time')
+            if update_time:
+                s = str(update_time).strip()
+                try:
+                    dt = datetime.strptime(s, '%Y-%m-%d %H:%M:%S')
+                    ts_val = int(dt.timestamp())
+                except Exception:
+                    try:
+                        dt = datetime.fromisoformat(s.replace('Z', '+00:00'))
+                        ts_val = int(dt.timestamp())
+                    except Exception:
+                        ts_val = None
+            server_id_val = 0
+            try:
+                server_id_val = int(server_id)
+            except Exception:
+                server_id_val = 0
+            points.append({
+                'axisX': axis_x,
+                'axisY': axis_y,
+                'serverId': server_id_val,
+                'heading': heading,
+                'ts': ts_val or 0
+            })
+        return points
+
+    async def _get_footprint_data(self, server_key: str, tmp_id: str, server_ids: Optional[List[str]] = None) -> Dict[str, Any]:
+        if not self.session:
+            raise NetworkException("插件未初始化，HTTP会话不可用")
+        base = self._cfg_str('footprint_api_base', '').strip() or "https://da.vtcm.link"
+        base = base[:-1] if base.endswith('/') else base
+        urls = []
+        server_ids = server_ids or []
+        server_ids = [str(s).strip() for s in server_ids if str(s).strip()]
+        urls.append(f"{base}/footprint/today?tmpId={tmp_id}&server={server_key}")
+        urls.append(f"{base}/footprint/today?tmpId={tmp_id}&serverId={server_key}")
+        urls.append(f"{base}/footprint/list?tmpId={tmp_id}&server={server_key}")
+        urls.append(f"{base}/map/footprint?tmpId={tmp_id}&server={server_key}")
+        urls.append(f"{base}/map/track?tmpId={tmp_id}&server={server_key}")
+        for sid in server_ids:
+            urls.append(f"{base}/footprint/today?tmpId={tmp_id}&serverId={sid}")
+            urls.append(f"{base}/footprint/list?tmpId={tmp_id}&serverId={sid}")
+            urls.append(f"{base}/map/footprint?tmpId={tmp_id}&serverId={sid}")
+            urls.append(f"{base}/map/track?tmpId={tmp_id}&serverId={sid}")
+        last_error = None
+        for url in urls:
+            try:
+                logger.info(f"足迹接口: 请求 {url}")
+                async with self.session.get(url, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        if isinstance(data, dict):
+                            code = data.get('code')
+                            if code is not None and int(code) != 200:
+                                continue
+                            success = data.get('success')
+                            if success is not None and success is False:
+                                continue
+                        points, _ = self._extract_footprint_points(data, server_key, server_ids)
+                        if not points:
+                            continue
+                        return { 'url': url, 'data': data }
+                    if resp.status in (404, 204):
+                        continue
+            except Exception as e:
+                last_error = e
+        if last_error:
+            raise NetworkException(f"足迹接口请求失败: {last_error}")
+        raise ApiResponseException("足迹接口无可用数据")
+
+    def _extract_footprint_points(self, payload: Any, server_key: str, server_ids: Optional[List[str]] = None) -> Tuple[List[Dict[str, float]], Dict[str, Any]]:
+        ids = [str(s).lower() for s in (server_ids or []) if str(s).strip()]
+        key = str(server_key or "").strip().lower()
+
+        def _point_from_item(item: Any) -> Optional[Dict[str, float]]:
+            if isinstance(item, (list, tuple)) and len(item) >= 2:
+                x, y = item[0], item[1]
+            elif isinstance(item, dict):
+                x = item.get('axisX') or item.get('x') or item.get('posX') or item.get('pos_x')
+                y = item.get('axisY') or item.get('y') or item.get('posY') or item.get('pos_y')
+            else:
+                return None
+            if x is None or y is None:
+                return None
+            try:
+                return { 'x': float(x), 'y': float(y) }
+            except Exception:
+                return None
+
+        def _collect_points_from_list(items: List[Any]) -> List[Dict[str, float]]:
+            pts: List[Dict[str, float]] = []
+            for it in items:
+                p = _point_from_item(it)
+                if p:
+                    pts.append(p)
+            return pts
+
+        def _match_server(item: Dict[str, Any]) -> bool:
+            sid = str(item.get('serverId') or item.get('server_id') or item.get('server') or '').strip().lower()
+            if not sid:
+                return False
+            if sid == key:
+                return True
+            return sid in ids
+
+        def _find_points(obj: Any, depth: int = 0) -> Tuple[List[Dict[str, float]], Dict[str, Any]]:
+            if depth > 5:
+                return [], {}
+            if isinstance(obj, list):
+                pts = _collect_points_from_list(obj)
+                if pts:
+                    return pts, {}
+                for it in obj:
+                    if isinstance(it, dict) and _match_server(it):
+                        pts2, meta2 = _find_points(it, depth + 1)
+                        if pts2:
+                            return pts2, meta2 or it
+                for it in obj:
+                    pts2, meta2 = _find_points(it, depth + 1)
+                    if pts2:
+                        return pts2, meta2
+                return [], {}
+            if isinstance(obj, dict):
+                for k in ['points', 'track', 'tracks', 'list', 'route', 'path', 'data', 'response', 'result', 'items']:
+                    if k in obj:
+                        pts2, meta2 = _find_points(obj.get(k), depth + 1)
+                        if pts2:
+                            return pts2, meta2 or obj
+                for v in obj.values():
+                    pts2, meta2 = _find_points(v, depth + 1)
+                    if pts2:
+                        return pts2, meta2
+            return [], {}
+
+        points, meta = _find_points(payload, 0)
+        return points, meta
 
     async def _render_text_to_image(self, text: str) -> Optional[Any]:
         if not self.session:
@@ -1381,12 +1760,23 @@ class TmpBotPlugin(Star):
     # ******************************************************
 
     @filter.event_message_type(filter.EventMessageType.ALL)
-    async def _on_any_message_dispatch(self, event: AstrMessageEvent):
-        msg = (event.message_str or "").strip()
+    async def _on_any_message_dispatch(self, event: AstrMessageEvent, *args, **kwargs):
+        target_event = event
+        if not hasattr(target_event, "message_str"):
+            if args:
+                candidate = args[0]
+                if hasattr(candidate, "message_str") or hasattr(candidate, "message_obj"):
+                    target_event = candidate
+            if target_event is event:
+                kw_event = kwargs.get("event")
+                if hasattr(kw_event, "message_str") or hasattr(kw_event, "message_obj"):
+                    target_event = kw_event
+
+        msg = (getattr(target_event, "message_str", "") or "").strip()
         if not msg:
             return
 
-        message_obj = getattr(event, "message_obj", None)
+        message_obj = getattr(target_event, "message_obj", None)
         has_at = False
         if message_obj is not None:
             try:
@@ -1437,6 +1827,10 @@ class TmpBotPlugin(Star):
             return
         if re.match(r'^今日里程排行\s*$', msg):
             async for r in self.tmprank_today(event):
+                yield r
+            return
+        if re.match(r'^足迹(\s+\S+)?(\s+\d+)?\s*$', msg) or (msg.startswith("足迹") and has_at):
+            async for r in self.tmptoday_footprint(event):
                 yield r
             return
         if re.match(r'^服务器\s*$', msg):
@@ -1538,6 +1932,26 @@ class TmpBotPlugin(Star):
         """查看今日里程排行榜前若干名。"""
         async for r in self.tmprank_today(event):
             yield r
+
+    @filter.command("足迹")
+    async def cmd_tmp_today_footprint(self, event: AstrMessageEvent, server: str | None = None, tmp_id: str | None = None):
+        orig = getattr(event, "message_str", "") or ""
+        try:
+            if server and tmp_id:
+                event.message_str = f"足迹 {server} {tmp_id}"
+            elif server:
+                event.message_str = f"足迹 {server}"
+            elif tmp_id:
+                event.message_str = f"足迹 {tmp_id}"
+            else:
+                event.message_str = "足迹"
+            async for r in self.tmptoday_footprint(event):
+                yield r
+        finally:
+            try:
+                event.message_str = orig
+            except Exception:
+                pass
 
     @filter.command("服务器")
     async def cmd_tmp_server(self, event: AstrMessageEvent):
@@ -1683,9 +2097,9 @@ class TmpBotPlugin(Star):
             if isinstance(perms, dict):
                 groups = [g for g in ["Staff", "Management", "Game Admin"] if perms.get(f'is{g.replace(" ", "")}')]
                 if groups:
-                    perms_str = ', '.join(groups)
+                    perms_str = ', '.join(_translate_user_groups(groups))
             elif isinstance(perms, list) and perms:
-                perms_str = ', '.join(perms)
+                perms_str = ', '.join(_translate_user_groups(perms))
         body += f"💼所属分组: {perms_str}\n"
 
         # 车队信息：优先使用 player_info.vtc（若为字典），若缺少 role 则调用 VTCM API 获取
@@ -1989,6 +2403,388 @@ class TmpBotPlugin(Star):
             yield r
     # --- DLC 命令处理器结束 ---
 
+    async def tmptoday_footprint(self, event: AstrMessageEvent):
+        message_str = event.message_str.strip()
+        user_id = event.get_sender_id()
+
+        target_user_id = None
+        message_obj = getattr(event, "message_obj", None)
+        if message_obj is not None:
+            try:
+                chain = getattr(message_obj, "message", None) or []
+                for seg in chain:
+                    seg_type = getattr(seg, "type", None)
+                    if isinstance(seg, dict):
+                        seg_type = seg.get("type") or seg_type
+                    if isinstance(seg_type, str) and seg_type.lower() == "at":
+                        uid = (
+                            getattr(seg, "qq", None)
+                            or getattr(seg, "user_id", None)
+                            or getattr(seg, "id", None)
+                        )
+                        if isinstance(seg, dict):
+                            uid = seg.get("qq") or seg.get("user_id") or seg.get("id") or uid
+                        if uid:
+                            target_user_id = str(uid)
+                            break
+                    uid2 = getattr(seg, "qq", None)
+                    if isinstance(seg, dict):
+                        uid2 = seg.get("qq") or uid2
+                    if uid2:
+                        target_user_id = str(uid2)
+                        break
+            except Exception:
+                target_user_id = None
+
+        tokens = message_str.split()
+        server_token = None
+        input_id = None
+        if len(tokens) > 1:
+            for t in tokens[1:]:
+                if t.isdigit():
+                    input_id = t
+                else:
+                    server_token = t
+        if not server_token:
+            yield event.plain_result("用法: 足迹 [服务器简称] [ID]，例如: 足迹 s1 123")
+            return
+        server_key_raw = str(server_token).strip().lower()
+        server_alias = {
+            "s1": "sim1",
+            "s2": "sim2",
+            "p": "eupromods1",
+            "a": "arc1",
+            "promods": "eupromods1",
+            "promods1": "eupromods1",
+            "sim1": "sim1",
+            "sim2": "sim2",
+            "arc1": "arc1"
+        }
+        server_key = server_alias.get(server_key_raw, server_key_raw)
+        server_id_map = {
+            "sim1": 2,
+            "sim2": 41,
+            "eupromods1": 50,
+            "arc1": 7
+        }
+        server_label_map = {
+            "sim1": "SIM1",
+            "sim2": "SIM2",
+            "eupromods1": "ProMods",
+            "arc1": "Arc"
+        }
+        server_label = server_label_map.get(server_key, server_key.upper())
+        map_type = 'promods' if server_key in ['eupromods1', 'promods', 'promods1'] else 'ets'
+
+        tmp_id = None
+        if input_id:
+            if len(input_id) == 17 and input_id.startswith('7'):
+                try:
+                    tmp_id = await self._get_tmp_id_from_steam_id(input_id)
+                except SteamIdNotFoundException as e:
+                    yield event.plain_result(str(e))
+                    return
+                except NetworkException as e:
+                    yield event.plain_result(f"查询失败: {str(e)}")
+                    return
+            else:
+                tmp_id = input_id
+        else:
+            bind_user_id = target_user_id or user_id
+            tmp_id = self._get_bound_tmp_id(bind_user_id)
+
+        if not tmp_id:
+            yield event.plain_result("请输入正确的玩家编号 TMP ID")
+            return
+
+        try:
+            player_info, stats_info, online_status = await asyncio.gather(
+                self._get_player_info(tmp_id),
+                self._get_player_stats(tmp_id),
+                self._get_online_status(tmp_id)
+            )
+        except PlayerNotFoundException as e:
+            yield event.plain_result(str(e))
+            return
+        except Exception as e:
+            yield event.plain_result(f"查询失败: {str(e)}")
+            return
+
+        player_name = player_info.get('name', '未知')
+        last_online_raw = stats_info.get('last_online') or player_info.get('lastOnline')
+        last_online_formatted = _format_timestamp_to_readable(last_online_raw) if last_online_raw else '未知'
+
+        try:
+            server_ids = await self._resolve_server_ids(server_key)
+            for k in ['serverId', 'serverDetailsId', 'apiServerId']:
+                v = online_status.get(k)
+                if v is not None:
+                    s = str(v).strip()
+                    if s:
+                        server_ids.append(s)
+            mapped_id = server_id_map.get(server_key)
+            if mapped_id is not None:
+                server_ids.append(str(mapped_id))
+            seen = set()
+            uniq = []
+            for sid in server_ids:
+                if sid in seen:
+                    continue
+                seen.add(sid)
+                uniq.append(sid)
+            server_ids = uniq
+
+            now_local = datetime.now()
+            start_time = now_local.replace(hour=0, minute=0, second=0, microsecond=0).strftime('%Y-%m-%d %H:%M:%S')
+            end_time = now_local.replace(hour=23, minute=59, second=59, microsecond=0).strftime('%Y-%m-%d %H:%M:%S')
+            history_points = []
+            history_candidates = []
+            if server_ids:
+                history_candidates.extend(server_ids)
+            mapped_id = server_id_map.get(server_key)
+            if mapped_id is not None:
+                history_candidates.append(str(mapped_id))
+            history_candidates.append("")
+            seen_hist = set()
+            hist_list = []
+            for sid in history_candidates:
+                s = str(sid or "").strip()
+                if s in seen_hist:
+                    continue
+                seen_hist.add(s)
+                hist_list.append(s)
+            range_start = start_time
+            range_end = end_time
+            for sid in hist_list:
+                history_points = await self._get_footprint_history(tmp_id, sid or None, start_time, end_time)
+                if history_points:
+                    break
+            if not history_points:
+                extended_start = (now_local - timedelta(days=7)).strftime('%Y-%m-%d %H:%M:%S')
+                extended_end = now_local.strftime('%Y-%m-%d %H:%M:%S')
+                for sid in hist_list:
+                    history_points = await self._get_footprint_history(tmp_id, sid or None, extended_start, extended_end)
+                    if history_points:
+                        range_start = extended_start
+                        range_end = extended_end
+                        break
+            if history_points:
+                if server_key in ['eupromods1', 'promods', 'promods1']:
+                    filtered = [p for p in history_points if str(p.get('serverId') or p.get('server_id') or p.get('server')) in {str(i) for i in PROMODS_SERVER_IDS}]
+                elif server_key in server_id_map:
+                    target = str(server_id_map[server_key])
+                    filtered = [p for p in history_points if str(p.get('serverId') or p.get('server_id') or p.get('server')) == target]
+                elif server_ids:
+                    target_set = {str(i) for i in server_ids}
+                    filtered = [p for p in history_points if str(p.get('serverId') or p.get('server_id') or p.get('server')) in target_set]
+                else:
+                    filtered = history_points
+                history_points = filtered
+
+            if history_points:
+                points = self._normalize_history_points(history_points)
+                meta = {'source': 'playerHistory', 'startTime': range_start, 'endTime': range_end}
+            else:
+                logger.info("足迹历史为空，开始回退足迹接口")
+                footprint_resp = await self._get_footprint_data(server_key, tmp_id, server_ids)
+                points, meta = self._extract_footprint_points(footprint_resp.get('data'), server_key, server_ids)
+                fallback_points = []
+                for p in points:
+                    x = p.get('x')
+                    y = p.get('y')
+                    if x is None or y is None:
+                        continue
+                    fallback_points.append({'axisX': x, 'axisY': y, 'serverId': 0, 'heading': 0, 'ts': 0})
+                points = fallback_points
+        except Exception as e:
+            yield event.plain_result(f"查询今日足迹失败: {str(e)}")
+            return
+
+        if not points:
+            yield event.plain_result("今日/输入的对应服务器暂无足迹数据")
+            return
+
+        def _to_km(val):
+            try:
+                v = float(val)
+                if v > 10000:
+                    v = v / 1000.0
+                return round(v, 2)
+            except Exception:
+                return None
+
+        distance_km = _to_km(meta.get('distance') or meta.get('mileage') or meta.get('totalDistance') or meta.get('totalMileage'))
+        start_time = meta.get('startTime') or meta.get('start_time') or meta.get('beginTime') or meta.get('begin_time')
+        end_time = meta.get('endTime') or meta.get('end_time') or meta.get('finishTime') or meta.get('finish_time')
+        if distance_km is None:
+            try:
+                daily_km = float(stats_info.get('daily_km') or 0)
+                if daily_km > 0:
+                    distance_km = round(daily_km, 2)
+            except Exception:
+                distance_km = None
+
+        tile_url_ets = "https://ets-map.oss-cn-beijing.aliyuncs.com/ets2/05102019/{z}/{x}/{y}.png"
+        tile_url_promods = "https://ets-map.oss-cn-beijing.aliyuncs.com/promods/05102019/{z}/{x}/{y}.png"
+        fullmap_ets = self._get_fullmap_tile_url("ets") if self._fullmap_cache else None
+        fullmap_promods = self._get_fullmap_tile_url("promods") if self._fullmap_cache else None
+        if fullmap_ets:
+            tile_url_ets = fullmap_ets
+        if fullmap_promods:
+            tile_url_promods = fullmap_promods
+
+        map_tmpl = """
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  html, body { margin:0; padding:0; width:100vw; height:100vh; background:#111; overflow:hidden; }
+  * { box-sizing: border-box; }
+  .wrap { width: 100vw; color:#f2f4f8; font-family: system-ui, Segoe UI, Helvetica, Arial, sans-serif; }
+  #map { width: 100vw; height: calc(100vh - 140px); background:#121417; }
+  .panel { width:100vw; height:140px; background:rgba(10,10,10,.82); display:flex; align-items:center; padding:14px 20px; color:#eaeaea; backdrop-filter: blur(4px); }
+  .avatar { width:64px; height:64px; border-radius:50%; background:#808080; object-fit:cover; margin-right:16px; }
+  .col { flex:1; }
+  .name { font-size:20px; font-weight:600; letter-spacing:.3px; color:#f0f3f5; }
+  .sub { font-size:14px; color:#d8d8d8; margin-top:6px; line-height:1.5; }
+  .right { width:260px; text-align:right; color:#f0f3f5; font-size:14px; }
+</style>
+<div class="wrap">
+  <div id="map"></div>
+  <div class="panel">
+    <img class="avatar" src="{{ avatar }}" />
+    <div class="col"> 
+      <div class="name">{{ player_name }} · {{ server_label }}</div>
+      <div class="sub">点位数: {{ points_count }}{% if distance_km is not none %} · 里程: {{ '%.2f' % distance_km }} km{% endif %}</div>
+      <div class="sub">{% if start_time %}开始: {{ start_time }}{% endif %}{% if end_time %} · 结束: {{ end_time }}{% endif %}</div>
+    </div>
+    <div class="right">
+      <div>上次在线: {{ last_online }}</div>
+    </div>
+  </div>
+</div>
+<script>
+  var mapType = "{{ map_type }}";
+  var cfg = {
+    ets: {
+      tileUrl: '{{ tile_url_ets }}',
+      fallbackUrl: 'https://ets2.online/map/ets2map_157/{z}/{x}/{y}.png',
+      multipliers: { x: 70272, y: 76157 },
+      breakpoints: { uk: { x: -31056.8, y: -5832.867 } },
+      bounds: { x:131072, y:131072 },
+      maxZoom: 8, minZoom: 2,
+      calc: function(xx, yy) {
+        return [ xx / 1.609055 + cfg.ets.multipliers.x, yy / 1.609055 + cfg.ets.multipliers.y ];
+      }
+    },
+    promods: {
+      tileUrl: '{{ tile_url_promods }}',
+      fallbackUrl: 'https://ets2.online/map/ets2mappromods_156/{z}/{x}/{y}.png',
+      multipliers: { x: 51953, y: 76024 },
+      breakpoints: { uk: { x: -31056.8, y: -5832.867 } },
+      bounds: { x:131072, y:131072 },
+      maxZoom: 8, minZoom: 2,
+      calc: function(xx, yy) {
+        return [ xx / 2.598541 + cfg.promods.multipliers.x, yy / 2.598541 + cfg.promods.multipliers.y ];
+      }
+    }
+  };
+
+  var map = L.map('map', { attributionControl: false, crs: L.CRS.Simple, zoomControl: false, zoomSnap: 0.2, zoomDelta: 0.2 });
+  var c = cfg[mapType];
+  var b = L.latLngBounds(
+    map.unproject([0, c.bounds.y], c.maxZoom),
+    map.unproject([c.bounds.x, 0], c.maxZoom)
+  );
+  var tileLayer = L.tileLayer(c.tileUrl, { minZoom: c.minZoom, maxZoom: 10, maxNativeZoom: c.maxZoom, tileSize: 512, bounds: b, reuseTiles: true }).addTo(map);
+  var switched = false;
+  tileLayer.on('tileerror', function(){
+    if (switched || !c.fallbackUrl) return;
+    switched = true;
+    map.removeLayer(tileLayer);
+    tileLayer = L.tileLayer(c.fallbackUrl, { minZoom: c.minZoom, maxZoom: 10, maxNativeZoom: c.maxZoom, tileSize: 512, bounds: b, reuseTiles: true }).addTo(map);
+  });
+  map.setMaxBounds(b);
+  function calculateDistance(p1, p2) {
+    return Math.sqrt(Math.pow(p1.axisX - p2.axisX, 2) + Math.pow(p1.axisY - p2.axisY, 2));
+  }
+  var points = [ {% for p in points %}{ axisX: {{ p.axisX }}, axisY: {{ p.axisY }}, serverId: {{ p.serverId }}, heading: {{ p.heading }}, ts: {{ p.ts }} }{% if not loop.last %}, {% endif %}{% endfor %} ];
+  points = points.filter(function(p){ return !(p.axisX === 0 && p.axisY === 0 && p.heading === 0); });
+  var lines = [];
+  var currentLine = [];
+  if (points.length > 0) {
+    currentLine.push(points[0]);
+    for (var i=1;i<points.length;i++){
+      var prev = points[i-1];
+      var curr = points[i];
+      var dist = calculateDistance(prev, curr) * 19;
+      var isDistJump = dist > 30000;
+      var timeDiff = 0;
+      if (curr.ts && prev.ts) {
+        timeDiff = curr.ts - prev.ts;
+      }
+      var isTimeJump = timeDiff > 90;
+      var isServerJump = prev.serverId !== curr.serverId;
+      if (isDistJump || isTimeJump || isServerJump) {
+        if (currentLine.length > 0) lines.push(currentLine);
+        currentLine = [];
+      }
+      currentLine.push(curr);
+    }
+    if (currentLine.length > 0) lines.push(currentLine);
+  }
+  var allLatlngs = [];
+  for (var li=0; li<lines.length; li++){
+    var linePts = lines[li];
+    if (!linePts || linePts.length === 0) continue;
+    var latlngs = [];
+    for (var j=0;j<linePts.length;j++){
+      var xy = c.calc(linePts[j].axisX, linePts[j].axisY);
+      var ll = map.unproject(xy, c.maxZoom);
+      latlngs.push(ll);
+      allLatlngs.push(ll);
+    }
+    var line = L.polyline(latlngs, { color:'#3aa3ff', weight:4, opacity:0.9 }).addTo(map);
+    if (latlngs.length > 0) {
+      L.circleMarker(latlngs[0], { color:'#ffffff', weight:2, fillColor:'#21d07a', fillOpacity:1, radius:5 }).addTo(map);
+      L.circleMarker(latlngs[latlngs.length-1], { color:'#ffffff', weight:2, fillColor:'#ff4d4f', fillOpacity:1, radius:5 }).addTo(map);
+    }
+  }
+  if (allLatlngs.length > 0) {
+    map.fitBounds(L.latLngBounds(allLatlngs), { padding: [30, 30] });
+  }
+</script>
+"""
+        data = {
+            'player_name': player_name,
+            'avatar': self._normalize_avatar_url(player_info.get('avatar')) or '',
+            'points': points,
+            'points_count': len(points),
+            'distance_km': distance_km,
+            'start_time': start_time,
+            'end_time': end_time,
+            'last_online': last_online_formatted,
+            'map_type': map_type,
+            'server_label': server_label,
+            'tile_url_ets': tile_url_ets,
+            'tile_url_promods': tile_url_promods
+        }
+        try:
+            url = await self.html_render(map_tmpl, data, options={'type': 'jpeg', 'quality': 92, 'full_page': True, 'timeout': 8000, 'animations': 'disabled'})
+            if isinstance(url, str) and url:
+                yield event.chain_result([Image.fromURL(url)])
+                return
+        except Exception:
+            pass
+
+        message = "📍 足迹\n"
+        message += f"玩家: {player_name} (ID:{tmp_id})\n"
+        message += f"服务器: {server_label}\n"
+        message += f"点位数: {len(points)}"
+        if distance_km is not None:
+            message += f" | 里程: {distance_km:.2f} km"
+        message += f"\n上次在线: {last_online_formatted}"
+        yield event.plain_result(message)
+
     async def tmpbind(self, event: AstrMessageEvent):
         """[命令: 绑定] 绑定您的聊天账号与TMP ID。支持输入 TMP ID 或 Steam ID。"""
         message_str = event.message_str.strip()
@@ -2125,11 +2921,28 @@ class TmpBotPlugin(Star):
             yield event.plain_result(f"查询失败: {str(e)}")
             return
 
-        # 2) 在线与坐标（Trucky V3）
+        # 2) 在线与坐标（fullmap + Trucky V3）
+        await self._fetch_fullmap()
+        fullmap_player = self._get_fullmap_player(tmp_id)
         online = await self._get_online_status(tmp_id)
         if not online or not online.get('online'):
-            yield event.plain_result("玩家未在线")
-            return
+            if not fullmap_player:
+                yield event.plain_result("玩家未在线")
+                return
+            online = {
+                'online': True,
+                'serverName': '未知服务器',
+                'serverId': fullmap_player.get('ServerId'),
+                'x': fullmap_player.get('X'),
+                'y': fullmap_player.get('Y'),
+                'country': None,
+                'realName': None,
+                'city': {'name': '未知位置'}
+            }
+        if fullmap_player:
+            online['x'] = fullmap_player.get('X')
+            online['y'] = fullmap_player.get('Y')
+            online['serverId'] = fullmap_player.get('ServerId')
 
         # 3) 构造 HTML 渲染数据（玩家 + 位置，周边玩家留作后续扩展）
         server_name = online.get('serverName', '未知服务器')
@@ -2176,6 +2989,22 @@ class TmpBotPlugin(Star):
             area_players = [p for p in area_players if str(p.get('tmpId')) != str(tmp_id)]
             area_players.append({'tmpId': str(tmp_id), 'axisX': cx, 'axisY': cy})
 
+            map_type = 'promods' if int(server_id or 0) in [50, 51] else 'ets'
+            tile_url_ets = "https://ets2.online/map/ets2map_157/{z}/{x}/{y}.png"
+            tile_url_promods = "https://ets2.online/map/ets2mappromods_156/{z}/{x}/{y}.png"
+            fullmap_ets = self._get_fullmap_tile_url("ets") if self._fullmap_cache else None
+            fullmap_promods = self._get_fullmap_tile_url("promods") if self._fullmap_cache else None
+            if fullmap_ets:
+                tile_url_ets = fullmap_ets
+            if fullmap_promods:
+                tile_url_promods = fullmap_promods
+            logger.info(f"定位: tile_ets={'fullmap' if fullmap_ets else 'ets2.online'}")
+            logger.info(f"定位: tile_promods={'fullmap' if fullmap_promods else 'ets2.online'}")
+            if map_type == 'ets' and not tile_url_ets:
+                raise RuntimeError("fullmap 缓存未包含 ETS 瓦片地址")
+            if map_type == 'promods' and not tile_url_promods:
+                raise RuntimeError("fullmap 缓存未包含 ProMods 瓦片地址")
+
             map_tmpl = """
 <link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css\">
 <script src=\"https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js\"></script>
@@ -2211,50 +3040,43 @@ class TmpBotPlugin(Star):
   var mapType = promodsIds.indexOf(serverId) !== -1 ? 'promods' : 'ets';
   var cfg = {
     ets: {
-      tileUrl: 'https://ets2.online/map/ets2map_157/{z}/{x}/{y}.png',
-      bounds: { x:65536, y:65536 },
+      tileUrl: 'https://ets-map.oss-cn-beijing.aliyuncs.com/ets2/05102019/{z}/{x}/{y}.png',
+      fallbackUrl: 'https://ets2.online/map/ets2map_157/{z}/{x}/{y}.png',
+      multipliers: { x: 70272, y: 76157 },
+      breakpoints: { uk: { x: -31056.8, y: -5832.867 } },
+      bounds: { x:131072, y:131072 },
       maxZoom: 8, minZoom: 2,
       calc: function(xx, yy) {
-        var MAX_X = 65536;
-        var MAX_Y = 65536;
-        const x1 = -113177.313;
-        const x2 = 97925.625;
-        const y1 = -122648.086;
-        const y2 = 88454.85;
-        const xtot = x2 - x1;
-        const ytot = y2 - y1;
-        const xrel = (xx - x1) / xtot;
-        const yrel = (yy - y1) / ytot;
-        return [ xrel * MAX_X, yrel * MAX_Y ];
+        return [ xx / 1.609055 + cfg.ets.multipliers.x, yy / 1.609055 + cfg.ets.multipliers.y ];
       }
     },
     promods: {
-      tileUrl: 'https://ets2.online/map/ets2mappromods_156/{z}/{x}/{y}.png',
-      bounds: { x:65536, y:65536 },
+      tileUrl: 'https://ets-map.oss-cn-beijing.aliyuncs.com/promods/05102019/{z}/{x}/{y}.png',
+      fallbackUrl: 'https://ets2.online/map/ets2mappromods_156/{z}/{x}/{y}.png',
+      multipliers: { x: 51953, y: 76024 },
+      breakpoints: { uk: { x: -31056.8, y: -5832.867 } },
+      bounds: { x:131072, y:131072 },
       maxZoom: 8, minZoom: 2,
       calc: function(xx, yy) {
-        var MAX_X = 65536;
-        var MAX_Y = 65536;
-        const x1 = -135110.156;
-        const x2 = 168923.75;
-        const y1 = -190095.016;
-        const y2 = 113938.891;
-        const xtot = x2 - x1;
-        const ytot = y2 - y1;
-        const xrel = (xx - x1) / xtot;
-        const yrel = (yy - y1) / ytot;
-        return [ xrel * MAX_X, yrel * MAX_Y ];
+        return [ xx / 2.598541 + cfg.promods.multipliers.x, yy / 2.598541 + cfg.promods.multipliers.y ];
       }
     }
   };
 
-  var map = L.map('map', { attributionControl: false, crs: L.CRS.Simple, zoomControl: false });
+  var map = L.map('map', { attributionControl: false, crs: L.CRS.Simple, zoomControl: false, zoomSnap: 0.2, zoomDelta: 0.2 });
   var c = cfg[mapType];
   var b = L.latLngBounds(
     map.unproject([0, c.bounds.y], c.maxZoom),
     map.unproject([c.bounds.x, 0], c.maxZoom)
   );
- L.tileLayer(c.tileUrl, { minZoom: c.minZoom, maxZoom: 10, maxNativeZoom: c.maxZoom, tileSize: 256, bounds: b, reuseTiles: true }).addTo(map);
+  var tileLayer = L.tileLayer(c.tileUrl, { minZoom: c.minZoom, maxZoom: 10, maxNativeZoom: c.maxZoom, tileSize: 512, bounds: b, reuseTiles: true }).addTo(map);
+  var switched = false;
+  tileLayer.on('tileerror', function(){
+    if (switched || !c.fallbackUrl) return;
+    switched = true;
+    map.removeLayer(tileLayer);
+    tileLayer = L.tileLayer(c.fallbackUrl, { minZoom: c.minZoom, maxZoom: 10, maxNativeZoom: c.maxZoom, tileSize: 512, bounds: b, reuseTiles: true }).addTo(map);
+  });
   map.setMaxBounds(b);
   var centerX = {{ center_x }};
   var centerY = {{ center_y }};
@@ -2287,7 +3109,9 @@ class TmpBotPlugin(Star):
                 'city': display_city,
                 'server_id': int(online.get('serverId') or 0),
                 'center_x': float(cx),
-                'center_y': float(cy)
+                'center_y': float(cy),
+                'tile_url_ets': tile_url_ets,
+                'tile_url_promods': tile_url_promods
             }
             logger.info(f"定位: 渲染底图 mapType={'promods' if int(online.get('serverId') or 0) in [50,51] else 'ets'} players={len(area_players)}")
             url2 = await self.html_render(map_tmpl, map_data, options={'type': 'jpeg', 'quality': 92, 'full_page': True, 'timeout': 8000, 'animations': 'disabled'})
@@ -2811,17 +3635,19 @@ class TmpBotPlugin(Star):
 4. 地图DLC
 5. 总里程排行
 6. 今日里程排行
-7. 路况
-8. 解绑
-9. 服务器
-10. 插件版本
-11. 菜单
+7. 足迹 [服务器简称] [ID]
+8. 路况
+9. 解绑
+10. 服务器
+11. 插件版本
+12. 菜单
 使用提示: 绑定后可直接发送 查询/定位
 """
         yield event.plain_result(help_text)
         
     async def terminate(self):
         """插件卸载时的清理工作：关闭HTTP会话。"""
+        self._fullmap_task = None
         if self.session:
             await self.session.close()
             self.session = None

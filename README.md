@@ -1,5 +1,5 @@
  # astrbot-plugin-tmp-bot
-[![npm](https://img.shields.io/badge/npm-v1.6.9-blue)](https://github.com/BGYdook/astrbot-plugin-tmp-bot)
+[![npm](https://img.shields.io/badge/npm-v1.7.2-blue)](https://github.com/BGYdook/astrbot-plugin-tmp-bot)
 
 ![:astrbot_plugin_tmp_bot](https://count.getloli.com/@:astrbot_plugin_tmp-bot?theme=minecraft)
 
@@ -21,9 +21,9 @@
 | DLC列表 / 地图DLC | 列出地图相关 DLC（可图片输出） | DLC列表 / 地图DLC |
 | 总里程排行 | 总里程排行榜（自 2025-08-23 20:00 起统计） | 总里程排行 |
 | 今日里程排行 | 今日里程排行榜（每日 0 点重置） | 今日里程排行 |
-
+| 足迹 | 今日足迹（每日 0 点重置） | 足迹 |
 ### 接口与数据
-API 文档与数据来源：https://apifox.com/apidoc/shared/38508a88-5ff4-4b29-b724-41f9d3d3336a
+API 文档与数据来源：https://s.apifox.cn/38508a88-5ff4-4b29-b724-41f9d3d3336a
 
 和
 
@@ -32,6 +32,10 @@ https://truckersmp.com/developers/api
 ## 非常感谢[晚安](https://github.com/nulijiazaizhong)提供的帮助
 
 ## 历史更新
+
+## 版本v1.7.2
+- 修复对定位时底图的问题
+- 添加足迹功能
 
 ## 版本v1.7.1
 - 修复对国家/城市的翻译
