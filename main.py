@@ -91,6 +91,24 @@ except ImportError:
         def __init__(self, text: str):
             self.text = text
 
+USER_GROUP_MAP = {
+    'Player': '玩家',
+    'Retired Legend': '退役',
+    'Game Developer': '游戏开发者',
+    'Retired Team Member': '退休团队成员',
+    'Add-On Team': '附加组件团队',
+    'Game Moderator': '游戏管理员'
+}
+
+def _translate_user_groups(groups: List[Any]) -> List[str]:
+    translated: List[str] = []
+    for g in groups:
+        if g is None:
+            continue
+        key = str(g)
+        translated.append(USER_GROUP_MAP.get(key, key))
+    return translated
+
 
 # --- 辅助函数：格式化时间戳 ---
 def _format_timestamp_to_readable(timestamp_str: Optional[str]) -> str:
@@ -1211,6 +1229,82 @@ class TmpBotPlugin(Star):
             logger.error(f"查询路况时发生未知错误: {e}", exc_info=True)
             raise NetworkException("查询路况失败")
 
+    async def _get_footprint_data(self, server_key: str, tmp_id: str) -> Dict[str, Any]:
+        if not self.session:
+            raise NetworkException("插件未初始化，HTTP会话不可用")
+        base = self._cfg_str('footprint_api_base', '').strip() or "https://da.vtcm.link"
+        base = base[:-1] if base.endswith('/') else base
+        urls = [
+            f"{base}/footprint/today?tmpId={tmp_id}&server={server_key}",
+            f"{base}/footprint/today?tmpId={tmp_id}&serverId={server_key}",
+            f"{base}/footprint/list?tmpId={tmp_id}&server={server_key}",
+            f"{base}/map/footprint?tmpId={tmp_id}&server={server_key}",
+            f"{base}/map/track?tmpId={tmp_id}&server={server_key}",
+        ]
+        last_error = None
+        for url in urls:
+            try:
+                async with self.session.get(url, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        return { 'url': url, 'data': data }
+                    if resp.status in (404, 204):
+                        continue
+            except Exception as e:
+                last_error = e
+        if last_error:
+            raise NetworkException(f"足迹接口请求失败: {last_error}")
+        raise ApiResponseException("足迹接口无可用数据")
+
+    def _extract_footprint_points(self, payload: Any, server_key: str) -> Tuple[List[Dict[str, float]], Dict[str, Any]]:
+        data = payload
+        if isinstance(payload, dict):
+            data = payload.get('data') or payload.get('response') or payload.get('list') or payload.get('tracks') or payload.get('track') or payload.get('points') or payload
+        points: List[Dict[str, float]] = []
+        meta: Dict[str, Any] = {}
+        if isinstance(data, list) and data:
+            if isinstance(data[0], dict) and any(k in data[0] for k in ['server', 'serverId', 'server_id', 'serverName', 'points', 'track', 'list']):
+                match_item = None
+                for it in data:
+                    if not isinstance(it, dict):
+                        continue
+                    sid = str(it.get('serverId') or it.get('server_id') or it.get('server') or '').strip().lower()
+                    if sid and sid == str(server_key).lower():
+                        match_item = it
+                        break
+                if match_item is None:
+                    match_item = data[0]
+                data = match_item
+            if isinstance(data, list):
+                for p in data:
+                    if not isinstance(p, dict):
+                        continue
+                    x = p.get('axisX') or p.get('x') or p.get('posX') or p.get('pos_x')
+                    y = p.get('axisY') or p.get('y') or p.get('posY') or p.get('pos_y')
+                    try:
+                        if x is None or y is None:
+                            continue
+                        points.append({ 'x': float(x), 'y': float(y) })
+                    except Exception:
+                        continue
+                return points, meta
+        if isinstance(data, dict):
+            meta = data
+            candidate = data.get('points') or data.get('track') or data.get('tracks') or data.get('list') or data.get('route') or data.get('path')
+            if isinstance(candidate, list):
+                for p in candidate:
+                    if not isinstance(p, dict):
+                        continue
+                    x = p.get('axisX') or p.get('x') or p.get('posX') or p.get('pos_x')
+                    y = p.get('axisY') or p.get('y') or p.get('posY') or p.get('pos_y')
+                    try:
+                        if x is None or y is None:
+                            continue
+                        points.append({ 'x': float(x), 'y': float(y) })
+                    except Exception:
+                        continue
+        return points, meta
+
     async def _render_text_to_image(self, text: str) -> Optional[Any]:
         if not self.session:
             return None
@@ -1567,6 +1661,10 @@ class TmpBotPlugin(Star):
             async for r in self.tmprank_today(event):
                 yield r
             return
+        if re.match(r'^足迹(\s*\d+)?\s*$', msg) or (msg.startswith("足迹") and has_at):
+            async for r in self.tmptoday_footprint(event):
+                yield r
+            return
         if re.match(r'^服务器\s*$', msg):
             async for r in self.tmpserver(event):
                 yield r
@@ -1666,6 +1764,22 @@ class TmpBotPlugin(Star):
         """查看今日里程排行榜前若干名。"""
         async for r in self.tmprank_today(event):
             yield r
+
+    @filter.command("足迹")
+    async def cmd_tmp_today_footprint(self, event: AstrMessageEvent, tmp_id: str | None = None):
+        orig = getattr(event, "message_str", "") or ""
+        try:
+            if tmp_id:
+                event.message_str = f"足迹 {tmp_id}"
+            else:
+                event.message_str = "足迹"
+            async for r in self.tmptoday_footprint(event):
+                yield r
+        finally:
+            try:
+                event.message_str = orig
+            except Exception:
+                pass
 
     @filter.command("服务器")
     async def cmd_tmp_server(self, event: AstrMessageEvent):
@@ -1811,9 +1925,9 @@ class TmpBotPlugin(Star):
             if isinstance(perms, dict):
                 groups = [g for g in ["Staff", "Management", "Game Admin"] if perms.get(f'is{g.replace(" ", "")}')]
                 if groups:
-                    perms_str = ', '.join(groups)
+                    perms_str = ', '.join(_translate_user_groups(groups))
             elif isinstance(perms, list) and perms:
-                perms_str = ', '.join(perms)
+                perms_str = ', '.join(_translate_user_groups(perms))
         body += f"💼所属分组: {perms_str}\n"
 
         # 车队信息：优先使用 player_info.vtc（若为字典），若缺少 role 则调用 VTCM API 获取
@@ -2116,6 +2230,260 @@ class TmpBotPlugin(Star):
         async for r in self.tmpdlc_list(event):
             yield r
     # --- DLC 命令处理器结束 ---
+
+    async def tmptoday_footprint(self, event: AstrMessageEvent):
+        message_str = event.message_str.strip()
+        user_id = event.get_sender_id()
+
+        target_user_id = None
+        message_obj = getattr(event, "message_obj", None)
+        if message_obj is not None:
+            try:
+                chain = getattr(message_obj, "message", None) or []
+                for seg in chain:
+                    seg_type = getattr(seg, "type", None)
+                    if isinstance(seg, dict):
+                        seg_type = seg.get("type") or seg_type
+                    if isinstance(seg_type, str) and seg_type.lower() == "at":
+                        uid = (
+                            getattr(seg, "qq", None)
+                            or getattr(seg, "user_id", None)
+                            or getattr(seg, "id", None)
+                        )
+                        if isinstance(seg, dict):
+                            uid = seg.get("qq") or seg.get("user_id") or seg.get("id") or uid
+                        if uid:
+                            target_user_id = str(uid)
+                            break
+                    uid2 = getattr(seg, "qq", None)
+                    if isinstance(seg, dict):
+                        uid2 = seg.get("qq") or uid2
+                    if uid2:
+                        target_user_id = str(uid2)
+                        break
+            except Exception:
+                target_user_id = None
+
+        tokens = message_str.split()
+        server_token = None
+        input_id = None
+        if len(tokens) > 1:
+            for t in tokens[1:]:
+                if t.isdigit():
+                    input_id = t
+                else:
+                    server_token = t
+        if not server_token:
+            yield event.plain_result("用法: 足迹 [服务器简称] [ID]，例如: 足迹 s1 123")
+            return
+        server_key_raw = str(server_token).strip().lower()
+        server_alias = {
+            "s1": "sim1",
+            "s2": "sim2",
+            "p": "eupromods1",
+            "a": "arc1",
+            "promods": "eupromods1",
+            "promods1": "eupromods1",
+            "sim1": "sim1",
+            "sim2": "sim2",
+            "arc1": "arc1"
+        }
+        server_key = server_alias.get(server_key_raw, server_key_raw)
+        server_label_map = {
+            "sim1": "SIM1",
+            "sim2": "SIM2",
+            "eupromods1": "ProMods",
+            "arc1": "Arc"
+        }
+        server_label = server_label_map.get(server_key, server_key.upper())
+        map_type = 'promods' if server_key in ['eupromods1', 'promods', 'promods1'] else 'ets'
+
+        tmp_id = None
+        if input_id:
+            if len(input_id) == 17 and input_id.startswith('7'):
+                try:
+                    tmp_id = await self._get_tmp_id_from_steam_id(input_id)
+                except SteamIdNotFoundException as e:
+                    yield event.plain_result(str(e))
+                    return
+                except NetworkException as e:
+                    yield event.plain_result(f"查询失败: {str(e)}")
+                    return
+            else:
+                tmp_id = input_id
+        else:
+            bind_user_id = target_user_id or user_id
+            tmp_id = self._get_bound_tmp_id(bind_user_id)
+
+        if not tmp_id:
+            yield event.plain_result("请输入正确的玩家编号 TMP ID")
+            return
+
+        try:
+            player_info, stats_info, online_status = await asyncio.gather(
+                self._get_player_info(tmp_id),
+                self._get_player_stats(tmp_id),
+                self._get_online_status(tmp_id)
+            )
+        except PlayerNotFoundException as e:
+            yield event.plain_result(str(e))
+            return
+        except Exception as e:
+            yield event.plain_result(f"查询失败: {str(e)}")
+            return
+
+        player_name = player_info.get('name', '未知')
+        last_online_raw = stats_info.get('last_online') or player_info.get('lastOnline')
+        last_online_formatted = _format_timestamp_to_readable(last_online_raw) if last_online_raw else '未知'
+
+        try:
+            footprint_resp = await self._get_footprint_data(server_key, tmp_id)
+            points, meta = self._extract_footprint_points(footprint_resp.get('data'), server_key)
+        except Exception as e:
+            yield event.plain_result(f"查询足迹失败: {str(e)}")
+            return
+
+        if not points:
+            yield event.plain_result("暂无足迹数据")
+            return
+
+        def _to_km(val):
+            try:
+                v = float(val)
+                if v > 10000:
+                    v = v / 1000.0
+                return round(v, 2)
+            except Exception:
+                return None
+
+        distance_km = _to_km(meta.get('distance') or meta.get('mileage') or meta.get('totalDistance') or meta.get('totalMileage'))
+        start_time = meta.get('startTime') or meta.get('start_time') or meta.get('beginTime') or meta.get('begin_time')
+        end_time = meta.get('endTime') or meta.get('end_time') or meta.get('finishTime') or meta.get('finish_time')
+
+        tile_url_ets = "https://ets2.online/map/ets2map_157/{z}/{x}/{y}.png"
+        tile_url_promods = "https://ets2.online/map/ets2mappromods_156/{z}/{x}/{y}.png"
+        fullmap_ets = self._get_fullmap_tile_url("ets") if self._fullmap_cache else None
+        fullmap_promods = self._get_fullmap_tile_url("promods") if self._fullmap_cache else None
+        if fullmap_ets:
+            tile_url_ets = fullmap_ets
+        if fullmap_promods:
+            tile_url_promods = fullmap_promods
+
+        map_tmpl = """
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  html, body { margin:0; padding:0; width:100vw; height:100vh; background:#111; overflow:hidden; }
+  * { box-sizing: border-box; }
+  .wrap { width: 100vw; color:#f2f4f8; font-family: system-ui, Segoe UI, Helvetica, Arial, sans-serif; }
+  #map { width: 100vw; height: calc(100vh - 140px); background:#121417; }
+  .panel { width:100vw; height:140px; background:rgba(10,10,10,.82); display:flex; align-items:center; padding:14px 20px; color:#eaeaea; backdrop-filter: blur(4px); }
+  .avatar { width:64px; height:64px; border-radius:50%; background:#808080; object-fit:cover; margin-right:16px; }
+  .col { flex:1; }
+  .name { font-size:20px; font-weight:600; letter-spacing:.3px; color:#f0f3f5; }
+  .sub { font-size:14px; color:#d8d8d8; margin-top:6px; line-height:1.5; }
+  .right { width:260px; text-align:right; color:#f0f3f5; font-size:14px; }
+</style>
+<div class="wrap">
+  <div id="map"></div>
+  <div class="panel">
+    <img class="avatar" src="{{ avatar }}" />
+    <div class="col"> 
+      <div class="name">{{ player_name }} · {{ server_label }}</div>
+      <div class="sub">点位数: {{ points_count }}{% if distance_km is not none %} · 里程: {{ '%.2f' % distance_km }} km{% endif %}</div>
+      <div class="sub">{% if start_time %}开始: {{ start_time }}{% endif %}{% if end_time %} · 结束: {{ end_time }}{% endif %}</div>
+    </div>
+    <div class="right">
+      <div>上次在线: {{ last_online }}</div>
+    </div>
+  </div>
+</div>
+<script>
+  var mapType = "{{ map_type }}";
+  var cfg = {
+    ets: {
+      tileUrl: '{{ tile_url_ets }}',
+      fallbackUrl: 'https://ets2.online/map/ets2map_157/{z}/{x}/{y}.png',
+      multipliers: { x: 70272, y: 76157 },
+      breakpoints: { uk: { x: -31056.8, y: -5832.867 } },
+      bounds: { x:131072, y:131072 },
+      maxZoom: 8, minZoom: 2,
+      calc: function(xx, yy) {
+        return [ xx / 1.609055 + cfg.ets.multipliers.x, yy / 1.609055 + cfg.ets.multipliers.y ];
+      }
+    },
+    promods: {
+      tileUrl: '{{ tile_url_promods }}',
+      fallbackUrl: 'https://ets2.online/map/ets2mappromods_156/{z}/{x}/{y}.png',
+      multipliers: { x: 51953, y: 76024 },
+      breakpoints: { uk: { x: -31056.8, y: -5832.867 } },
+      bounds: { x:131072, y:131072 },
+      maxZoom: 8, minZoom: 2,
+      calc: function(xx, yy) {
+        return [ xx / 2.598541 + cfg.promods.multipliers.x, yy / 2.598541 + cfg.promods.multipliers.y ];
+      }
+    }
+  };
+
+  var map = L.map('map', { attributionControl: false, crs: L.CRS.Simple, zoomControl: false, zoomSnap: 0.2, zoomDelta: 0.2 });
+  var c = cfg[mapType];
+  var b = L.latLngBounds(
+    map.unproject([0, c.bounds.y], c.maxZoom),
+    map.unproject([c.bounds.x, 0], c.maxZoom)
+  );
+  var tileLayer = L.tileLayer(c.tileUrl, { minZoom: c.minZoom, maxZoom: 10, maxNativeZoom: c.maxZoom, tileSize: 512, bounds: b, reuseTiles: true }).addTo(map);
+  var switched = false;
+  tileLayer.on('tileerror', function(){
+    if (switched || !c.fallbackUrl) return;
+    switched = true;
+    map.removeLayer(tileLayer);
+    tileLayer = L.tileLayer(c.fallbackUrl, { minZoom: c.minZoom, maxZoom: 10, maxNativeZoom: c.maxZoom, tileSize: 512, bounds: b, reuseTiles: true }).addTo(map);
+  });
+  map.setMaxBounds(b);
+  var points = [ {% for p in points %}{ x: {{ p.x }}, y: {{ p.y }} }{% if not loop.last %}, {% endif %}{% endfor %} ];
+  var latlngs = [];
+  for (var i=0;i<points.length;i++){
+    var xy = c.calc(points[i].x, points[i].y);
+    latlngs.push(map.unproject(xy, c.maxZoom));
+  }
+  var line = L.polyline(latlngs, { color:'#3aa3ff', weight:4, opacity:0.9 }).addTo(map);
+  if (latlngs.length > 0) {
+    L.circleMarker(latlngs[0], { color:'#ffffff', weight:2, fillColor:'#21d07a', fillOpacity:1, radius:5 }).addTo(map);
+    L.circleMarker(latlngs[latlngs.length-1], { color:'#ffffff', weight:2, fillColor:'#ff4d4f', fillOpacity:1, radius:5 }).addTo(map);
+    map.fitBounds(line.getBounds(), { padding: [30, 30] });
+  }
+</script>
+"""
+        data = {
+            'player_name': player_name,
+            'avatar': self._normalize_avatar_url(player_info.get('avatar')) or '',
+            'points': points,
+            'points_count': len(points),
+            'distance_km': distance_km,
+            'start_time': start_time,
+            'end_time': end_time,
+            'last_online': last_online_formatted,
+            'map_type': map_type,
+            'server_label': server_label,
+            'tile_url_ets': tile_url_ets,
+            'tile_url_promods': tile_url_promods
+        }
+        try:
+            url = await self.html_render(map_tmpl, data, options={'type': 'jpeg', 'quality': 92, 'full_page': True, 'timeout': 8000, 'animations': 'disabled'})
+            if isinstance(url, str) and url:
+                yield event.chain_result([Image.fromURL(url)])
+                return
+        except Exception:
+            pass
+
+        message = "📍 足迹\n"
+        message += f"玩家: {player_name} (ID:{tmp_id})\n"
+        message += f"服务器: {server_label}\n"
+        message += f"点位数: {len(points)}"
+        if distance_km is not None:
+            message += f" | 里程: {distance_km:.2f} km"
+        message += f"\n上次在线: {last_online_formatted}"
+        yield event.plain_result(message)
 
     async def tmpbind(self, event: AstrMessageEvent):
         """[命令: 绑定] 绑定您的聊天账号与TMP ID。支持输入 TMP ID 或 Steam ID。"""
@@ -2967,11 +3335,12 @@ class TmpBotPlugin(Star):
 4. 地图DLC
 5. 总里程排行
 6. 今日里程排行
-7. 路况
-8. 解绑
-9. 服务器
-10. 插件版本
-11. 菜单
+7. 足迹 [服务器简称] [ID]
+8. 路况
+9. 解绑
+10. 服务器
+11. 插件版本
+12. 菜单
 使用提示: 绑定后可直接发送 查询/定位
 """
         yield event.plain_result(help_text)
