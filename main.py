@@ -1090,6 +1090,24 @@ class TmpBotPlugin(Star):
         except Exception as e:
             logger.error(f"Trucky V3 API 解析失败: {e.__class__.__name__}", exc_info=True)
             return {'online': False, 'debug_error': f'Trucky V3 API 发生意外错误: {e.__class__.__name__}。'}
+
+    def _get_fullmap_player(self, tmp_id: str) -> Optional[Dict[str, Any]]:
+        data = self._fullmap_cache or {}
+        payload = None
+        if isinstance(data, dict):
+            payload = data.get('Data') or data.get('data') or data.get('players')
+        if not isinstance(payload, list):
+            return None
+        tid = str(tmp_id)
+        for p in payload:
+            if not isinstance(p, dict):
+                continue
+            mp_id = p.get('MpId') or p.get('mp_id') or p.get('tmpId') or p.get('tmp_id')
+            if mp_id is None:
+                continue
+            if str(mp_id) == tid:
+                return p
+        return None
     
     async def _get_rank_list(self, ranking_type: str = "total", limit: int = 10) -> Optional[List[Dict]]:
         """获取 TruckersMP 里程排行榜列表 (使用 da.vtcm.link API)。
@@ -2224,11 +2242,28 @@ class TmpBotPlugin(Star):
             yield event.plain_result(f"查询失败: {str(e)}")
             return
 
-        # 2) 在线与坐标（Trucky V3）
+        # 2) 在线与坐标（fullmap + Trucky V3）
+        await self._fetch_fullmap()
+        fullmap_player = self._get_fullmap_player(tmp_id)
         online = await self._get_online_status(tmp_id)
         if not online or not online.get('online'):
-            yield event.plain_result("玩家未在线")
-            return
+            if not fullmap_player:
+                yield event.plain_result("玩家未在线")
+                return
+            online = {
+                'online': True,
+                'serverName': '未知服务器',
+                'serverId': fullmap_player.get('ServerId'),
+                'x': fullmap_player.get('X'),
+                'y': fullmap_player.get('Y'),
+                'country': None,
+                'realName': None,
+                'city': {'name': '未知位置'}
+            }
+        if fullmap_player:
+            online['x'] = fullmap_player.get('X')
+            online['y'] = fullmap_player.get('Y')
+            online['serverId'] = fullmap_player.get('ServerId')
 
         # 3) 构造 HTML 渲染数据（玩家 + 位置，周边玩家留作后续扩展）
         server_name = online.get('serverName', '未知服务器')
@@ -2275,14 +2310,17 @@ class TmpBotPlugin(Star):
             area_players = [p for p in area_players if str(p.get('tmpId')) != str(tmp_id)]
             area_players.append({'tmpId': str(tmp_id), 'axisX': cx, 'axisY': cy})
 
-            if not self._fullmap_cache:
-                await self._fetch_fullmap()
-
             map_type = 'promods' if int(server_id or 0) in [50, 51] else 'ets'
-            tile_url_ets = self._get_fullmap_tile_url("ets")
-            tile_url_promods = self._get_fullmap_tile_url("promods")
-            logger.info(f"定位: tile_ets={'fullmap' if tile_url_ets else 'missing'}")
-            logger.info(f"定位: tile_promods={'fullmap' if tile_url_promods else 'missing'}")
+            tile_url_ets = "https://ets2.online/map/ets2map_157/{z}/{x}/{y}.png"
+            tile_url_promods = "https://ets2.online/map/ets2mappromods_156/{z}/{x}/{y}.png"
+            fullmap_ets = self._get_fullmap_tile_url("ets") if self._fullmap_cache else None
+            fullmap_promods = self._get_fullmap_tile_url("promods") if self._fullmap_cache else None
+            if fullmap_ets:
+                tile_url_ets = fullmap_ets
+            if fullmap_promods:
+                tile_url_promods = fullmap_promods
+            logger.info(f"定位: tile_ets={'fullmap' if fullmap_ets else 'ets2.online'}")
+            logger.info(f"定位: tile_promods={'fullmap' if fullmap_promods else 'ets2.online'}")
             if map_type == 'ets' and not tile_url_ets:
                 raise RuntimeError("fullmap 缓存未包含 ETS 瓦片地址")
             if map_type == 'promods' and not tile_url_promods:
