@@ -1084,6 +1084,9 @@ class TmpBotPlugin(Star):
                             'game': 1 if server_details.get('game') == 'ETS2' else 2 if server_details.get('game') == 'ATS' else 0,
                             'city': {'name': formatted_location}, 
                             'serverId': online_data.get('server'),
+                            'serverDetailsId': server_details.get('id') or server_details.get('_id'),
+                            'apiServerId': server_details.get('apiserverid') or server_details.get('apiServerId'),
+                            'serverCode': server_details.get('code') or server_details.get('shortname'),
                             'x': online_data.get('x'),
                             'y': online_data.get('y'),
                             'country': country_cn,
@@ -1304,6 +1307,16 @@ class TmpBotPlugin(Star):
                 async with self.session.get(url, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
                     if resp.status == 200:
                         data = await resp.json()
+                        if isinstance(data, dict):
+                            code = data.get('code')
+                            if code is not None and int(code) != 200:
+                                continue
+                            success = data.get('success')
+                            if success is not None and success is False:
+                                continue
+                        points, _ = self._extract_footprint_points(data, server_key, server_ids)
+                        if not points:
+                            continue
                         return { 'url': url, 'data': data }
                     if resp.status in (404, 204):
                         continue
@@ -2417,6 +2430,20 @@ class TmpBotPlugin(Star):
 
         try:
             server_ids = await self._resolve_server_ids(server_key)
+            for k in ['serverId', 'serverDetailsId', 'apiServerId']:
+                v = online_status.get(k)
+                if v is not None:
+                    s = str(v).strip()
+                    if s:
+                        server_ids.append(s)
+            seen = set()
+            uniq = []
+            for sid in server_ids:
+                if sid in seen:
+                    continue
+                seen.add(sid)
+                uniq.append(sid)
+            server_ids = uniq
             footprint_resp = await self._get_footprint_data(server_key, tmp_id, server_ids)
             points, meta = self._extract_footprint_points(footprint_resp.get('data'), server_key, server_ids)
         except Exception as e:
