@@ -2446,7 +2446,7 @@ class TmpBotPlugin(Star):
                 else:
                     server_token = t
         if not server_token:
-            yield event.plain_result("用法: 足迹 [服务器简称] [ID]，例如: 足迹 s1 123")
+            yield event.plain_result("用法: 足迹 [服务器简称] [ID]或 足迹 [ID]，例如: 足迹 s1 123 或足迹 s1")
             return
         server_key_raw = str(server_token).strip().lower()
         server_alias = {
@@ -2664,6 +2664,7 @@ class TmpBotPlugin(Star):
 </div>
 <script>
   var mapType = "{{ map_type }}";
+  var distanceKm = {% if distance_km is not none %}{{ '%.2f' % distance_km }}{% else %}null{% endif %};
   var cfg = {
     ets: {
       tileUrl: '{{ tile_url_ets }}',
@@ -2709,6 +2710,15 @@ class TmpBotPlugin(Star):
   }
   var points = [ {% for p in points %}{ axisX: {{ p.axisX }}, axisY: {{ p.axisY }}, serverId: {{ p.serverId }}, heading: {{ p.heading }}, ts: {{ p.ts }} }{% if not loop.last %}, {% endif %}{% endfor %} ];
   points = points.filter(function(p){ return !(p.axisX === 0 && p.axisY === 0 && p.heading === 0); });
+  var minX = null, maxX = null, minY = null, maxY = null;
+  for (var pi=0; pi<points.length; pi++){
+    var px = points[pi].axisX;
+    var py = points[pi].axisY;
+    if (minX === null || px < minX) minX = px;
+    if (maxX === null || px > maxX) maxX = px;
+    if (minY === null || py < minY) minY = py;
+    if (maxY === null || py > maxY) maxY = py;
+  }
   var lines = [];
   var currentLine = [];
   if (points.length > 0) {
@@ -2749,7 +2759,30 @@ class TmpBotPlugin(Star):
       L.circleMarker(latlngs[latlngs.length-1], { color:'#ffffff', weight:2, fillColor:'#ff4d4f', fillOpacity:1, radius:5 }).addTo(map);
     }
   }
-  if (allLatlngs.length > 0) {
+  var fitLatlngs = null;
+  if (minX !== null && minY !== null && maxX !== null && maxY !== null) {
+    if (distanceKm && !isNaN(distanceKm)) {
+      var targetRange = (distanceKm * 1000) / 19;
+      var rangeX = maxX - minX;
+      var rangeY = maxY - minY;
+      var range = Math.max(rangeX, rangeY);
+      if (targetRange > range) {
+        var cx = (minX + maxX) / 2;
+        var cy = (minY + maxY) / 2;
+        var half = targetRange / 2;
+        minX = cx - half;
+        maxX = cx + half;
+        minY = cy - half;
+        maxY = cy + half;
+      }
+    }
+    var ll1 = map.unproject(c.calc(minX, maxY), c.maxZoom);
+    var ll2 = map.unproject(c.calc(maxX, minY), c.maxZoom);
+    fitLatlngs = [ll1, ll2];
+  }
+  if (fitLatlngs && fitLatlngs.length > 0) {
+    map.fitBounds(L.latLngBounds(fitLatlngs), { padding: [30, 30] });
+  } else if (allLatlngs.length > 0) {
     map.fitBounds(L.latLngBounds(allLatlngs), { padding: [30, 30] });
   }
 </script>
@@ -3641,7 +3674,7 @@ class TmpBotPlugin(Star):
 10. 服务器
 11. 插件版本
 12. 菜单
-使用提示: 绑定后可直接发送 查询/定位
+使用提示: 绑定后可直接发送 查询/定位/足迹 [服务器简称]
 """
         yield event.plain_result(help_text)
         
