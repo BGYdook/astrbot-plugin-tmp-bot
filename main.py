@@ -2762,7 +2762,8 @@ class TmpBotPlugin(Star):
   var fitLatlngs = null;
   if (minX !== null && minY !== null && maxX !== null && maxY !== null) {
     if (distanceKm && !isNaN(distanceKm)) {
-      var targetRange = (distanceKm * 1000) / 19;
+      var scaleFactor = (mapType === 'promods') ? (2.598541 / 1.609055) : 1;
+      var targetRange = (distanceKm * 1000) / 19 * scaleFactor;
       var rangeX = maxX - minX;
       var rangeY = maxY - minY;
       var range = Math.max(rangeX, rangeY);
