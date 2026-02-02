@@ -3067,8 +3067,16 @@ class TmpBotPlugin(Star):
         country_cn, city_cn = await self._translate_country_city(raw_country, location_name)
         
         # 修正显示名称
-        display_country = country_cn or raw_country or '未知国家'
-        display_city = city_cn or location_name
+        def _strip_paren_text(s: Optional[str]) -> str:
+            t = (s or "").strip()
+            if not t:
+                return t
+            t = re.sub(r"\s*\([^)]*\)\s*", "", t).strip()
+            t = re.sub(r"\s*（[^）]*）\s*", "", t).strip()
+            return t
+
+        display_country = _strip_paren_text(country_cn or raw_country or '未知国家')
+        display_city = _strip_paren_text(city_cn or location_name)
         location_line = f"{display_country}-{display_city}" if display_country and display_city else (display_city or display_country or "未知位置")
         
         player_name = player_info.get('name') or '未知'
