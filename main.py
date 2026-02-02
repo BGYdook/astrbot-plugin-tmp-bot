@@ -1134,7 +1134,7 @@ class TmpBotPlugin(Star):
 
                         formatted_location = '未知位置'
                         if country_cn and city_cn:
-                            formatted_location = f"{country_cn} {city_cn}"
+                            formatted_location = f"{country_cn}-{city_cn}"
                         elif city_cn:
                             formatted_location = city_cn
                         elif country_cn:
@@ -2321,7 +2321,7 @@ class TmpBotPlugin(Star):
             
             location_display = city_cn
             if country_cn and country_cn != city_cn:
-                 location_display = f"{country_cn} {city_cn}"
+                 location_display = f"{country_cn}-{city_cn}"
             elif not location_display:
                  location_display = raw_city
 
@@ -3069,6 +3069,7 @@ class TmpBotPlugin(Star):
         # 修正显示名称
         display_country = country_cn or raw_country or '未知国家'
         display_city = city_cn or location_name
+        location_line = f"{display_country}-{display_city}" if display_country and display_city else (display_city or display_country or "未知位置")
         
         player_name = player_info.get('name') or '未知'
 
@@ -3090,6 +3091,29 @@ class TmpBotPlugin(Star):
                         j = await resp.json()
                         area_players = j.get('data') or []
                         logger.info(f"定位: 周边玩家数量={len(area_players)}")
+            if not area_players and self._fullmap_cache:
+                data = self._fullmap_cache or {}
+                payload = data.get('Data') or data.get('data') or data.get('players')
+                if isinstance(payload, list):
+                    for p in payload:
+                        if not isinstance(p, dict):
+                            continue
+                        sid = p.get('ServerId') or p.get('serverId') or p.get('server_id')
+                        if sid is None or int(sid) != int(server_id or 0):
+                            continue
+                        px = p.get('X') or p.get('x') or p.get('axisX') or p.get('posX') or p.get('pos_x')
+                        py = p.get('Y') or p.get('y') or p.get('axisY') or p.get('posY') or p.get('pos_y')
+                        if px is None or py is None:
+                            continue
+                        try:
+                            fx = float(px)
+                            fy = float(py)
+                        except Exception:
+                            continue
+                        if fx < min(ax, bx) or fx > max(ax, bx) or fy < min(by, ay) or fy > max(by, ay):
+                            continue
+                        pid = p.get('MpId') or p.get('mp_id') or p.get('tmpId') or p.get('tmp_id') or p.get('id')
+                        area_players.append({'tmpId': str(pid) if pid is not None else '', 'axisX': fx, 'axisY': fy})
             normalized_players = []
             for p in area_players:
                 if not isinstance(p, dict):
@@ -3148,8 +3172,7 @@ class TmpBotPlugin(Star):
       <div class=\"sub\">{{ server_name }} 游戏中</div>
     </div>
     <div class=\"right\">
-      <div>{{ country or '未知' }}</div>
-      <div>{{ city }}</div>
+      <div>{{ location_line }}</div>
     </div>
   </div>
 </div>
@@ -3215,7 +3238,7 @@ class TmpBotPlugin(Star):
             min_y, max_y = by, ay  # 注意坐标系方向
             map_data = {
                 'server_name': server_name,
-                'location_name': f"{display_country} {display_city}",
+                'location_name': location_line,
                 'player_name': player_name,
                 'me_id': str(tmp_id),
                 'players': area_players,
@@ -3224,8 +3247,7 @@ class TmpBotPlugin(Star):
                 'min_y': min_y,
                 'max_y': max_y,
                 'avatar': avatar_url or '',
-                'country': display_country,
-                'city': display_city,
+                'location_line': location_line,
                 'server_id': int(online.get('serverId') or 0),
                 'center_x': float(cx),
                 'center_y': float(cy),
@@ -3241,7 +3263,7 @@ class TmpBotPlugin(Star):
             pass
 
         # 最终回退文本
-        msg = f"玩家实时定位\n玩家名称: {player_name}\nTMP编号: {tmp_id}\n服务器: {server_name}\n位置: {display_country} {display_city}"
+        msg = f"玩家实时定位\n玩家名称: {player_name}\nTMP编号: {tmp_id}\n服务器: {server_name}\n位置: {location_line}"
         yield event.plain_result(msg)
     # --- 定位命令结束 ---
     
