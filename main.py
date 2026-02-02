@@ -425,38 +425,16 @@ class TmpBotPlugin(Star):
         if not self._cfg_bool('baidu_translate_enable', True):
             return content
         use_cache = self._cfg_bool('baidu_translate_cache_enable', False)
-        cache_key = s
+        cache_key = hashlib.md5(s.encode('utf-8')).hexdigest()
         if cache and use_cache:
             cached = self._translate_cache.get(cache_key)
             if cached:
                 return cached
-        if not self.session:
-            return content
-        try:
-            async with self.session.post(
-                "https://fanyi.baidu.com/sug",
-                data={'kw': s},
-                timeout=self._cfg_int('api_timeout_seconds', 10)
-            ) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    if isinstance(data, dict):
-                        items = data.get('data') or []
-                        if isinstance(items, list) and items:
-                            v = items[0].get('v')
-                            if isinstance(v, str) and v.strip():
-                                translated = v.strip()
-                                if cache and use_cache:
-                                    self._translate_cache[cache_key] = translated
-                                return translated
-        except Exception:
-            pass
         app_id = self._cfg_str('baidu_translate_app_id', '').strip()
         app_key = self._cfg_str('baidu_translate_key', '').strip()
-        if not app_id or not app_key:
+        if not app_id or not app_key or not self.session:
             return content
         try:
-            import hashlib
             salt = str(random.randint(1000, 9999))
             sign = hashlib.md5((app_id + s + salt + app_key).encode('utf-8')).hexdigest()
             url = "https://fanyi-api.baidu.com/api/trans/vip/translate"
@@ -792,9 +770,12 @@ class TmpBotPlugin(Star):
         country_en = (country or "").strip()
         city_en = (city or "").strip()
 
+        def _has_cjk(t: str) -> bool:
+            return bool(_re_local.search(r"[\u4e00-\u9fff]", t or ""))
+
         def _clean_raw_text(raw: str) -> str:
             t = (raw or "").strip()
-            if not t:
+            if not t or _has_cjk(t):
                 return t
             t = _re_local.sub(r"\s*\([^)]*\)\s*", " ", t)
             t = _re_local.sub(r"\s*（[^）]*）\s*", " ", t)
@@ -803,21 +784,17 @@ class TmpBotPlugin(Star):
             t = _re_local.sub(r"\s+", " ", t).strip()
             return t
 
-        def _has_cjk(t: str) -> bool:
-            return bool(_re_local.search(r"[\u4e00-\u9fff]", t or ""))
-
         def _ensure_cn_text(text: Optional[str], en_fallback: str, is_city: bool) -> str:
             t = (text or "").strip()
             if _has_cjk(t):
                 return t
             key = (en_fallback or "").strip().lower()
-            if key:
-                mapped = self.CITY_MAP_EN_TO_CN.get(key) if is_city else self.COUNTRY_MAP_EN_TO_CN.get(key)
-                if mapped:
-                    return mapped
-                fixed = self.LOCATION_FIX_MAP.get(key)
-                if fixed:
-                    return fixed
+            mapped = self.CITY_MAP_EN_TO_CN.get(key) if is_city else self.COUNTRY_MAP_EN_TO_CN.get(key)
+            if mapped and _has_cjk(mapped):
+                return mapped
+            fixed = self.LOCATION_FIX_MAP.get(key)
+            if fixed and _has_cjk(fixed):
+                return fixed
             return ""
 
         country_en = _clean_raw_text(country_en)
@@ -2356,7 +2333,7 @@ class TmpBotPlugin(Star):
             if country_cn and country_cn != city_cn:
                  location_display = f"{country_cn}-{city_cn}"
             elif not location_display:
-                 location_display = raw_city
+                 location_display = "未知位置"
 
             body += f"📶在线状态: 在线\n"
             body += f"📶所在服务器: {server_name}\n"
@@ -3108,8 +3085,8 @@ class TmpBotPlugin(Star):
             t = re.sub(r"\s*（[^）]*）\s*", "", t).strip()
             return t
 
-        display_country = _strip_paren_text(country_cn or raw_country or '未知国家')
-        display_city = _strip_paren_text(city_cn or location_name)
+        display_country = _strip_paren_text(country_cn or '未知国家')
+        display_city = _strip_paren_text(city_cn or '未知位置')
         location_line = f"{display_country}-{display_city}" if display_country and display_city else (display_city or display_country or "未知位置")
         
         player_name = player_info.get('name') or '未知'
