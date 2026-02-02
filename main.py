@@ -419,6 +419,67 @@ class TmpBotPlugin(Star):
             return None
 
     async def _translate_text(self, content: str, cache: bool = True) -> str:
+        s = (content or "").strip()
+        if not s:
+            return content
+        if not self._cfg_bool('baidu_translate_enable', True):
+            return content
+        use_cache = self._cfg_bool('baidu_translate_cache_enable', False)
+        cache_key = s
+        if cache and use_cache:
+            cached = self._translate_cache.get(cache_key)
+            if cached:
+                return cached
+        if not self.session:
+            return content
+        try:
+            async with self.session.post(
+                "https://fanyi.baidu.com/sug",
+                data={'kw': s},
+                timeout=self._cfg_int('api_timeout_seconds', 10)
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    if isinstance(data, dict):
+                        items = data.get('data') or []
+                        if isinstance(items, list) and items:
+                            v = items[0].get('v')
+                            if isinstance(v, str) and v.strip():
+                                translated = v.strip()
+                                if cache and use_cache:
+                                    self._translate_cache[cache_key] = translated
+                                return translated
+        except Exception:
+            pass
+        app_id = self._cfg_str('baidu_translate_app_id', '').strip()
+        app_key = self._cfg_str('baidu_translate_key', '').strip()
+        if not app_id or not app_key:
+            return content
+        try:
+            import hashlib
+            salt = str(random.randint(1000, 9999))
+            sign = hashlib.md5((app_id + s + salt + app_key).encode('utf-8')).hexdigest()
+            url = "https://fanyi-api.baidu.com/api/trans/vip/translate"
+            params = {
+                'q': s,
+                'from': 'auto',
+                'to': 'zh',
+                'appid': app_id,
+                'salt': salt,
+                'sign': sign
+            }
+            async with self.session.get(url, params=params, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    if isinstance(data, dict) and data.get('trans_result'):
+                        dst = data['trans_result'][0].get('dst')
+                        if isinstance(dst, str) and dst.strip():
+                            translated = dst.strip()
+                            if cache and use_cache:
+                                self._translate_cache[cache_key] = translated
+                            return translated
+        except Exception:
+            return content
         return content
 
     async def _get_avatar_bytes_with_fallback(self, url: str, tmp_id: Optional[str]) -> Optional[bytes]:
@@ -2446,7 +2507,7 @@ class TmpBotPlugin(Star):
                 else:
                     server_token = t
         if not server_token:
-            yield event.plain_result("用法: 足迹 [服务器简称] [ID]或 足迹 [ID]，例如: 足迹 s1 123 或足迹 s1")
+            yield event.plain_result("用法: 足迹 [服务器简称] [ID]或 足迹 [服务器简称]，例如: 足迹 s1 123 或足迹 s1")
             return
         server_key_raw = str(server_token).strip().lower()
         server_alias = {
@@ -2763,10 +2824,20 @@ class TmpBotPlugin(Star):
   if (minX !== null && minY !== null && maxX !== null && maxY !== null) {
     if (distanceKm && !isNaN(distanceKm)) {
       var scaleFactor = (mapType === 'promods') ? (2.598541 / 1.609055) : 1;
-      var targetRange = (distanceKm * 1000) / 19 * scaleFactor;
+      var baseRange = (distanceKm * 1000) / 19 * scaleFactor;
       var rangeX = maxX - minX;
       var rangeY = maxY - minY;
       var range = Math.max(rangeX, rangeY);
+      var targetRange = baseRange;
+      if (mapType === 'promods') {
+        if (distanceKm >= 1200) {
+          targetRange = baseRange * 2.2;
+        } else if (distanceKm >= 600) {
+          targetRange = baseRange * 1.6;
+        } else {
+          targetRange = baseRange * 1.2;
+        }
+      }
       if (targetRange > range) {
         var cx = (minX + maxX) / 2;
         var cy = (minY + maxY) / 2;
@@ -2885,7 +2956,7 @@ class TmpBotPlugin(Star):
 
     # 状态命令已移除
     
-    # --- 【新功能】定位命令 ---
+    # --- 【定位命令】 ---
     async def tmplocate(self, event: AstrMessageEvent):
         """[命令:定位] 查询玩家的实时位置，并返回图片。支持输入 TMP ID 或 Steam ID。"""
         message_str = event.message_str.strip()
@@ -3019,7 +3090,21 @@ class TmpBotPlugin(Star):
                         j = await resp.json()
                         area_players = j.get('data') or []
                         logger.info(f"定位: 周边玩家数量={len(area_players)}")
-            # 将当前玩家追加
+            normalized_players = []
+            for p in area_players:
+                if not isinstance(p, dict):
+                    continue
+                axis_x = p.get('axisX') or p.get('x') or p.get('posX') or p.get('pos_x')
+                axis_y = p.get('axisY') or p.get('y') or p.get('posY') or p.get('pos_y')
+                if axis_x is None or axis_y is None:
+                    continue
+                pid = p.get('tmpId') or p.get('mpId') or p.get('playerId') or p.get('id')
+                normalized_players.append({
+                    'tmpId': str(pid) if pid is not None else '',
+                    'axisX': axis_x,
+                    'axisY': axis_y
+                })
+            area_players = normalized_players
             area_players = [p for p in area_players if str(p.get('tmpId')) != str(tmp_id)]
             area_players.append({'tmpId': str(tmp_id), 'axisX': cx, 'axisY': cy})
 
