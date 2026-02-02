@@ -3,7 +3,7 @@
 
 """
 astrbot-plugin-tmp-bot
-欧卡2TMP查询插件 (版本 1.7.2)
+欧卡2TMP查询插件 (版本 1.7.3)
 """
 
 import re
@@ -202,8 +202,7 @@ class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
 
-# 版本号更新为 1.3.59
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.7.0", "https://github.com/BGYdook/astrbot-plugin-tmp-bot")
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.7.3", "https://github.com/BGYdook/astrbot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context, config=None):  # 接收 context 和 config
         super().__init__(context)              # 将 context 传给父类
@@ -419,6 +418,45 @@ class TmpBotPlugin(Star):
             return None
 
     async def _translate_text(self, content: str, cache: bool = True) -> str:
+        s = (content or "").strip()
+        if not s:
+            return content
+        if not self._cfg_bool('baidu_translate_enable', True):
+            return content
+        use_cache = self._cfg_bool('baidu_translate_cache_enable', False)
+        cache_key = hashlib.md5(s.encode('utf-8')).hexdigest()
+        if cache and use_cache:
+            cached = self._translate_cache.get(cache_key)
+            if cached:
+                return cached
+        app_id = self._cfg_str('baidu_translate_app_id', '').strip()
+        app_key = self._cfg_str('baidu_translate_key', '').strip()
+        if not app_id or not app_key or not self.session:
+            return content
+        try:
+            salt = str(random.randint(1000, 9999))
+            sign = hashlib.md5((app_id + s + salt + app_key).encode('utf-8')).hexdigest()
+            url = "https://fanyi-api.baidu.com/api/trans/vip/translate"
+            params = {
+                'q': s,
+                'from': 'auto',
+                'to': 'zh',
+                'appid': app_id,
+                'salt': salt,
+                'sign': sign
+            }
+            async with self.session.get(url, params=params, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    if isinstance(data, dict) and data.get('trans_result'):
+                        dst = data['trans_result'][0].get('dst')
+                        if isinstance(dst, str) and dst.strip():
+                            translated = dst.strip()
+                            if cache and use_cache:
+                                self._translate_cache[cache_key] = translated
+                            return translated
+        except Exception:
+            return content
         return content
 
     async def _get_avatar_bytes_with_fallback(self, url: str, tmp_id: Optional[str]) -> Optional[bytes]:
@@ -731,6 +769,36 @@ class TmpBotPlugin(Star):
         country_en = (country or "").strip()
         city_en = (city or "").strip()
 
+        def _has_cjk(t: str) -> bool:
+            return bool(_re_local.search(r"[\u4e00-\u9fff]", t or ""))
+
+        def _clean_raw_text(raw: str) -> str:
+            t = (raw or "").strip()
+            if not t or _has_cjk(t):
+                return t
+            t = _re_local.sub(r"\s*\([^)]*\)\s*", " ", t)
+            t = _re_local.sub(r"\s*（[^）]*）\s*", " ", t)
+            t = _re_local.sub(r"\s*\[[^\]]*\]\s*", " ", t)
+            t = _re_local.sub(r"[^A-Za-z\s\-]", " ", t)
+            t = _re_local.sub(r"\s+", " ", t).strip()
+            return t
+
+        def _ensure_cn_text(text: Optional[str], en_fallback: str, is_city: bool) -> str:
+            t = (text or "").strip()
+            if _has_cjk(t):
+                return t
+            key = (en_fallback or "").strip().lower()
+            mapped = self.CITY_MAP_EN_TO_CN.get(key) if is_city else self.COUNTRY_MAP_EN_TO_CN.get(key)
+            if mapped and _has_cjk(mapped):
+                return mapped
+            fixed = self.LOCATION_FIX_MAP.get(key)
+            if fixed and _has_cjk(fixed):
+                return fixed
+            return ""
+
+        country_en = _clean_raw_text(country_en)
+        city_en = _clean_raw_text(city_en)
+
         def _normalize_city_input(raw_city: str, raw_country: str) -> str:
             s = (raw_city or "").strip()
             if not s:
@@ -779,7 +847,9 @@ class TmpBotPlugin(Star):
             country_cn = fix_country
         if fix_city:
             city_cn = fix_city
-        return country_cn or country_en, city_cn or city_en
+        country_cn = _ensure_cn_text(country_cn, country_en, False)
+        city_cn = _ensure_cn_text(city_cn, city_en, True)
+        return country_cn, city_cn
 
     async def _translate_traffic_name(self, name: Optional[str]) -> str:
         s = (name or "").strip()
@@ -1073,7 +1143,7 @@ class TmpBotPlugin(Star):
 
                         formatted_location = '未知位置'
                         if country_cn and city_cn:
-                            formatted_location = f"{country_cn} {city_cn}"
+                            formatted_location = f"{country_cn}-{city_cn}"
                         elif city_cn:
                             formatted_location = city_cn
                         elif country_cn:
@@ -1875,6 +1945,10 @@ class TmpBotPlugin(Star):
     async def cmd_tmp_query_alias(self, event: AstrMessageEvent, tmp_id: str | None = None):
         orig = getattr(event, "message_str", "") or ""
         try:
+            if not tmp_id and orig:
+                m = re.match(r'^查\s*(\d+)\s*$', orig.strip())
+                if m:
+                    tmp_id = m.group(1)
             if tmp_id:
                 event.message_str = f"查询 {tmp_id}"
             else:
@@ -2258,11 +2332,25 @@ class TmpBotPlugin(Star):
             # 使用更准确的翻译函数
             country_cn, city_cn = await self._translate_country_city(raw_country, raw_city)
             
-            location_display = city_cn
-            if country_cn and country_cn != city_cn:
-                 location_display = f"{country_cn} {city_cn}"
-            elif not location_display:
-                 location_display = raw_city
+            def _strip_paren_text_q(s: Optional[str]) -> str:
+                t = (s or "").strip()
+                if not t:
+                    return t
+                t = re.sub(r"\s*\([^)]*\)\s*", "", t).strip()
+                t = re.sub(r"\s*（[^）]*）\s*", "", t).strip()
+                return t
+
+            display_country = _strip_paren_text_q(country_cn or "")
+            display_city = _strip_paren_text_q(city_cn or "")
+            if display_country and display_city:
+                dc = display_country.strip()
+                dcity = display_city.strip()
+                if dcity == dc or dcity.startswith(dc):
+                    location_display = dcity
+                else:
+                    location_display = f"{dc}-{dcity}"
+            else:
+                location_display = display_city or display_country or "未知位置"
 
             body += f"📶在线状态: 在线\n"
             body += f"📶所在服务器: {server_name}\n"
@@ -2446,7 +2534,7 @@ class TmpBotPlugin(Star):
                 else:
                     server_token = t
         if not server_token:
-            yield event.plain_result("用法: 足迹 [服务器简称] [ID]，例如: 足迹 s1 123")
+            yield event.plain_result("用法: 足迹 [服务器简称] [ID]或 足迹 [服务器简称]，例如: 足迹 s1 123 或足迹 s1")
             return
         server_key_raw = str(server_token).strip().lower()
         server_alias = {
@@ -2569,17 +2657,23 @@ class TmpBotPlugin(Star):
                         range_end = extended_end
                         break
             if history_points:
-                if server_key in ['eupromods1', 'promods', 'promods1']:
-                    filtered = [p for p in history_points if str(p.get('serverId') or p.get('server_id') or p.get('server')) in {str(i) for i in PROMODS_SERVER_IDS}]
-                elif server_key in server_id_map:
-                    target = str(server_id_map[server_key])
-                    filtered = [p for p in history_points if str(p.get('serverId') or p.get('server_id') or p.get('server')) == target]
-                elif server_ids:
-                    target_set = {str(i) for i in server_ids}
-                    filtered = [p for p in history_points if str(p.get('serverId') or p.get('server_id') or p.get('server')) in target_set]
-                else:
-                    filtered = history_points
-                history_points = filtered
+                has_server_id = any(
+                    str(p.get('serverId') or p.get('server_id') or p.get('server') or "").strip()
+                    for p in history_points
+                    if isinstance(p, dict)
+                )
+                if has_server_id:
+                    if server_key in ['eupromods1', 'promods', 'promods1']:
+                        filtered = [p for p in history_points if str(p.get('serverId') or p.get('server_id') or p.get('server')) in {str(i) for i in PROMODS_SERVER_IDS}]
+                    elif server_key in server_id_map:
+                        target = str(server_id_map[server_key])
+                        filtered = [p for p in history_points if str(p.get('serverId') or p.get('server_id') or p.get('server')) == target]
+                    elif server_ids:
+                        target_set = {str(i) for i in server_ids}
+                        filtered = [p for p in history_points if str(p.get('serverId') or p.get('server_id') or p.get('server')) in target_set]
+                    else:
+                        filtered = history_points
+                    history_points = filtered
 
             if history_points:
                 points = self._normalize_history_points(history_points)
@@ -2664,6 +2758,7 @@ class TmpBotPlugin(Star):
 </div>
 <script>
   var mapType = "{{ map_type }}";
+  var distanceKm = {% if distance_km is not none %}{{ '%.2f' % distance_km }}{% else %}null{% endif %};
   var cfg = {
     ets: {
       tileUrl: '{{ tile_url_ets }}',
@@ -2709,6 +2804,15 @@ class TmpBotPlugin(Star):
   }
   var points = [ {% for p in points %}{ axisX: {{ p.axisX }}, axisY: {{ p.axisY }}, serverId: {{ p.serverId }}, heading: {{ p.heading }}, ts: {{ p.ts }} }{% if not loop.last %}, {% endif %}{% endfor %} ];
   points = points.filter(function(p){ return !(p.axisX === 0 && p.axisY === 0 && p.heading === 0); });
+  var minX = null, maxX = null, minY = null, maxY = null;
+  for (var pi=0; pi<points.length; pi++){
+    var px = points[pi].axisX;
+    var py = points[pi].axisY;
+    if (minX === null || px < minX) minX = px;
+    if (maxX === null || px > maxX) maxX = px;
+    if (minY === null || py < minY) minY = py;
+    if (maxY === null || py > maxY) maxY = py;
+  }
   var lines = [];
   var currentLine = [];
   if (points.length > 0) {
@@ -2749,7 +2853,41 @@ class TmpBotPlugin(Star):
       L.circleMarker(latlngs[latlngs.length-1], { color:'#ffffff', weight:2, fillColor:'#ff4d4f', fillOpacity:1, radius:5 }).addTo(map);
     }
   }
-  if (allLatlngs.length > 0) {
+  var fitLatlngs = null;
+  if (minX !== null && minY !== null && maxX !== null && maxY !== null) {
+    if (distanceKm && !isNaN(distanceKm)) {
+      var scaleFactor = (mapType === 'promods') ? (2.598541 / 1.609055) : 1;
+      var baseRange = (distanceKm * 1000) / 19 * scaleFactor;
+      var rangeX = maxX - minX;
+      var rangeY = maxY - minY;
+      var range = Math.max(rangeX, rangeY);
+      var targetRange = baseRange;
+      if (mapType === 'promods') {
+        if (distanceKm >= 1200) {
+          targetRange = baseRange * 2.2;
+        } else if (distanceKm >= 600) {
+          targetRange = baseRange * 1.6;
+        } else {
+          targetRange = baseRange * 1.2;
+        }
+      }
+      if (targetRange > range) {
+        var cx = (minX + maxX) / 2;
+        var cy = (minY + maxY) / 2;
+        var half = targetRange / 2;
+        minX = cx - half;
+        maxX = cx + half;
+        minY = cy - half;
+        maxY = cy + half;
+      }
+    }
+    var ll1 = map.unproject(c.calc(minX, maxY), c.maxZoom);
+    var ll2 = map.unproject(c.calc(maxX, minY), c.maxZoom);
+    fitLatlngs = [ll1, ll2];
+  }
+  if (fitLatlngs && fitLatlngs.length > 0) {
+    map.fitBounds(L.latLngBounds(fitLatlngs), { padding: [30, 30] });
+  } else if (allLatlngs.length > 0) {
     map.fitBounds(L.latLngBounds(allLatlngs), { padding: [30, 30] });
   }
 </script>
@@ -2851,7 +2989,7 @@ class TmpBotPlugin(Star):
 
     # 状态命令已移除
     
-    # --- 【新功能】定位命令 ---
+    # --- 【定位命令】 ---
     async def tmplocate(self, event: AstrMessageEvent):
         """[命令:定位] 查询玩家的实时位置，并返回图片。支持输入 TMP ID 或 Steam ID。"""
         message_str = event.message_str.strip()
@@ -2962,8 +3100,25 @@ class TmpBotPlugin(Star):
         country_cn, city_cn = await self._translate_country_city(raw_country, location_name)
         
         # 修正显示名称
-        display_country = country_cn or raw_country or '未知国家'
-        display_city = city_cn or location_name
+        def _strip_paren_text(s: Optional[str]) -> str:
+            t = (s or "").strip()
+            if not t:
+                return t
+            t = re.sub(r"\s*\([^)]*\)\s*", "", t).strip()
+            t = re.sub(r"\s*（[^）]*）\s*", "", t).strip()
+            return t
+
+        display_country = _strip_paren_text(country_cn or '未知国家')
+        display_city = _strip_paren_text(city_cn or '未知位置')
+        if display_country and display_city:
+            dc = display_country.strip()
+            dcity = display_city.strip()
+            if dcity == dc or dcity.startswith(dc):
+                location_line = dcity
+            else:
+                location_line = f"{dc}-{dcity}"
+        else:
+            location_line = display_city or display_country or "未知位置"
         
         player_name = player_info.get('name') or '未知'
 
@@ -2985,7 +3140,44 @@ class TmpBotPlugin(Star):
                         j = await resp.json()
                         area_players = j.get('data') or []
                         logger.info(f"定位: 周边玩家数量={len(area_players)}")
-            # 将当前玩家追加
+            if not area_players and self._fullmap_cache:
+                data = self._fullmap_cache or {}
+                payload = data.get('Data') or data.get('data') or data.get('players')
+                if isinstance(payload, list):
+                    for p in payload:
+                        if not isinstance(p, dict):
+                            continue
+                        sid = p.get('ServerId') or p.get('serverId') or p.get('server_id')
+                        if sid is None or int(sid) != int(server_id or 0):
+                            continue
+                        px = p.get('X') or p.get('x') or p.get('axisX') or p.get('posX') or p.get('pos_x')
+                        py = p.get('Y') or p.get('y') or p.get('axisY') or p.get('posY') or p.get('pos_y')
+                        if px is None or py is None:
+                            continue
+                        try:
+                            fx = float(px)
+                            fy = float(py)
+                        except Exception:
+                            continue
+                        if fx < min(ax, bx) or fx > max(ax, bx) or fy < min(by, ay) or fy > max(by, ay):
+                            continue
+                        pid = p.get('MpId') or p.get('mp_id') or p.get('tmpId') or p.get('tmp_id') or p.get('id')
+                        area_players.append({'tmpId': str(pid) if pid is not None else '', 'axisX': fx, 'axisY': fy})
+            normalized_players = []
+            for p in area_players:
+                if not isinstance(p, dict):
+                    continue
+                axis_x = p.get('axisX') or p.get('x') or p.get('posX') or p.get('pos_x')
+                axis_y = p.get('axisY') or p.get('y') or p.get('posY') or p.get('pos_y')
+                if axis_x is None or axis_y is None:
+                    continue
+                pid = p.get('tmpId') or p.get('mpId') or p.get('playerId') or p.get('id')
+                normalized_players.append({
+                    'tmpId': str(pid) if pid is not None else '',
+                    'axisX': axis_x,
+                    'axisY': axis_y
+                })
+            area_players = normalized_players
             area_players = [p for p in area_players if str(p.get('tmpId')) != str(tmp_id)]
             area_players.append({'tmpId': str(tmp_id), 'axisX': cx, 'axisY': cy})
 
@@ -3029,8 +3221,7 @@ class TmpBotPlugin(Star):
       <div class=\"sub\">{{ server_name }} 游戏中</div>
     </div>
     <div class=\"right\">
-      <div>{{ country or '未知' }}</div>
-      <div>{{ city }}</div>
+      <div>{{ location_line }}</div>
     </div>
   </div>
 </div>
@@ -3096,7 +3287,7 @@ class TmpBotPlugin(Star):
             min_y, max_y = by, ay  # 注意坐标系方向
             map_data = {
                 'server_name': server_name,
-                'location_name': f"{display_country} {display_city}",
+                'location_name': location_line,
                 'player_name': player_name,
                 'me_id': str(tmp_id),
                 'players': area_players,
@@ -3105,8 +3296,7 @@ class TmpBotPlugin(Star):
                 'min_y': min_y,
                 'max_y': max_y,
                 'avatar': avatar_url or '',
-                'country': display_country,
-                'city': display_city,
+                'location_line': location_line,
                 'server_id': int(online.get('serverId') or 0),
                 'center_x': float(cx),
                 'center_y': float(cy),
@@ -3122,7 +3312,7 @@ class TmpBotPlugin(Star):
             pass
 
         # 最终回退文本
-        msg = f"玩家实时定位\n玩家名称: {player_name}\nTMP编号: {tmp_id}\n服务器: {server_name}\n位置: {display_country} {display_city}"
+        msg = f"玩家实时定位\n玩家名称: {player_name}\nTMP编号: {tmp_id}\n服务器: {server_name}\n位置: {location_line}"
         yield event.plain_result(msg)
     # --- 定位命令结束 ---
     
@@ -3565,8 +3755,9 @@ class TmpBotPlugin(Star):
                                     status_str = '🟢' 
                                     
                                     # 服务器特性提示
-                                    collision_str = "💥碰撞" if server.get('collisions') else "💥无碰撞"
+                                    collision_str = "💥碰撞" if server.get('collisions') else ""
                                     speed_str = "🚀无限速" if server.get('speedLimiter') is False else ""
+                                    afk_str = "⏱挂机"
                                     
                                     output += f"服务器: {status_str} {name}\n"
                                     
@@ -3577,9 +3768,14 @@ class TmpBotPlugin(Star):
                                     else:
                                         output += f"{players_str}\n"
                                     
-                                    output += f"  特性: {collision_str}"
+                                    output += "  特性:"
+                                    tags = []
+                                    if collision_str:
+                                        tags.append(collision_str)
                                     if speed_str:
-                                        output += f" | {speed_str}"
+                                        tags.append(speed_str)
+                                    tags.append(afk_str)
+                                    output += " " + " | ".join(tags)
                                     output += "\n"
                                     
                                     
@@ -3629,19 +3825,19 @@ class TmpBotPlugin(Star):
         help_text = """TMP查询插件使用说明
 
 可用命令:
-1. 绑定 [ID]
-2. 查询 [ID]
-3. 定位 [ID]
+1. 绑定 [TMP ID]
+2. 查询 [TMP ID]
+3. 定位 [TMP ID]
 4. 地图DLC
 5. 总里程排行
 6. 今日里程排行
-7. 足迹 [服务器简称] [ID]
-8. 路况
+7. 足迹 [服务器简称] [TMP ID]
+8. 路况[s1/s2/p/a]
 9. 解绑
 10. 服务器
 11. 插件版本
 12. 菜单
-使用提示: 绑定后可直接发送 查询/定位
+使用提示: 绑定后可直接发送 查询/定位/足迹 [服务器简称]
 """
         yield event.plain_result(help_text)
         

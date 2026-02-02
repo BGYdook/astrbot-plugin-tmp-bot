@@ -1,5 +1,5 @@
  # astrbot-plugin-tmp-bot
-[![npm](https://img.shields.io/badge/npm-v1.7.2-blue)](https://github.com/BGYdook/astrbot-plugin-tmp-bot)
+[![npm](https://img.shields.io/badge/npm-v1.7.3-blue)](https://github.com/BGYdook/astrbot-plugin-tmp-bot)
 
 ![:astrbot_plugin_tmp_bot](https://count.getloli.com/@:astrbot_plugin_tmp-bot?theme=minecraft)
 
@@ -33,6 +33,15 @@ https://truckersmp.com/developers/api
 
 ## 历史更新
 
+## 版本v1.7.3
+- 修复筛选坐标点逻辑问题
+- 修复了 Promods 足迹缩放的问题
+- 修改定位时的输出形式
+- 修改查询时的输出形式
+- 修改使用服务器功能时的输出形式
+- 添加百度翻译（进行对地方的翻译,比如定位和查询的地方翻译）
+- 添加使用“查”命令时可以直接输入 TMP ID 查询
+
 ## 版本v1.7.2
 - 修复对定位时底图的问题
 - 添加足迹功能
@@ -49,7 +58,7 @@ https://truckersmp.com/developers/api
 - 修复今日历程排行和总里程排行 出现黑色背景的问题
 
 ## 版本v1.6.9
-- 修复历史里程/今日里程为O时不显示
+- 修复历史里程/今日里程为 `0` 时不显示
 - 修复astrbot里行为为1的问题
 - 添加对城市和其他的翻译
 - 调整了上次在线的顺序
