@@ -792,6 +792,37 @@ class TmpBotPlugin(Star):
         country_en = (country or "").strip()
         city_en = (city or "").strip()
 
+        def _clean_raw_text(raw: str) -> str:
+            t = (raw or "").strip()
+            if not t:
+                return t
+            t = _re_local.sub(r"\s*\([^)]*\)\s*", " ", t)
+            t = _re_local.sub(r"\s*（[^）]*）\s*", " ", t)
+            t = _re_local.sub(r"\s*\[[^\]]*\]\s*", " ", t)
+            t = _re_local.sub(r"[^A-Za-z\s\-]", " ", t)
+            t = _re_local.sub(r"\s+", " ", t).strip()
+            return t
+
+        def _has_cjk(t: str) -> bool:
+            return bool(_re_local.search(r"[\u4e00-\u9fff]", t or ""))
+
+        def _ensure_cn_text(text: Optional[str], en_fallback: str, is_city: bool) -> str:
+            t = (text or "").strip()
+            if _has_cjk(t):
+                return t
+            key = (en_fallback or "").strip().lower()
+            if key:
+                mapped = self.CITY_MAP_EN_TO_CN.get(key) if is_city else self.COUNTRY_MAP_EN_TO_CN.get(key)
+                if mapped:
+                    return mapped
+                fixed = self.LOCATION_FIX_MAP.get(key)
+                if fixed:
+                    return fixed
+            return ""
+
+        country_en = _clean_raw_text(country_en)
+        city_en = _clean_raw_text(city_en)
+
         def _normalize_city_input(raw_city: str, raw_country: str) -> str:
             s = (raw_city or "").strip()
             if not s:
@@ -840,7 +871,9 @@ class TmpBotPlugin(Star):
             country_cn = fix_country
         if fix_city:
             city_cn = fix_city
-        return country_cn or country_en, city_cn or city_en
+        country_cn = _ensure_cn_text(country_cn, country_en, False)
+        city_cn = _ensure_cn_text(city_cn, city_en, True)
+        return country_cn, city_cn
 
     async def _translate_traffic_name(self, name: Optional[str]) -> str:
         s = (name or "").strip()
