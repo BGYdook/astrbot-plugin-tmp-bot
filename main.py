@@ -2658,17 +2658,23 @@ class TmpBotPlugin(Star):
                         range_end = extended_end
                         break
             if history_points:
-                if server_key in ['eupromods1', 'promods', 'promods1']:
-                    filtered = [p for p in history_points if str(p.get('serverId') or p.get('server_id') or p.get('server')) in {str(i) for i in PROMODS_SERVER_IDS}]
-                elif server_key in server_id_map:
-                    target = str(server_id_map[server_key])
-                    filtered = [p for p in history_points if str(p.get('serverId') or p.get('server_id') or p.get('server')) == target]
-                elif server_ids:
-                    target_set = {str(i) for i in server_ids}
-                    filtered = [p for p in history_points if str(p.get('serverId') or p.get('server_id') or p.get('server')) in target_set]
-                else:
-                    filtered = history_points
-                history_points = filtered
+                has_server_id = any(
+                    str(p.get('serverId') or p.get('server_id') or p.get('server') or "").strip()
+                    for p in history_points
+                    if isinstance(p, dict)
+                )
+                if has_server_id:
+                    if server_key in ['eupromods1', 'promods', 'promods1']:
+                        filtered = [p for p in history_points if str(p.get('serverId') or p.get('server_id') or p.get('server')) in {str(i) for i in PROMODS_SERVER_IDS}]
+                    elif server_key in server_id_map:
+                        target = str(server_id_map[server_key])
+                        filtered = [p for p in history_points if str(p.get('serverId') or p.get('server_id') or p.get('server')) == target]
+                    elif server_ids:
+                        target_set = {str(i) for i in server_ids}
+                        filtered = [p for p in history_points if str(p.get('serverId') or p.get('server_id') or p.get('server')) in target_set]
+                    else:
+                        filtered = history_points
+                    history_points = filtered
 
             if history_points:
                 points = self._normalize_history_points(history_points)
