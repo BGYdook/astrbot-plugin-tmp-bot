@@ -2329,11 +2329,25 @@ class TmpBotPlugin(Star):
             # 使用更准确的翻译函数
             country_cn, city_cn = await self._translate_country_city(raw_country, raw_city)
             
-            location_display = city_cn
-            if country_cn and country_cn != city_cn:
-                 location_display = f"{country_cn}-{city_cn}"
-            elif not location_display:
-                 location_display = "未知位置"
+            def _strip_paren_text_q(s: Optional[str]) -> str:
+                t = (s or "").strip()
+                if not t:
+                    return t
+                t = re.sub(r"\s*\([^)]*\)\s*", "", t).strip()
+                t = re.sub(r"\s*（[^）]*）\s*", "", t).strip()
+                return t
+
+            display_country = _strip_paren_text_q(country_cn or "")
+            display_city = _strip_paren_text_q(city_cn or "")
+            if display_country and display_city:
+                dc = display_country.strip()
+                dcity = display_city.strip()
+                if dcity == dc or dcity.startswith(dc):
+                    location_display = dcity
+                else:
+                    location_display = f"{dc}-{dcity}"
+            else:
+                location_display = display_city or display_country or "未知位置"
 
             body += f"📶在线状态: 在线\n"
             body += f"📶所在服务器: {server_name}\n"
