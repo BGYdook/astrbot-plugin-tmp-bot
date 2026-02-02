@@ -3087,7 +3087,15 @@ class TmpBotPlugin(Star):
 
         display_country = _strip_paren_text(country_cn or '未知国家')
         display_city = _strip_paren_text(city_cn or '未知位置')
-        location_line = f"{display_country}-{display_city}" if display_country and display_city else (display_city or display_country or "未知位置")
+        if display_country and display_city:
+            dc = display_country.strip()
+            dcity = display_city.strip()
+            if dcity == dc or dcity.startswith(dc):
+                location_line = dcity
+            else:
+                location_line = f"{dc}-{dcity}"
+        else:
+            location_line = display_city or display_country or "未知位置"
         
         player_name = player_info.get('name') or '未知'
 
