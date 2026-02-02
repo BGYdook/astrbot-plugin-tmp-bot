@@ -1946,6 +1946,10 @@ class TmpBotPlugin(Star):
     async def cmd_tmp_query_alias(self, event: AstrMessageEvent, tmp_id: str | None = None):
         orig = getattr(event, "message_str", "") or ""
         try:
+            if not tmp_id and orig:
+                m = re.match(r'^查\s*(\d+)\s*$', orig.strip())
+                if m:
+                    tmp_id = m.group(1)
             if tmp_id:
                 event.message_str = f"查询 {tmp_id}"
             else:
@@ -3746,8 +3750,9 @@ class TmpBotPlugin(Star):
                                     status_str = '🟢' 
                                     
                                     # 服务器特性提示
-                                    collision_str = "💥碰撞" if server.get('collisions') else "💥无碰撞"
+                                    collision_str = "💥碰撞" if server.get('collisions') else ""
                                     speed_str = "🚀无限速" if server.get('speedLimiter') is False else ""
+                                    afk_str = "⏱挂机"
                                     
                                     output += f"服务器: {status_str} {name}\n"
                                     
@@ -3758,9 +3763,14 @@ class TmpBotPlugin(Star):
                                     else:
                                         output += f"{players_str}\n"
                                     
-                                    output += f"  特性: {collision_str}"
+                                    output += "  特性:"
+                                    tags = []
+                                    if collision_str:
+                                        tags.append(collision_str)
                                     if speed_str:
-                                        output += f" | {speed_str}"
+                                        tags.append(speed_str)
+                                    tags.append(afk_str)
+                                    output += " " + " | ".join(tags)
                                     output += "\n"
                                     
                                     
@@ -3810,14 +3820,14 @@ class TmpBotPlugin(Star):
         help_text = """TMP查询插件使用说明
 
 可用命令:
-1. 绑定 [ID]
-2. 查询 [ID]
-3. 定位 [ID]
+1. 绑定 [TMP ID]
+2. 查询 [TMP ID]
+3. 定位 [TMP ID]
 4. 地图DLC
 5. 总里程排行
 6. 今日里程排行
-7. 足迹 [服务器简称] [ID]
-8. 路况
+7. 足迹 [服务器简称] [TMP ID]
+8. 路况[s1/s2/p/a]
 9. 解绑
 10. 服务器
 11. 插件版本
