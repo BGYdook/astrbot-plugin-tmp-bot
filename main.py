@@ -3713,93 +3713,65 @@ class TmpBotPlugin(Star):
             async with self.session.get(url, timeout=10) as response:
                 if response.status == 200:
                     data = await response.json()
-                    servers = data.get('response', [])
-                    
-                    if servers and isinstance(servers, list):
-                        
-                        ets2_servers = []
-                        ats_servers = []
-                        
-                        # 优化服务器分组逻辑 (1.3.25/1.3.26)
-                        for s in servers:
-                            name = s.get('name', '').lower()
-                            if s.get('online'):
-                                # ATS 服务器的常见标记: [US] 或 American Truck Simulator/ATS
-                                if '[us]' in name or 'american truck simulator' in name or 'ats' in name:
-                                    ats_servers.append(s)
-                                # ETS2 服务器的常见标记: 默认(Simulation 1/2, Arcade, ProMods等) 或包含[EU]/[Asia]
-                                else:
-                                    ets2_servers.append(s)
-
-                        # ATS/ETS2总玩家数计算
-                        total_players = sum(s.get('players', 0) for s in (ets2_servers + ats_servers))
-
-                        message = f"TMP服务器状态 (总在线数: {len(ets2_servers) + len(ats_servers)}个)\n"
-                        message += "=" * 30 + "\n"
-                        message += f"**[当前总玩家数: {total_players:,}]**\n\n".replace(',', ' ')
-                        
-                        if ets2_servers or ats_servers:
-                            
-                            def _format_server_list(server_list: List[Dict], title: str, game_icon: str) -> str:
-                                output = f"**{game_icon} {title} ({len(server_list)}个在线)**\n"
-                                if not server_list:
-                                    return output + "  (暂无)\n\n"
-                                
-                                # 保持 API 返回的顺序（即 Simulation 1/2 靠前）
-                                for server in server_list:
-                                    name = server.get('name', '未知')
-                                    players = server.get('players', 0)
-                                    max_players = server.get('maxplayers', 0)
-                                    queue = server.get('queue', 0)
-                                    
-                                    status_str = '🟢' 
-                                    
-                                    # 服务器特性提示
-                                    collision_str = "💥碰撞" if server.get('collisions') else ""
-                                    speed_str = "🚀无限速" if server.get('speedLimiter') is False else ""
-                                    afk_raw = server.get('afkenabled')
-                                    if afk_raw is None:
-                                        afk_raw = server.get('afkEnabled')
-                                    afk_enabled = False
-                                    if isinstance(afk_raw, bool):
-                                        afk_enabled = afk_raw
-                                    elif isinstance(afk_raw, (int, float)):
-                                        afk_enabled = int(afk_raw) == 1
-                                    elif isinstance(afk_raw, str):
-                                        afk_enabled = afk_raw.strip().lower() in ("1", "true", "yes", "y")
-                                    afk_str = "⏱挂机" if afk_enabled else ""
-                                    
-                                    output += f"服务器: {status_str} {name}\n"
-                                    
-                                    players_str = f"  玩家人数: {players:,}/{max_players:,}".replace(',', ' ')
-                                    
-                                    if queue > 0: 
-                                        output += f"{players_str} (排队: {queue})\n"
-                                    else:
-                                        output += f"{players_str}\n"
-                                    
-                                    output += "  特性:"
-                                    tags = []
-                                    if collision_str:
-                                        tags.append(collision_str)
-                                    if speed_str:
-                                        tags.append(speed_str)
-                                    if afk_str:
-                                        tags.append(afk_str)
-                                    output += " " + " | ".join(tags)
-                                    output += "\n"
-                                    
-                                    
-                                return output + "\n"
-
-                            message += _format_server_list(ets2_servers, "Euro Truck Simulator 2 服务器", "🚛")
-                            message += _format_server_list(ats_servers, "American Truck Simulator 服务器", "🇺🇸")
-
-                        else: 
-                            message += "暂无在线服务器"
-                        
-                        message += "=" * 30 
-                        yield event.plain_result(message)
+                    code = data.get('code') if isinstance(data, dict) else None
+                    if code is not None and int(code) != 200:
+                        yield event.plain_result("查询服务器失败，请稍后重试")
+                        return
+                    servers = data.get('data') or data.get('response') or data.get('result') or []
+                    if not isinstance(servers, list):
+                        yield event.plain_result("查询服务器失败，请稍后重试")
+                        return
+                    message = ""
+                    for server in servers:
+                        if message:
+                            message += "\n\n"
+                        is_online = server.get('isOnline')
+                        if is_online is None:
+                            is_online = server.get('online')
+                        online_flag = int(is_online) == 1 if isinstance(is_online, (int, float, str)) else bool(is_online)
+                        name = server.get('serverName') or server.get('name') or '未知服务器'
+                        status = "🟢" if online_flag else "⚫"
+                        message += f"服务器: {status}{name}"
+                        players = server.get('playerCount')
+                        if players is None:
+                            players = server.get('players', 0)
+                        max_players = server.get('maxPlayer')
+                        if max_players is None:
+                            max_players = server.get('maxplayers', 0)
+                        message += f"\n玩家人数: {players}/{max_players}"
+                        queue_flag = server.get('queue', 0)
+                        queue_count = server.get('queueCount', queue_flag)
+                        if queue_flag:
+                            message += f" (队列: {queue_count})"
+                        characteristic_list = []
+                        afk_enable = server.get('afkEnable')
+                        if afk_enable is None:
+                            afk_enable = server.get('afkEnabled')
+                        if afk_enable is None:
+                            afk_enable = server.get('afkenable')
+                        if afk_enable is None:
+                            afk_enable = server.get('afkenabled')
+                        can_afk = False
+                        if isinstance(afk_enable, bool):
+                            can_afk = afk_enable
+                        elif isinstance(afk_enable, (int, float)):
+                            can_afk = int(afk_enable) == 1
+                        elif isinstance(afk_enable, str):
+                            can_afk = afk_enable.strip().lower() in ("1", "true", "yes", "y")
+                        if not can_afk:
+                            characteristic_list.append("⏱挂机")
+                        collisions_enable = server.get('collisionsEnable')
+                        if collisions_enable is None:
+                            collisions_enable = server.get('collisions')
+                        if isinstance(collisions_enable, bool):
+                            if collisions_enable:
+                                characteristic_list.append("💥碰撞")
+                        elif isinstance(collisions_enable, (int, float)):
+                            if int(collisions_enable) == 1:
+                                characteristic_list.append("💥碰撞")
+                        if characteristic_list:
+                            message += "\n服务器特性: " + " ".join(characteristic_list)
+                    yield event.plain_result(message or "暂无在线服务器")
                 else:
                     yield event.plain_result(f"查询服务器状态失败，API返回错误状态码: {response.status}")
         except Exception:
