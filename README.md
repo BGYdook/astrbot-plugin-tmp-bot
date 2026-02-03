@@ -33,6 +33,9 @@ https://truckersmp.com/developers/api
 
 ## 历史更新
 
+## 版本v1.7.4
+- 调整了服务器命令的输出形式，对齐koishi版本
+
 ## 版本v1.7.3
 - 修复筛选坐标点逻辑问题
 - 修复了 Promods 足迹缩放的问题
