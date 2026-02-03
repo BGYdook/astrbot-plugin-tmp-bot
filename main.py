@@ -3757,9 +3757,16 @@ class TmpBotPlugin(Star):
                                     # 服务器特性提示
                                     collision_str = "💥碰撞" if server.get('collisions') else ""
                                     speed_str = "🚀无限速" if server.get('speedLimiter') is False else ""
-                                    afk_enabled = server.get('afkenabled')
-                                    if afk_enabled is None:
-                                        afk_enabled = server.get('afkEnabled')
+                                    afk_raw = server.get('afkenabled')
+                                    if afk_raw is None:
+                                        afk_raw = server.get('afkEnabled')
+                                    afk_enabled = False
+                                    if isinstance(afk_raw, bool):
+                                        afk_enabled = afk_raw
+                                    elif isinstance(afk_raw, (int, float)):
+                                        afk_enabled = int(afk_raw) == 1
+                                    elif isinstance(afk_raw, str):
+                                        afk_enabled = afk_raw.strip().lower() in ("1", "true", "yes", "y")
                                     afk_str = "⏱挂机" if afk_enabled else ""
                                     
                                     output += f"服务器: {status_str} {name}\n"
