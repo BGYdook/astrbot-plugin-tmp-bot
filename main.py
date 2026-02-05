@@ -1131,13 +1131,29 @@ class TmpBotPlugin(Star):
                 
                 if status == 200:
                     online_data = raw_data.get('response') if 'response' in raw_data else raw_data
-                    
-                    is_online = bool(
-                        online_data and 
-                        online_data.get('online') is True and 
-                        online_data.get('server') 
-                    )
-                    
+
+                    def _to_bool(v):
+                        if isinstance(v, bool):
+                            return v
+                        if isinstance(v, (int, float)):
+                            return int(v) == 1
+                        if isinstance(v, str):
+                            return v.strip().lower() in ("1", "true", "yes", "y", "online")
+                        return False
+
+                    server_details = online_data.get('serverDetails', {}) if isinstance(online_data, dict) else {}
+                    server_id = online_data.get('server') if isinstance(online_data, dict) else None
+                    if server_id is None:
+                        server_id = server_details.get('id') or server_details.get('apiserverid') or server_details.get('apiServerId')
+                    x = online_data.get('x') if isinstance(online_data, dict) else None
+                    y = online_data.get('y') if isinstance(online_data, dict) else None
+
+                    online_flag = online_data.get('online') if isinstance(online_data, dict) else None
+                    if online_flag is None:
+                        is_online = bool(server_id is not None and x is not None and y is not None)
+                    else:
+                        is_online = bool(online_data and _to_bool(online_flag) and (server_id is not None or (x is not None and y is not None)))
+
                     if is_online:
                         server_details = online_data.get('serverDetails', {})
                         server_name = server_details.get('name', f"未知服务器 ({online_data.get('server')})")
@@ -1166,12 +1182,12 @@ class TmpBotPlugin(Star):
                             'serverName': server_name,
                             'game': 1 if server_details.get('game') == 'ETS2' else 2 if server_details.get('game') == 'ATS' else 0,
                             'city': {'name': formatted_location}, 
-                            'serverId': online_data.get('server'),
+                            'serverId': server_id,
                             'serverDetailsId': server_details.get('id') or server_details.get('_id'),
                             'apiServerId': server_details.get('apiserverid') or server_details.get('apiServerId'),
                             'serverCode': server_details.get('code') or server_details.get('shortname'),
-                            'x': online_data.get('x'),
-                            'y': online_data.get('y'),
+                            'x': x,
+                            'y': y,
                             'country': country_cn,
                             'realName': city_cn,
                             'debug_error': 'Trucky V3 判断在线，并获取到实时数据。',
