@@ -1,15 +1,15 @@
 import re
 import sys
 
-import feature_bind
-import feature_dlc
-import feature_footprint
-import feature_help
-import feature_locate
-import feature_query
-import feature_rank
-import feature_server
-import feature_traffic
+from . import feature_bind
+from . import feature_dlc
+from . import feature_footprint
+from . import feature_help
+from . import feature_locate
+from . import feature_query
+from . import feature_rank
+from . import feature_server
+from . import feature_traffic
 
 try:
     from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult

@@ -20,8 +20,8 @@ import random
 import time
 from typing import Optional, List, Dict, Tuple, Any
 from datetime import datetime, timedelta
-from templates import dlc_list_template, footprint_map_template, locate_map_template, rank_template
-from feature_handlers import FeatureHandlersMixin
+from .templates import dlc_list_template, footprint_map_template, locate_map_template, rank_template
+from .feature_handlers import FeatureHandlersMixin
 
 # 引入 AstrBot 核心 API
 try:
