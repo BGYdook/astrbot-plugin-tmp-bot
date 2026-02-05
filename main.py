@@ -21,7 +21,16 @@ import time
 from typing import Optional, List, Dict, Tuple, Any
 from datetime import datetime, timedelta
 from .templates import dlc_list_template, footprint_map_template, locate_map_template, rank_template
-from .feature_handlers import FeatureHandlersMixin
+from . import feature_handlers
+from . import feature_bind
+from . import feature_dlc
+from . import feature_footprint
+from . import feature_help
+from . import feature_locate
+from . import feature_query
+from . import feature_rank
+from . import feature_server
+from . import feature_traffic
 
 # 引入 AstrBot 核心 API
 try:
@@ -206,7 +215,7 @@ class ApiResponseException(TmpApiException):
     pass
 
 @register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.7.4", "https://github.com/BGYdook/astrbot-plugin-tmp-bot")
-class TmpBotPlugin(FeatureHandlersMixin, Star):
+class TmpBotPlugin(Star):
     def __init__(self, context, config=None):  # 接收 context 和 config
         super().__init__(context)              # 将 context 传给父类
         self.widget_list = []
@@ -1826,7 +1835,146 @@ class TmpBotPlugin(FeatureHandlersMixin, Star):
             result = re.sub(pattern, zh, result, flags=re.IGNORECASE)
 
         return result
-        
+
+    @filter.event_message_type(filter.EventMessageType.ALL)
+    async def _on_any_message_dispatch(self, event: AstrMessageEvent, *args, **kwargs):
+        async for r in feature_handlers.on_any_message_dispatch(self, event, *args, **kwargs):
+            yield r
+
+    @filter.command("查询")
+    async def cmd_tmp_query(self, event: AstrMessageEvent, tmp_id: str | None = None):
+        async for r in feature_handlers.cmd_tmp_query(self, event, tmp_id):
+            yield r
+
+    @filter.command("查")
+    async def cmd_tmp_query_alias(self, event: AstrMessageEvent, tmp_id: str | None = None):
+        async for r in feature_handlers.cmd_tmp_query_alias(self, event, tmp_id):
+            yield r
+
+    @filter.command("定位")
+    async def cmd_tmp_locate(self, event: AstrMessageEvent, tmp_id: str | None = None):
+        async for r in feature_handlers.cmd_tmp_locate(self, event, tmp_id):
+            yield r
+
+    @filter.command("路况")
+    async def cmd_tmp_traffic(self, event: AstrMessageEvent, server: str | None = None):
+        async for r in feature_handlers.cmd_tmp_traffic(self, event, server):
+            yield r
+
+    @filter.command("总里程排行")
+    async def cmd_tmp_rank_total(self, event: AstrMessageEvent):
+        async for r in feature_handlers.cmd_tmp_rank_total(self, event):
+            yield r
+
+    @filter.command("今日里程排行")
+    async def cmd_tmp_rank_today(self, event: AstrMessageEvent):
+        async for r in feature_handlers.cmd_tmp_rank_today(self, event):
+            yield r
+
+    @filter.command("足迹")
+    async def cmd_tmp_today_footprint(self, event: AstrMessageEvent, server: str | None = None, tmp_id: str | None = None):
+        async for r in feature_handlers.cmd_tmp_today_footprint(self, event, server, tmp_id):
+            yield r
+
+    @filter.command("服务器")
+    async def cmd_tmp_server(self, event: AstrMessageEvent):
+        async for r in feature_handlers.cmd_tmp_server(self, event):
+            yield r
+
+    @filter.command("插件版本")
+    async def cmd_tmp_plugin_version(self, event: AstrMessageEvent):
+        async for r in feature_handlers.cmd_tmp_plugin_version(self, event):
+            yield r
+
+    @filter.command("菜单")
+    async def cmd_tmp_help(self, event: AstrMessageEvent):
+        async for r in feature_handlers.cmd_tmp_help(self, event):
+            yield r
+
+    async def tmpquery(self, event: AstrMessageEvent):
+        async for r in feature_query.tmpquery(
+            self,
+            event,
+            logger,
+            Image,
+            Plain,
+            _format_timestamp_to_readable,
+            _format_timestamp_to_beijing,
+            _translate_user_groups,
+            PlayerNotFoundException,
+            SteamIdNotFoundException,
+            NetworkException,
+        ):
+            yield r
+
+    async def tmpdlc_list(self, event: AstrMessageEvent):
+        async for r in feature_dlc.tmpdlc_list(self, event, logger, Image, dlc_list_template):
+            yield r
+
+    async def tmpdlc_map_alias(self, event: AstrMessageEvent):
+        async for r in feature_dlc.tmpdlc_map_alias(self, event, logger, Image, dlc_list_template):
+            yield r
+
+    async def tmptoday_footprint(self, event: AstrMessageEvent):
+        async for r in feature_footprint.tmptoday_footprint(
+            self,
+            event,
+            logger,
+            Image,
+            footprint_map_template,
+            _format_timestamp_to_readable,
+            PROMODS_SERVER_IDS,
+            PlayerNotFoundException,
+            SteamIdNotFoundException,
+            NetworkException,
+        ):
+            yield r
+
+    async def tmpbind(self, event: AstrMessageEvent):
+        async for r in feature_bind.tmpbind(self, event, PlayerNotFoundException, SteamIdNotFoundException):
+            yield r
+
+    async def tmpunbind(self, event: AstrMessageEvent):
+        async for r in feature_bind.tmpunbind(self, event):
+            yield r
+
+    async def tmplocate(self, event: AstrMessageEvent):
+        async for r in feature_locate.tmplocate(
+            self,
+            event,
+            logger,
+            Image,
+            locate_map_template,
+            PlayerNotFoundException,
+            SteamIdNotFoundException,
+            NetworkException,
+        ):
+            yield r
+
+    async def tmprank_total(self, event: AstrMessageEvent):
+        async for r in feature_rank.tmprank_total(self, event, Image, rank_template, NetworkException, ApiResponseException):
+            yield r
+
+    async def tmprank_today(self, event: AstrMessageEvent):
+        async for r in feature_rank.tmprank_today(self, event, Image, rank_template, NetworkException, ApiResponseException):
+            yield r
+
+    async def tmptraffic(self, event: AstrMessageEvent):
+        async for r in feature_traffic.tmptraffic(self, event, NetworkException, ApiResponseException):
+            yield r
+
+    async def tmpserver(self, event: AstrMessageEvent):
+        async for r in feature_server.tmpserver(self, event):
+            yield r
+
+    async def tmpversion(self, event: AstrMessageEvent):
+        async for r in feature_server.tmpversion(self, event):
+            yield r
+
+    async def tmphelp(self, event: AstrMessageEvent):
+        async for r in feature_help.tmphelp(self, event):
+            yield r
+
     async def terminate(self):
         """插件卸载时的清理工作：关闭HTTP会话。"""
         self._fullmap_task = None
