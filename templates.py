@@ -233,7 +233,7 @@ def locate_map_template() -> str:
   var mapType = promodsIds.indexOf(serverId) !== -1 ? 'promods' : 'ets';
   var cfg = {
     ets: {
-      tileUrl: 'https://ets-map.oss-cn-beijing.aliyuncs.com/ets2/05102019/{z}/{x}/{y}.png',
+      tileUrl: '{{ tile_url_ets }}',
       fallbackUrl: 'https://ets2.online/map/ets2map_157/{z}/{x}/{y}.png',
       multipliers: { x: 70272, y: 76157 },
       breakpoints: { uk: { x: -31056.8, y: -5832.867 } },
@@ -244,7 +244,7 @@ def locate_map_template() -> str:
       }
     },
     promods: {
-      tileUrl: 'https://ets-map.oss-cn-beijing.aliyuncs.com/promods/05102019/{z}/{x}/{y}.png',
+      tileUrl: '{{ tile_url_promods }}',
       fallbackUrl: 'https://ets2.online/map/ets2mappromods_156/{z}/{x}/{y}.png',
       multipliers: { x: 51953, y: 76024 },
       breakpoints: { uk: { x: -31056.8, y: -5832.867 } },
