@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-AstrBot-plugin-tmp-bot
+astrBot-plugin-tmp-bot
 欧卡2TMP查询插件 - Python辅助脚本
 """
 
