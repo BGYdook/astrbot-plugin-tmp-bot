@@ -142,24 +142,47 @@ async def tmplocate(
     avatar_url = self._normalize_avatar_url(player_info.get("avatar"))
 
     try:
-        server_id = online.get("serverId")
+        server_id_raw = online.get("serverId")
         try:
-            server_id = int(server_id) if server_id is not None else None
+            server_id = int(server_id_raw) if server_id_raw is not None else None
         except Exception:
             server_id = None
+        candidates = [
+            server_id_raw,
+            online.get("serverDetailsId"),
+            online.get("apiServerId"),
+            (online.get("serverDetails") or {}).get("apiserverid"),
+            (online.get("serverDetails") or {}).get("apiServerId"),
+            (online.get("serverDetails") or {}).get("id"),
+        ]
+        server_candidates = []
+        for c in candidates:
+            try:
+                v = int(c)
+            except Exception:
+                continue
+            if v <= 0:
+                continue
+            if v not in server_candidates:
+                server_candidates.append(v)
         cx = float(online.get("x") or 0)
         cy = float(online.get("y") or 0)
         ax, ay = cx - 4000, cy + 2500
         bx, by = cx + 4000, cy - 2500
         area_players = []
-        if self.session and server_id:
-            area_url = f"https://da.vtcm.link/map/playerList?aAxisX={ax}&aAxisY={ay}&bAxisX={bx}&bAxisY={by}&serverId={server_id}"
-            logger.info(f"定位: 使用底图查询周边玩家 serverId={server_id} center=({cx},{cy}) url={area_url}")
-            async with self.session.get(area_url, timeout=self._cfg_int("api_timeout_seconds", 10)) as resp:
-                if resp.status == 200:
-                    j = await resp.json()
-                    area_players = j.get("data") or []
-                    logger.info(f"定位: 周边玩家数量={len(area_players)}")
+        used_server_id = None
+        if self.session and server_candidates:
+            for cand in server_candidates:
+                area_url = f"https://da.vtcm.link/map/playerList?aAxisX={ax}&aAxisY={ay}&bAxisX={bx}&bAxisY={by}&serverId={cand}"
+                logger.info(f"定位: 使用底图查询周边玩家 serverId={cand} center=({cx},{cy}) url={area_url}")
+                async with self.session.get(area_url, timeout=self._cfg_int("api_timeout_seconds", 10)) as resp:
+                    if resp.status == 200:
+                        j = await resp.json()
+                        area_players = j.get("data") or []
+                        logger.info(f"定位: 周边玩家数量={len(area_players)}")
+                        if area_players:
+                            used_server_id = cand
+                            break
         if not area_players and self._fullmap_cache:
             data = self._fullmap_cache or {}
             payload = data.get("Data") or data.get("data") or data.get("players")
@@ -233,15 +256,13 @@ async def tmplocate(
             "max_y": max_y,
             "avatar": avatar_url or "",
             "location_line": location_line,
-            "server_id": int(online.get("serverId") or 0),
+            "server_id": int(server_id or used_server_id or 0),
             "center_x": float(cx),
             "center_y": float(cy),
             "tile_url_ets": tile_url_ets,
             "tile_url_promods": tile_url_promods,
         }
-        logger.info(
-            f"定位: 渲染底图 mapType={'promods' if int(online.get('serverId') or 0) in [50,51] else 'ets'} players={len(area_players)}"
-        )
+        logger.info(f"定位: 渲染底图 mapType={'promods' if int(server_id or 0) in [50,51] else 'ets'} players={len(area_players)}")
         url2 = await self.html_render(
             map_tmpl,
             map_data,
