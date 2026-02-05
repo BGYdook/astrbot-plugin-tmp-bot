@@ -143,14 +143,18 @@ async def tmplocate(
 
     try:
         server_id = online.get("serverId")
+        try:
+            server_id = int(server_id) if server_id is not None else None
+        except Exception:
+            server_id = None
         cx = float(online.get("x") or 0)
         cy = float(online.get("y") or 0)
         ax, ay = cx - 4000, cy + 2500
         bx, by = cx + 4000, cy - 2500
-        area_url = f"https://da.vtcm.link/map/playerList?aAxisX={ax}&aAxisY={ay}&bAxisX={bx}&bAxisY={by}&serverId={server_id}"
-        logger.info(f"定位: 使用底图查询周边玩家 serverId={server_id} center=({cx},{cy}) url={area_url}")
         area_players = []
         if self.session and server_id:
+            area_url = f"https://da.vtcm.link/map/playerList?aAxisX={ax}&aAxisY={ay}&bAxisX={bx}&bAxisY={by}&serverId={server_id}"
+            logger.info(f"定位: 使用底图查询周边玩家 serverId={server_id} center=({cx},{cy}) url={area_url}")
             async with self.session.get(area_url, timeout=self._cfg_int("api_timeout_seconds", 10)) as resp:
                 if resp.status == 200:
                     j = await resp.json()
@@ -163,9 +167,14 @@ async def tmplocate(
                 for p in payload:
                     if not isinstance(p, dict):
                         continue
-                    sid = p.get("ServerId") or p.get("serverId") or p.get("server_id")
-                    if sid is None or int(sid) != int(server_id or 0):
-                        continue
+                    if server_id:
+                        sid = p.get("ServerId") or p.get("serverId") or p.get("server_id")
+                        try:
+                            sid = int(sid) if sid is not None else None
+                        except Exception:
+                            sid = None
+                        if sid is None or sid != server_id:
+                            continue
                     px = p.get("X") or p.get("x") or p.get("axisX") or p.get("posX") or p.get("pos_x")
                     py = p.get("Y") or p.get("y") or p.get("axisY") or p.get("posY") or p.get("pos_y")
                     if px is None or py is None:
