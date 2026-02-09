@@ -218,6 +218,8 @@ class TmpBotPlugin(Star):
         self._fullmap_last_fetch_ts: float = 0.0
         self._fullmap_next_fetch_ts: float = 0.0
         self._fullmap_task: Optional[asyncio.Task] = None
+        self._tmp_plugin_task: Optional[asyncio.Task] = None
+        self._tmp_plugin_state: Dict[str, Any] = {}
         self._fullmap_lock = asyncio.Lock()
         self._fullmap_fetch_lock = asyncio.Lock()
         self._load_location_maps()
@@ -260,6 +262,241 @@ class TmpBotPlugin(Star):
             return default
         return str(v)
 
+    async def _evm_open_request(self, method: str, path: str, payload: Optional[Dict[str, Any]] = None, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        if not self.session:
+            return {"error": True, "msg": "插件初始化中，请稍后重试"}
+        base = self._cfg_str("evm_open_api_base", "https://open.vtcm.link").strip()
+        if base.endswith("/"):
+            base = base[:-1]
+        token = self._cfg_str("evm_open_api_token", "").strip()
+        if not token:
+            return {"error": True, "msg": "请在配置中填写 evm_open_api_token"}
+        url = f"{base}{path}"
+        if params:
+            qs = "&".join(f"{k}={v}" for k, v in params.items() if v is not None)
+            if qs:
+                url = f"{url}?{qs}"
+        timeout_sec = self._cfg_int("evm_open_api_timeout", 10)
+        try:
+            async with self.session.request(
+                method,
+                url,
+                headers={"token": token, "Content-Type": "application/json"},
+                json=payload,
+                timeout=timeout_sec,
+            ) as resp:
+                status = resp.status
+                data = await resp.json()
+                if status != 200:
+                    return {"error": True, "msg": f"接口返回状态码: {status}", "data": data}
+                if isinstance(data, dict) and data.get("code") not in (None, 200):
+                    return {"error": True, "msg": data.get("msg") or "接口返回失败", "data": data}
+                return {"error": False, "data": data}
+        except Exception as e:
+            return {"error": True, "msg": f"请求失败: {e.__class__.__name__}"}
+
+    def _evm_format_data(self, data: Any) -> str:
+        if data is None:
+            return "空数据"
+        if isinstance(data, list):
+            lines = []
+            for it in data:
+                if isinstance(it, dict):
+                    line = ", ".join(f"{k}={v}" for k, v in it.items())
+                else:
+                    line = str(it)
+                lines.append(line)
+            return "\n".join(lines) if lines else "空列表"
+        if isinstance(data, dict):
+            return "\n".join(f"{k}: {v}" for k, v in data.items())
+        return str(data)
+
+    def _is_group_message(self, event: AstrMessageEvent) -> bool:
+        for attr in ("group_id", "groupId", "gid", "group", "guild_id", "guildId", "channel_id", "channelId"):
+            v = getattr(event, attr, None)
+            if v not in (None, "", 0):
+                return True
+        msg_type = getattr(event, "message_type", None) or getattr(event, "type", None)
+        if isinstance(msg_type, str) and msg_type.lower() in ("group", "guild"):
+            return True
+        return False
+
+    def _parse_id_list(self, raw: str) -> List[str]:
+        if not raw:
+            return []
+        parts = re.split(r"[\s,;，；|/]+", str(raw))
+        return [p.strip() for p in parts if p and p.strip()]
+
+    async def _get_group_ids(self) -> List[str]:
+        ctx = getattr(self, "context", None)
+        if not ctx:
+            return []
+        candidates = [
+            "get_group_list",
+            "list_group",
+            "list_groups",
+            "get_groups",
+        ]
+        for name in candidates:
+            fn = getattr(ctx, name, None)
+            if callable(fn):
+                try:
+                    res = fn()
+                    if asyncio.iscoroutine(res):
+                        res = await res
+                    if isinstance(res, list):
+                        ids: List[str] = []
+                        for it in res:
+                            if isinstance(it, (str, int)):
+                                ids.append(str(it))
+                            elif isinstance(it, dict):
+                                gid = it.get("group_id") or it.get("id") or it.get("gid") or it.get("groupId")
+                                if gid is not None:
+                                    ids.append(str(gid))
+                        if ids:
+                            return list(dict.fromkeys(ids))
+                except Exception:
+                    continue
+        bot = getattr(ctx, "bot", None)
+        for name in ("get_group_list", "list_groups", "get_groups"):
+            fn = getattr(bot, name, None) if bot else None
+            if callable(fn):
+                try:
+                    res = fn()
+                    if asyncio.iscoroutine(res):
+                        res = await res
+                    if isinstance(res, list):
+                        ids: List[str] = []
+                        for it in res:
+                            if isinstance(it, (str, int)):
+                                ids.append(str(it))
+                            elif isinstance(it, dict):
+                                gid = it.get("group_id") or it.get("id") or it.get("gid") or it.get("groupId")
+                                if gid is not None:
+                                    ids.append(str(gid))
+                        if ids:
+                            return list(dict.fromkeys(ids))
+                except Exception:
+                    continue
+        return []
+
+    async def _send_group_message(self, group_id: str, text: str) -> bool:
+        ctx = getattr(self, "context", None)
+        if not ctx:
+            return False
+        candidates = [
+            getattr(ctx, "send_group_message", None),
+            getattr(ctx, "send_group_msg", None),
+        ]
+        bot = getattr(ctx, "bot", None)
+        if bot:
+            candidates.extend([
+                getattr(bot, "send_group_message", None),
+                getattr(bot, "send_group_msg", None),
+            ])
+        for fn in candidates:
+            if callable(fn):
+                try:
+                    res = fn(group_id, text)
+                    if asyncio.iscoroutine(res):
+                        await res
+                    return True
+                except Exception:
+                    continue
+        return False
+
+    def _load_tmp_plugin_state(self) -> Dict[str, Any]:
+        try:
+            data_dir = StarTools.get_data_dir("tmp-bot")
+            os.makedirs(data_dir, exist_ok=True)
+            path = os.path.join(data_dir, "tmp_plugin_version.json")
+            if not os.path.exists(path):
+                return {}
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
+    def _save_tmp_plugin_state(self, data: Dict[str, Any]) -> None:
+        try:
+            data_dir = StarTools.get_data_dir("tmp-bot")
+            os.makedirs(data_dir, exist_ok=True)
+            path = os.path.join(data_dir, "tmp_plugin_version.json")
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False)
+        except Exception:
+            pass
+
+    def _get_tmp_plugin_interval(self) -> int:
+        return 60
+
+    async def _fetch_tmp_plugin_version(self) -> Optional[Dict[str, Any]]:
+        if not self.session:
+            return None
+        url = "https://api.truckersmp.com/v2/version"
+        try:
+            async with self.session.get(url, timeout=10) as response:
+                if response.status != 200:
+                    return None
+                data = await response.json()
+                plugin_ver = data.get("name") or data.get("version") or ""
+                ets2_ver = data.get("supported_game_version") or data.get("supported_ets2_version") or ""
+                ats_ver = data.get("supported_ats_game_version") or data.get("supported_ats_version") or ""
+                protocol = data.get("protocol") or ""
+                return {
+                    "plugin": str(plugin_ver),
+                    "ets2": str(ets2_ver),
+                    "ats": str(ats_ver),
+                    "protocol": str(protocol),
+                }
+        except Exception:
+            return None
+
+    async def _broadcast_tmp_plugin_update(self, payload: Dict[str, Any]) -> None:
+        group_ids = await self._get_group_ids()
+        if not group_ids:
+            return
+        whitelist = self._parse_id_list(self._cfg_str("tmp_plugin_update_group_whitelist", ""))
+        blacklist = set(self._parse_id_list(self._cfg_str("tmp_plugin_update_group_blacklist", "")))
+        if whitelist:
+            group_ids = [gid for gid in group_ids if gid in whitelist]
+        if blacklist:
+            group_ids = [gid for gid in group_ids if gid not in blacklist]
+        if not group_ids:
+            return
+        text = "TruckersMP 插件版本更新\n"
+        text += f"插件版本: {payload.get('plugin')}\n"
+        text += f"欧卡版本: {payload.get('ets2')}\n"
+        text += f"美卡版本: {payload.get('ats')}\n"
+        for gid in group_ids:
+            await self._send_group_message(gid, text)
+
+    async def _check_tmp_plugin_update(self) -> None:
+        if not self._cfg_bool("tmp_plugin_update_enable", False):
+            return
+        current = await self._fetch_tmp_plugin_version()
+        if not current:
+            return
+        if not self._tmp_plugin_state:
+            self._tmp_plugin_state = self._load_tmp_plugin_state()
+        last = self._tmp_plugin_state.get("version")
+        if last != current:
+            self._tmp_plugin_state = {"version": current, "ts": int(time.time())}
+            self._save_tmp_plugin_state(self._tmp_plugin_state)
+            await self._broadcast_tmp_plugin_update(current)
+
+    def _start_tmp_plugin_task(self) -> None:
+        if self._tmp_plugin_task and not self._tmp_plugin_task.done():
+            return
+        self._tmp_plugin_task = asyncio.create_task(self._tmp_plugin_loop())
+
+    async def _tmp_plugin_loop(self) -> None:
+        await asyncio.sleep(self._get_tmp_plugin_interval())
+        while True:
+            await self._check_tmp_plugin_update()
+            await asyncio.sleep(self._get_tmp_plugin_interval())
+
     async def initialize(self):
         # 统一 User-Agent，并更新版本号
         timeout_sec = self._cfg_int('api_timeout_seconds', 10)
@@ -273,6 +510,7 @@ class TmpBotPlugin(Star):
         )
         logger.info(f"TMP Bot 插件HTTP会话已创建，超时 {timeout_sec}s")
         self._fullmap_task = None
+        self._start_tmp_plugin_task()
 
     def _get_fullmap_interval(self) -> int:
         v = self._cfg_int('ets2map_fullmap_interval_seconds', 60)
@@ -904,6 +1142,24 @@ class TmpBotPlugin(Star):
 
     # --- API请求方法 ---
 
+    def _normalize_steam_id(self, raw: Optional[str]) -> Optional[str]:
+        s = (raw or "").strip()
+        if not s:
+            return None
+        if _re_local.fullmatch(r"\d{15,20}", s):
+            return s
+        m2 = _re_local.match(r"^steam_\d:([01]):(\d+)$", s, flags=_re_local.IGNORECASE)
+        if m2:
+            y = int(m2.group(1))
+            z = int(m2.group(2))
+            account_id = z * 2 + y
+            return str(76561197960265728 + account_id)
+        m3 = _re_local.match(r"^\[?u:1:(\d+)\]?$", s, flags=_re_local.IGNORECASE)
+        if m3:
+            account_id = int(m3.group(1))
+            return str(76561197960265728 + account_id)
+        return None
+
     async def _get_tmp_id_from_steam_id(self, steam_id: str) -> str:
         if not self.session:
             raise NetworkException("插件未初始化，HTTP会话不可用")
@@ -964,6 +1220,60 @@ class TmpBotPlugin(Star):
         except Exception as e:
             logger.error(f"查询玩家信息失败: {e}")
             raise NetworkException("查询失败")
+
+    async def _get_tmp_events(self) -> List[Dict[str, Any]]:
+        if not self.session:
+            raise NetworkException("插件未初始化，HTTP会话不可用")
+        url = "https://api.truckersmp.com/v2/events"
+        try:
+            async with self.session.get(url, timeout=10) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    payload = data.get("response") if isinstance(data, dict) else data
+                    if isinstance(payload, dict) and isinstance(payload.get("events"), list):
+                        payload = payload.get("events")
+                    if isinstance(payload, list):
+                        return payload
+                    return []
+                if response.status == 404:
+                    return []
+                raise ApiResponseException(f"API返回错误状态码: {response.status}")
+        except aiohttp.ClientError:
+            raise NetworkException("TruckersMP API 网络请求失败")
+        except asyncio.TimeoutError:
+            raise NetworkException("请求TruckersMP API超时")
+        except Exception as e:
+            logger.error(f"查询活动列表失败: {e}")
+            raise NetworkException("查询失败")
+
+    async def _get_tmp_event_info(self, event_id: str) -> Optional[Dict[str, Any]]:
+        if not self.session:
+            raise NetworkException("插件未初始化，HTTP会话不可用")
+        urls = [
+            f"https://api.truckersmp.com/v2/events/{event_id}",
+            f"https://api.truckersmp.com/v2/event/{event_id}",
+        ]
+        last_error: Optional[Exception] = None
+        for url in urls:
+            try:
+                async with self.session.get(url, timeout=10) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        payload = data.get("response") if isinstance(data, dict) else data
+                        if isinstance(payload, dict) and payload:
+                            return payload
+                        if isinstance(payload, list) and payload:
+                            return payload[0]
+                        return None
+                    if response.status == 404:
+                        continue
+                    last_error = ApiResponseException(f"API返回错误状态码: {response.status}")
+            except Exception as e:
+                last_error = e
+                continue
+        if last_error:
+            logger.error(f"查询活动信息失败: {last_error}")
+        return None
 
     async def _get_player_bans(self, tmp_id: str) -> List[Dict]:
         if not self.session: return []
@@ -1871,7 +2181,7 @@ class TmpBotPlugin(Star):
             except Exception:
                 has_at = False
 
-        if re.match(r'^(查询|查)(\s*\d+)?\s*$', msg) or (re.match(r'^(查询|查)(\s|$)', msg) and has_at):
+        if re.match(r'^(查询|查)(\s*\S+)?\s*$', msg) or (re.match(r'^(查询|查)(\s|$)', msg) and has_at):
             async for r in self.tmpquery(event):
                 yield r
             return
@@ -1879,7 +2189,7 @@ class TmpBotPlugin(Star):
             async for r in self.tmpdlc_list(event):
                 yield r
             return
-        if re.match(r'^绑定\s*\d+\s*$', msg):
+        if re.match(r'^绑定\s*\S+\s*$', msg):
             async for r in self.tmpbind(event):
                 yield r
             return
@@ -1887,7 +2197,7 @@ class TmpBotPlugin(Star):
             async for r in self.tmpunbind(event):
                 yield r
             return
-        if re.match(r'^定位(\s*\d+)?\s*$', msg) or (msg.startswith("定位") and has_at):
+        if re.match(r'^定位(\s*\S+)?\s*$', msg) or (msg.startswith("定位") and has_at):
             async for r in self.tmplocate(event):
                 yield r
             return
@@ -1919,6 +2229,30 @@ class TmpBotPlugin(Star):
             async for r in self.tmphelp(event):
                 yield r
             return
+        if re.match(r'^活动列表(\s+\d+)?\s*$', msg):
+            async for r in self.tmpevent_list(event):
+                yield r
+            return
+        if re.match(r'^活动信息\s+\d+\s*$', msg):
+            async for r in self.tmpevent_info(event):
+                yield r
+            return
+        if re.match(r'^信息\s+\S+\s*$', msg):
+            async for r in self.evm_member_info(event):
+                yield r
+            return
+        if re.match(r'^成员列表(\s+\d+)?(\s+\d+)?\s*$', msg):
+            async for r in self.evm_member_list(event):
+                yield r
+            return
+        if re.match(r'^成员更新\s+\S+\s+.+$', msg):
+            async for r in self.evm_member_update(event):
+                yield r
+            return
+        if re.match(r'^修改密码\s+\S+\s+\S+\s*$', msg):
+            async for r in self.evm_member_password(event):
+                yield r
+            return
 
     
     
@@ -1946,7 +2280,7 @@ class TmpBotPlugin(Star):
         orig = getattr(event, "message_str", "") or ""
         try:
             if not tmp_id and orig:
-                m = re.match(r'^查\s*(\d+)\s*$', orig.strip())
+                m = re.match(r'^查\s*(\S+)\s*$', orig.strip())
                 if m:
                     tmp_id = m.group(1)
             if tmp_id:
@@ -2045,6 +2379,92 @@ class TmpBotPlugin(Star):
         async for r in self.tmphelp(event):
             yield r
 
+    @filter.command("活动列表")
+    async def cmd_tmp_event_list(self, event: AstrMessageEvent, limit: str | None = None):
+        orig = getattr(event, "message_str", "") or ""
+        try:
+            if limit:
+                event.message_str = f"活动列表 {limit}"
+            async for r in self.tmpevent_list(event):
+                yield r
+        finally:
+            try:
+                event.message_str = orig
+            except Exception:
+                pass
+
+    @filter.command("活动信息")
+    async def cmd_tmp_event_info(self, event: AstrMessageEvent, event_id: str | None = None):
+        orig = getattr(event, "message_str", "") or ""
+        try:
+            if event_id:
+                event.message_str = f"活动信息 {event_id}"
+            async for r in self.tmpevent_info(event):
+                yield r
+        finally:
+            try:
+                event.message_str = orig
+            except Exception:
+                pass
+
+    @filter.command("信息")
+    async def cmd_evm_member_info(self, event: AstrMessageEvent, uid: str | None = None):
+        orig = getattr(event, "message_str", "") or ""
+        try:
+            if uid:
+                event.message_str = f"信息 {uid}"
+            async for r in self.evm_member_info(event):
+                yield r
+        finally:
+            try:
+                event.message_str = orig
+            except Exception:
+                pass
+
+    @filter.command("成员列表")
+    async def cmd_evm_member_list(self, event: AstrMessageEvent, page: str | None = None, size: str | None = None):
+        orig = getattr(event, "message_str", "") or ""
+        try:
+            if page and size:
+                event.message_str = f"成员列表 {page} {size}"
+            elif page:
+                event.message_str = f"成员列表 {page}"
+            async for r in self.evm_member_list(event):
+                yield r
+        finally:
+            try:
+                event.message_str = orig
+            except Exception:
+                pass
+
+    @filter.command("成员更新")
+    async def cmd_evm_member_update(self, event: AstrMessageEvent, uid: str | None = None, payload: str | None = None):
+        orig = getattr(event, "message_str", "") or ""
+        try:
+            if uid and payload:
+                event.message_str = f"成员更新 {uid} {payload}"
+            async for r in self.evm_member_update(event):
+                yield r
+        finally:
+            try:
+                event.message_str = orig
+            except Exception:
+                pass
+
+    @filter.command("修改密码")
+    async def cmd_evm_member_password(self, event: AstrMessageEvent, uid: str | None = None, password: str | None = None):
+        orig = getattr(event, "message_str", "") or ""
+        try:
+            if uid and password:
+                event.message_str = f"修改密码 {uid} {password}"
+            async for r in self.evm_member_password(event):
+                yield r
+        finally:
+            try:
+                event.message_str = orig
+            except Exception:
+                pass
+
 
     # 具体功能实现
 
@@ -2082,15 +2502,20 @@ class TmpBotPlugin(Star):
             except Exception:
                 target_user_id = None
 
-        match = re.search(r'查询\s*(\d+)', message_str) 
+        match = re.search(r'查询\s*(\S+)', message_str) 
         input_id = match.group(1) if match else None
+        if not input_id:
+            m2 = re.match(r'^查\s*(\S+)\s*$', message_str)
+            if m2:
+                input_id = m2.group(1)
         
         tmp_id = None
         
         if input_id:
-            if len(input_id) == 17 and input_id.startswith('7'):
+            steam64 = self._normalize_steam_id(input_id)
+            if steam64:
                 try:
-                    tmp_id = await self._get_tmp_id_from_steam_id(input_id)
+                    tmp_id = await self._get_tmp_id_from_steam_id(steam64)
                 except SteamIdNotFoundException as e:
                     yield event.plain_result(str(e))
                     return
@@ -2928,7 +3353,7 @@ class TmpBotPlugin(Star):
         message_str = event.message_str.strip()
         user_id = event.get_sender_id()
         
-        match = re.search(r'绑定\s*(\d+)', message_str)
+        match = re.search(r'绑定\s*(\S+)', message_str)
         input_id = match.group(1) if match else None
 
         if not input_id:
@@ -2936,12 +3361,11 @@ class TmpBotPlugin(Star):
             return
 
         tmp_id = input_id
-        is_steam_id = (len(input_id) == 17 and input_id.startswith('7'))
+        steam64 = self._normalize_steam_id(input_id)
 
-        if is_steam_id:
+        if steam64:
             try:
-                # 使用 TruckyApp 转换接口
-                tmp_id = await self._get_tmp_id_from_steam_id(input_id)
+                tmp_id = await self._get_tmp_id_from_steam_id(steam64)
             except SteamIdNotFoundException:
                 yield event.plain_result(f"Steam ID {input_id} 未在 TruckersMP 中注册，无法绑定。")
                 return
@@ -3024,15 +3448,16 @@ class TmpBotPlugin(Star):
             except Exception:
                 target_user_id = None
 
-        match = re.search(r'(定位)\s*(\d+)', message_str) 
+        match = re.search(r'(定位)\s*(\S+)', message_str) 
         input_id = match.group(2) if match else None
         
         tmp_id = None
         
         if input_id:
-            if len(input_id) == 17 and input_id.startswith('7'):
+            steam64 = self._normalize_steam_id(input_id)
+            if steam64:
                 try:
-                    tmp_id = await self._get_tmp_id_from_steam_id(input_id)
+                    tmp_id = await self._get_tmp_id_from_steam_id(steam64)
                 except SteamIdNotFoundException as e:
                     yield event.plain_result(str(e))
                     return
@@ -3777,6 +4202,108 @@ class TmpBotPlugin(Star):
         except Exception:
             yield event.plain_result("网络请求失败，请检查网络或稍后重试。")
 
+    async def tmpevent_list(self, event: AstrMessageEvent):
+        message_str = (event.message_str or "").strip()
+        m = re.search(r"活动列表\s*(\d+)?", message_str)
+        limit = 5
+        if m and m.group(1):
+            try:
+                limit = int(m.group(1))
+            except Exception:
+                limit = 5
+        if limit < 1:
+            limit = 1
+        if limit > 20:
+            limit = 20
+        try:
+            events = await self._get_tmp_events()
+        except NetworkException as e:
+            yield event.plain_result(f"查询活动列表失败: {str(e)}")
+            return
+        except Exception:
+            yield event.plain_result("查询活动列表失败，请稍后重试。")
+            return
+        if not events:
+            yield event.plain_result("暂无活动信息")
+            return
+        def pick(d: Dict[str, Any], keys: List[str]) -> Optional[Any]:
+            for k in keys:
+                v = d.get(k)
+                if v not in (None, ""):
+                    return v
+            return None
+        lines: List[str] = []
+        for it in events[:limit]:
+            if not isinstance(it, dict):
+                lines.append(str(it))
+                continue
+            eid = pick(it, ["id", "eventId", "event_id"])
+            name = pick(it, ["name", "title", "eventName", "event_name"]) or "未命名活动"
+            start = pick(it, ["start_at", "start", "startDate", "start_time", "startTime"])
+            start_text = _format_timestamp_to_readable(str(start)) if start else "未知"
+            server = pick(it, ["server", "serverName", "server_name"])
+            game = pick(it, ["game", "gameName", "game_name"])
+            line = f"{eid}. {name}" if eid is not None else str(name)
+            line += f" | {start_text}"
+            if server:
+                line += f" | 服务器: {server}"
+            if game:
+                line += f" | 游戏: {game}"
+            lines.append(line)
+        header = "活动列表\n" + "=" * 10
+        yield event.plain_result(header + "\n" + "\n".join(lines))
+
+    async def tmpevent_info(self, event: AstrMessageEvent):
+        message_str = (event.message_str or "").strip()
+        m = re.search(r"活动信息\s*(\d+)", message_str)
+        if not m:
+            yield event.plain_result("用法: 活动信息 [活动ID]")
+            return
+        event_id = m.group(1).strip()
+        try:
+            info = await self._get_tmp_event_info(event_id)
+        except NetworkException as e:
+            yield event.plain_result(f"查询活动信息失败: {str(e)}")
+            return
+        except Exception:
+            yield event.plain_result("查询活动信息失败，请稍后重试。")
+            return
+        if not info or not isinstance(info, dict):
+            yield event.plain_result("未找到该活动")
+            return
+        def pick(d: Dict[str, Any], keys: List[str]) -> Optional[Any]:
+            for k in keys:
+                v = d.get(k)
+                if v not in (None, ""):
+                    return v
+            return None
+        name = pick(info, ["name", "title", "eventName", "event_name"]) or "未命名活动"
+        start = pick(info, ["start_at", "start", "startDate", "start_time", "startTime"])
+        end = pick(info, ["end_at", "end", "endDate", "end_time", "endTime"])
+        server = pick(info, ["server", "serverName", "server_name"])
+        game = pick(info, ["game", "gameName", "game_name"])
+        map_name = pick(info, ["map", "mapName", "map_name"])
+        url = pick(info, ["url", "link", "eventUrl", "event_url"])
+        desc = pick(info, ["description", "details", "content", "summary"])
+        if isinstance(desc, str) and len(desc) > 300:
+            desc = desc[:300].rstrip() + "..."
+        lines = [f"活动信息\n{'=' * 10}", f"名称: {name}"]
+        if start:
+            lines.append(f"开始: {_format_timestamp_to_readable(str(start))}")
+        if end:
+            lines.append(f"结束: {_format_timestamp_to_readable(str(end))}")
+        if server:
+            lines.append(f"服务器: {server}")
+        if game:
+            lines.append(f"游戏: {game}")
+        if map_name:
+            lines.append(f"地图: {map_name}")
+        if url:
+            lines.append(f"链接: {url}")
+        if desc:
+            lines.append(f"简介: {desc}")
+        yield event.plain_result("\n".join(lines))
+
     async def tmpversion(self, event: AstrMessageEvent):
         """[命令: 插件版本] 实时查询 TMP 联机插件版本信息。"""
         if not self.session:
@@ -3803,6 +4330,123 @@ class TmpBotPlugin(Star):
         except Exception:
             yield event.plain_result("查询版本信息失败，请稍后重试。")
 
+    async def evm_member_info(self, event: AstrMessageEvent):
+        message_str = event.message_str.strip()
+        m = re.search(r"信息\s*(\S+)", message_str)
+        uid = m.group(1).strip() if m else ""
+        if not uid:
+            yield event.plain_result("用法: 信息 [UID]")
+            return
+        resp = await self._evm_open_request("GET", f"/members/{uid}")
+        if resp.get("error"):
+            yield event.plain_result(resp.get("msg") or "查询失败")
+            return
+        payload = resp.get("data")
+        data = payload.get("data") if isinstance(payload, dict) else payload
+        team_id_cfg = self._cfg_str("evm_team_id", "").strip()
+        member_team_id = None
+        member_team_name = None
+        if isinstance(data, dict):
+            for k in ("teamId", "team_id", "vtcId", "vtc_id", "guildId", "guild_id", "companyId", "company_id"):
+                if k in data and data.get(k) not in (None, ""):
+                    member_team_id = str(data.get(k))
+                    break
+            for k in ("teamName", "team_name", "vtcName", "vtc_name", "guildName", "guild_name", "companyName", "company_name"):
+                if k in data and data.get(k) not in (None, ""):
+                    member_team_name = str(data.get(k))
+                    break
+            for k in ("team", "vtc", "guild", "company", "group"):
+                v = data.get(k)
+                if isinstance(v, dict):
+                    if member_team_id is None:
+                        for kk in ("id", "teamId", "vtcId", "guildId", "companyId"):
+                            if kk in v and v.get(kk) not in (None, ""):
+                                member_team_id = str(v.get(kk))
+                                break
+                    if member_team_name is None:
+                        for kk in ("name", "teamName", "vtcName", "guildName", "companyName"):
+                            if kk in v and v.get(kk) not in (None, ""):
+                                member_team_name = str(v.get(kk))
+                                break
+        is_member = None
+        if team_id_cfg:
+            is_member = bool(member_team_id and team_id_cfg == member_team_id)
+        title = "成员信息"
+        body = self._evm_format_data(data)
+        if is_member is not None:
+            flag = "是" if is_member else "否"
+            extra = f"\n是否本队: {flag}"
+            if member_team_id:
+                extra += f"\n车队ID: {member_team_id}"
+            if member_team_name:
+                extra += f"\n车队名称: {member_team_name}"
+            body = f"{body}{extra}"
+        yield event.plain_result(f"{title}\n{body}")
+
+    async def evm_member_list(self, event: AstrMessageEvent):
+        message_str = event.message_str.strip()
+        tokens = message_str.split()
+        page = 1
+        size = 10
+        if len(tokens) >= 2 and tokens[1].isdigit():
+            page = int(tokens[1])
+        if len(tokens) >= 3 and tokens[2].isdigit():
+            size = int(tokens[2])
+        resp = await self._evm_open_request("GET", "/members", params={"page": page, "pageSize": size})
+        if resp.get("error"):
+            yield event.plain_result(resp.get("msg") or "查询失败")
+            return
+        payload = resp.get("data")
+        data = payload.get("data") if isinstance(payload, dict) else payload
+        body = self._evm_format_data(data)
+        yield event.plain_result(f"成员列表\n{body}")
+
+    async def evm_member_update(self, event: AstrMessageEvent):
+        message_str = event.message_str.strip()
+        m = re.match(r"成员更新\s+(\S+)\s+(.+)$", message_str)
+        if not m:
+            yield event.plain_result("用法: 成员更新 [UID] {json}")
+            return
+        uid = m.group(1).strip()
+        raw_json = m.group(2).strip()
+        try:
+            payload = json.loads(raw_json)
+        except Exception:
+            yield event.plain_result("用法: 成员更新 [UID] {json}")
+            return
+        if not isinstance(payload, dict):
+            yield event.plain_result("成员更新仅支持对象 JSON")
+            return
+        resp = await self._evm_open_request("PUT", f"/members/{uid}", payload=payload)
+        if resp.get("error"):
+            yield event.plain_result(resp.get("msg") or "更新失败")
+            return
+        payload = resp.get("data")
+        msg = payload.get("msg") if isinstance(payload, dict) else None
+        yield event.plain_result(msg or "更新成功")
+
+    async def evm_member_password(self, event: AstrMessageEvent):
+        if self._is_group_message(event):
+            yield event.plain_result("修改密码仅支持私信，请私信机器人操作。")
+            return
+        message_str = event.message_str.strip()
+        m = re.match(r"修改密码\s+(\S+)\s+(\S+)$", message_str)
+        if not m:
+            yield event.plain_result("用法: 修改密码 [UID] [新密码]")
+            return
+        uid = m.group(1).strip()
+        password = m.group(2).strip()
+        if len(password) < 6 or len(password) > 16:
+            yield event.plain_result("密码长度需为 6-16 位")
+            return
+        resp = await self._evm_open_request("POST", f"/members/{uid}/password", payload={"password": password})
+        if resp.get("error"):
+            yield event.plain_result(resp.get("msg") or "修改失败")
+            return
+        payload = resp.get("data")
+        msg = payload.get("msg") if isinstance(payload, dict) else None
+        yield event.plain_result(msg or "操作成功")
+
     async def tmphelp(self, event: AstrMessageEvent):
         """[命令: 菜单] 显示本插件的命令使用说明。"""
         help_text = """TMP查询插件使用说明
@@ -3819,14 +4463,25 @@ class TmpBotPlugin(Star):
 9. 解绑
 10. 服务器
 11. 插件版本
-12. 菜单
+12. 活动列表 [数量]
+13. 活动信息 [活动ID]
+14. 菜单
+15. 信息 [UID]
+16. 成员列表 [页码] [每页数量]
+17. 成员更新 [UID] {json}
+18. 修改密码 [UID] [新密码]（仅私信）
 使用提示: 绑定后可直接发送 查询/定位/足迹 [服务器简称]
 """
         yield event.plain_result(help_text)
         
     async def terminate(self):
         """插件卸载时的清理工作：关闭HTTP会话。"""
+        if self._fullmap_task and not self._fullmap_task.done():
+            self._fullmap_task.cancel()
         self._fullmap_task = None
+        if self._tmp_plugin_task and not self._tmp_plugin_task.done():
+            self._tmp_plugin_task.cancel()
+        self._tmp_plugin_task = None
         if self.session:
             await self.session.close()
             self.session = None

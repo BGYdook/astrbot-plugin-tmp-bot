@@ -33,13 +33,7 @@
     "type": "int",
     "default": 10,
     "title": "API 请求超时秒数",
-    "description": "TruckersMP/Trucky/VTCM 接口的请求超时时间。"
-  },
-  "prefer_vtcm_mileage": {
-    "type": "bool",
-    "default": true,
-    "title": "优先使用 VTCM 里程",
-    "description": "优先从 da.vtcm.link 获取里程，失败时回退 Trucky。"
+    "description": "TruckersMP/Trucky/VTCM 接口的请求超时秒数。"
   },
   "enable_bind_feature": {
     "type": "bool",
@@ -53,6 +47,48 @@
     "default": false,
     "title": "DLC列表使用图片输出",
     "description": "开启后，DLC列表将调用文本转图像服务以图片形式发送。"
+  },
+  "evm_open_api_base": {
+    "type": "string",
+    "default": "https://open.vtcm.link",
+    "title": "EVM 开放接口基础地址",
+    "description": "EVM 开放接口的基础地址，例如 https://open.vtcm.link"
+  },
+  "evm_open_api_token": {
+    "type": "string",
+    "default": "",
+    "title": "EVM 开放接口 Token",
+    "description": "调用 EVM 开放接口所需的 token"
+  },
+  "evm_open_api_timeout": {
+    "type": "int",
+    "default": 10,
+    "title": "EVM 开放接口超时秒数",
+    "description": "调用 EVM 开放接口时的超时设置"
+  },
+  "evm_team_id": {
+    "type": "string",
+    "default": "",
+    "title": "车队ID",
+    "description": "用于判断成员是否属于本车队的ID"
+  },
+  "tmp_plugin_update_enable": {
+    "type": "bool",
+    "default": false,
+    "title": "TMP 插件版本更新通知",
+    "description": "检测 TruckersMP 官方插件版本更新并推送到群"
+  },
+  "tmp_plugin_update_group_whitelist": {
+    "type": "string",
+    "default": "",
+    "title": "TMP 插件更新群白名单",
+    "description": "群号列表，逗号/空格分隔，留空表示全部"
+  },
+  "tmp_plugin_update_group_blacklist": {
+    "type": "string",
+    "default": "",
+    "title": "TMP 插件更新群黑名单",
+    "description": "群号列表，逗号/空格分隔"
   }
   
 }
