@@ -1,7 +1,7 @@
 {
   "query_show_avatar_enable": {
     "type": "bool",
-    "default": true,
+    "default": false,
     "title": "查询结果显示头像",
     "description": "在文本回复中附带玩家头像图片。"
   },
@@ -70,7 +70,7 @@
     "type": "string",
     "default": "",
     "title": "车队ID",
-    "description": "用于判断成员是否属于本车队的ID"
+    "description": "车队ID(用于判断成员是否属于本车队的ID)"
   },
   "tmp_plugin_update_enable": {
     "type": "bool",
@@ -82,13 +82,13 @@
     "type": "string",
     "default": "",
     "title": "TMP 插件更新群白名单",
-    "description": "群号列表，逗号/空格分隔，留空表示全部"
+    "description": "插件更新群白名单群号列表，逗号/空格分隔，留空表示全部"
   },
   "tmp_plugin_update_group_blacklist": {
     "type": "string",
     "default": "",
     "title": "TMP 插件更新群黑名单",
-    "description": "群号列表，逗号/空格分隔"
+    "description": "插件更新群黑名单群号列表，逗号/空格分隔"
   }
   
 }

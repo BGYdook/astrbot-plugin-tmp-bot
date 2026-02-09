@@ -4337,7 +4337,7 @@ class TmpBotPlugin(Star):
         if not uid:
             yield event.plain_result("用法: 信息 [UID]")
             return
-        resp = await self._evm_open_request("GET", f"/members/{uid}")
+        resp = await self._evm_open_request("GET", f"/open-api/members/{uid}")
         if resp.get("error"):
             yield event.plain_result(resp.get("msg") or "查询失败")
             return
@@ -4392,7 +4392,7 @@ class TmpBotPlugin(Star):
             page = int(tokens[1])
         if len(tokens) >= 3 and tokens[2].isdigit():
             size = int(tokens[2])
-        resp = await self._evm_open_request("GET", "/members", params={"page": page, "pageSize": size})
+        resp = await self._evm_open_request("GET", "/open-api/members", params={"page": page, "pageSize": size})
         if resp.get("error"):
             yield event.plain_result(resp.get("msg") or "查询失败")
             return
@@ -4417,7 +4417,7 @@ class TmpBotPlugin(Star):
         if not isinstance(payload, dict):
             yield event.plain_result("成员更新仅支持对象 JSON")
             return
-        resp = await self._evm_open_request("PUT", f"/members/{uid}", payload=payload)
+        resp = await self._evm_open_request("PUT", f"/open-api/members/{uid}", payload=payload)
         if resp.get("error"):
             yield event.plain_result(resp.get("msg") or "更新失败")
             return
@@ -4439,7 +4439,7 @@ class TmpBotPlugin(Star):
         if len(password) < 6 or len(password) > 16:
             yield event.plain_result("密码长度需为 6-16 位")
             return
-        resp = await self._evm_open_request("POST", f"/members/{uid}/password", payload={"password": password})
+        resp = await self._evm_open_request("POST", f"/open-api/members/{uid}/password", payload={"password": password})
         if resp.get("error"):
             yield event.plain_result(resp.get("msg") or "修改失败")
             return
