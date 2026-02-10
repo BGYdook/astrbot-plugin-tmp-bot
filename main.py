@@ -4186,33 +4186,136 @@ class TmpBotPlugin(Star):
             yield event.plain_result("数据格式错误")
             return
         
-        # 调试：打印原始数据结构
+        # 增强调试：打印原始数据结构并分析所有可能的字段
         import json
         debug_data = json.dumps(data, ensure_ascii=False, indent=2)
         logger.info(f"API返回数据: {debug_data}")
+        
+        # 分析所有可能的字段名（用于调试）
+        all_fields = list(data.keys())
+        logger.info(f"所有顶级字段: {all_fields}")
+        
+        # 检查嵌套对象
+        for key, value in data.items():
+            if isinstance(value, dict):
+                logger.info(f"对象 {key} 的字段: {list(value.keys())}")
+                # 递归检查更深层的嵌套
+                for sub_key, sub_value in value.items():
+                    if isinstance(sub_value, dict):
+                        logger.info(f"  子对象 {key}.{sub_key} 的字段: {list(sub_value.keys())}")
+        
+        # 专门查找玩家名称和车队角色的所有可能字段
+        logger.info("=== 玩家名称字段搜索 ===")
+        name_candidates = []
+        for key, value in data.items():
+            if any(name_keyword in key.lower() for name_keyword in ['name', 'nick', 'user', 'player']) and isinstance(value, str):
+                name_candidates.append(f"{key}: {value}")
+        if name_candidates:
+            logger.info(f"找到的名称字段: {name_candidates}")
+        
+        # 检查user/player对象
+        user_data = data.get("user") or data.get("player") or {}
+        if isinstance(user_data, dict):
+            logger.info("=== user/player对象字段搜索 ===")
+            for key, value in user_data.items():
+                if any(name_keyword in key.lower() for name_keyword in ['name', 'nick']) and isinstance(value, str):
+                    logger.info(f"user/player.{key}: {value}")
+        
+        logger.info("=== 车队角色字段搜索 ===")
+        role_candidates = []
+        for key, value in data.items():
+            if any(role_keyword in key.lower() for role_keyword in ['role', 'team', 'position', 'rank', 'title', 'job', 'duty']) and isinstance(value, str):
+                role_candidates.append(f"{key}: {value}")
+        if role_candidates:
+            logger.info(f"找到的角色字段: {role_candidates}")
+        
+        # 检查role/position对象
+        role_data = data.get("role") or data.get("position") or {}
+        if isinstance(role_data, dict):
+            logger.info("=== role/position对象字段搜索 ===")
+            for key, value in role_data.items():
+                if isinstance(value, str):
+                    logger.info(f"role/position.{key}: {value}")
         
         # 提取所需字段 - 扩展字段名支持
         uid = data.get("uid") or data.get("id") or data.get("userId") or data.get("user_id") or "未知"
         tmp_id = data.get("tmpId") or data.get("tmpID") or data.get("steamId") or data.get("steam_id") or data.get("steamID") or "未知"
         team_id = data.get("teamId") or data.get("teamID") or data.get("team_id") or data.get("vtcId") or data.get("vtc_id") or data.get("vtcID") or data.get("guildId") or data.get("guild_id") or "未知"
         
-        # 玩家名称 - 尝试更多可能的字段名，包括嵌套对象
-        player_name = (data.get("playerName") or data.get("player_name") or data.get("name") or 
-                      data.get("username") or data.get("userName") or data.get("nick") or 
-                      data.get("nickname") or data.get("displayName") or data.get("display_name") or 
-                      data.get("nickName") or "未知")
+        # 玩家名称 - 使用更智能的搜索策略
+        player_name = "未知"
         
-        # 检查是否有user或player子对象
-        user_data = data.get("user") or data.get("player") or {}
-        if isinstance(user_data, dict) and player_name == "未知":
-            player_name = (user_data.get("name") or user_data.get("username") or 
-                          user_data.get("nick") or user_data.get("nickname") or 
-                          user_data.get("displayName") or user_data.get("display_name") or "未知")
+        # 1. 优先尝试常见的字段名
+        name_fields = [
+            "playerName", "player_name", "name", "username", "userName",
+            "nick", "nickname", "displayName", "display_name", "nickName",
+            "realName", "real_name", "fullName", "full_name"
+        ]
         
-        # 车队角色 - 尝试更多可能的字段名，包括嵌套对象
-        team_role = (data.get("teamRole") or data.get("team_role") or data.get("role") or 
-                    data.get("position") or data.get("rank") or data.get("title") or 
-                    data.get("job") or data.get("duty") or "未知")
+        for field in name_fields:
+            if data.get(field):
+                player_name = str(data.get(field))
+                logger.info(f"找到玩家名称字段 '{field}': {player_name}")
+                break
+        
+        # 2. 如果没有找到，检查user/player对象
+        if player_name == "未知":
+            user_data = data.get("user") or data.get("player") or {}
+            if isinstance(user_data, dict):
+                logger.info("检查user/player对象中的名称字段")
+                for field in name_fields:
+                    if user_data.get(field):
+                        player_name = str(user_data.get(field))
+                        logger.info(f"在user/player中找到名称字段 '{field}': {player_name}")
+                        break
+        
+        # 3. 如果还是没有找到，进行模糊搜索
+        if player_name == "未知":
+            logger.info("进行模糊搜索玩家名称")
+            for key, value in data.items():
+                if isinstance(value, str) and len(value) > 1:  # 排除单字符
+                    key_lower = key.lower()
+                    if any(keyword in key_lower for keyword in ['name', 'nick']) and not any(exclude in key_lower for exclude in ['id', 'uid', 'role', 'team']):
+                        player_name = value
+                        logger.info(f"模糊搜索找到玩家名称 '{key}': {player_name}")
+                        break
+        
+        # 车队角色 - 使用更智能的搜索策略  
+        team_role = "未知"
+        
+        # 1. 优先尝试常见的字段名
+        role_fields = [
+            "teamRole", "team_role", "role", "position", "rank", "title", 
+            "job", "duty", "teamPosition", "team_position", "vtcRole", "vtc_role"
+        ]
+        
+        for field in role_fields:
+            if data.get(field):
+                team_role = str(data.get(field))
+                logger.info(f"找到车队角色字段 '{field}': {team_role}")
+                break
+        
+        # 2. 如果没有找到，检查role/position对象
+        if team_role == "未知":
+            role_data = data.get("role") or data.get("position") or {}
+            if isinstance(role_data, dict):
+                logger.info("检查role/position对象中的角色字段")
+                for field in ["name", "title", "position", "role"]:
+                    if role_data.get(field):
+                        team_role = str(role_data.get(field))
+                        logger.info(f"在role/position中找到角色字段 '{field}': {team_role}")
+                        break
+        
+        # 3. 如果还是没有找到，进行模糊搜索
+        if team_role == "未知":
+            logger.info("进行模糊搜索车队角色")
+            for key, value in data.items():
+                if isinstance(value, str) and len(value) > 1:
+                    key_lower = key.lower()
+                    if any(keyword in key_lower for keyword in ['role', 'team', 'position', 'rank']) and not any(exclude in key_lower for exclude in ['id', 'uid']):
+                        team_role = value
+                        logger.info(f"模糊搜索找到车队角色 '{key}': {team_role}")
+                        break
         
         # 检查是否有team或role子对象
         role_data = data.get("role") or data.get("position") or {}
