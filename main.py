@@ -4137,11 +4137,40 @@ class TmpBotPlugin(Star):
     async def evm_member_info(self, event: AstrMessageEvent):
         message_str = event.message_str.strip()
         m = re.search(r"信息\s*(\S+)", message_str)
-        uid = m.group(1).strip() if m else ""
-        if not uid:
-            yield event.plain_result("用法: 信息 [UID]")
+        query = m.group(1).strip() if m else ""
+        if not query:
+            yield event.plain_result("用法: 信息 [UID/TMP ID/QQ号]")
             return
-        resp = await self._evm_open_request("GET", "/members/get", params={"uid": uid})
+        
+        # 尝试所有可能的参数组合
+        resp = None
+        error_msgs = []
+        
+        # 首先尝试作为UID查询
+        resp = await self._evm_open_request("GET", "/members/get", params={"uid": query})
+        if not resp.get("error"):
+            # UID查询成功，直接使用这个结果
+            pass
+        else:
+            error_msgs.append(f"UID查询: {resp.get('msg', '失败')}")
+            
+            # UID失败，尝试作为TMP ID查询
+            if query.isdigit():
+                resp = await self._evm_open_request("GET", "/members/get", params={"tmpId": query})
+                if not resp.get("error"):
+                    # TMP ID查询成功
+                    pass
+                else:
+                    error_msgs.append(f"TMP ID查询: {resp.get('msg', '失败')}")
+                    
+                    # TMP ID也失败，尝试作为QQ号查询
+                    resp = await self._evm_open_request("GET", "/members/get", params={"qq": query})
+                    if resp.get("error"):
+                        error_msgs.append(f"QQ号查询: {resp.get('msg', '失败')}")
+                        # 所有查询都失败，返回错误信息
+                        yield event.plain_result(f"查询失败，已尝试:\n" + "\n".join(error_msgs))
+                        return
+        
         if resp.get("error"):
             yield event.plain_result(resp.get("msg") or "查询失败")
             return
