@@ -2363,6 +2363,9 @@ class TmpBotPlugin(Star):
 
     @filter.command("修改密码")
     async def cmd_evm_member_password(self, event: AstrMessageEvent, uid: str | None = None, password: str | None = None):
+        if self._is_group_message(event):
+            yield event.plain_result("为保证用户隐私安全，目前修改密码仅支持私信，请私信机器人操作。")
+            return
         orig = getattr(event, "message_str", "") or ""
         try:
             if uid and password:
