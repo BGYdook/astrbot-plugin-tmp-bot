@@ -2187,12 +2187,6 @@ class TmpBotPlugin(Star):
             async for r in self.evm_member_update(event):
                 yield r
             return
-        if re.match(r'^修改密码\s+\S+\s+\S+\s*$', msg):
-            # 这个处理应该通过@filter.command来触发，这里只做简单提示
-            yield event.plain_result("为保证用户隐私安全，目前修改密码仅支持私信，请私信机器人操作。")
-            return
-
-
     
     
     # 额外 AstrBot 正式指令包装（用于行为统计，保留无前缀用法）
@@ -2317,7 +2311,21 @@ class TmpBotPlugin(Star):
         """显示本插件支持的指令与用法。"""
         async for r in self.tmphelp(event):
             yield r
-            
+
+    @filter.command("信息")
+    async def cmd_evm_member_info(self, event: AstrMessageEvent, uid: str | None = None):
+        orig = getattr(event, "message_str", "") or ""
+        try:
+            if uid:
+                event.message_str = f"信息 {uid}"
+            async for r in self.evm_member_info(event):
+                yield r
+        finally:
+            try:
+                event.message_str = orig
+            except Exception:
+                pass
+
     @filter.command("成员列表")
     async def cmd_evm_member_list(self, event: AstrMessageEvent, page: str | None = None, size: str | None = None):
         orig = getattr(event, "message_str", "") or ""
