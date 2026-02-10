@@ -2139,6 +2139,15 @@ class TmpBotPlugin(Star):
             async for r in self.tmpbind(event):
                 yield r
             return
+        if re.match(r'^绑定uid\s*\d+\s*$', msg):
+            # 提取UID并调用绑定功能
+            m = re.match(r'^绑定uid\s*(\d+)\s*$', msg)
+            if m:
+                uid = m.group(1)
+                event.message_str = f"绑定 {uid}"
+                async for r in self.tmpbind(event):
+                    yield r
+            return
         if re.match(r'^解绑\s*$', msg):
             async for r in self.tmpunbind(event):
                 yield r
@@ -2177,14 +2186,6 @@ class TmpBotPlugin(Star):
             return
         if re.match(r'^信息\s+(\S+)$', msg):
             async for r in self.evm_member_info(event):
-                yield r
-            return
-        if re.match(r'^成员列表(\s+\d+)?(\s+\d+)?\s*$', msg):
-            async for r in self.evm_member_list(event):
-                yield r
-            return
-        if re.match(r'^成员更新\s+\S+\s+.+$', msg):
-            async for r in self.evm_member_update(event):
                 yield r
             return
     
@@ -2326,35 +2327,19 @@ class TmpBotPlugin(Star):
             except Exception:
                 pass
 
-    @filter.command("成员列表")
-    async def cmd_evm_member_list(self, event: AstrMessageEvent, page: str | None = None, size: str | None = None):
-        orig = getattr(event, "message_str", "") or ""
-        try:
-            if page and size:
-                event.message_str = f"成员列表 {page} {size}"
-            elif page:
-                event.message_str = f"成员列表 {page}"
-            async for r in self.evm_member_list(event):
-                yield r
-        finally:
-            try:
-                event.message_str = orig
-            except Exception:
-                pass
+    @filter.command("绑定uid")
+    async def cmd_bind_uid(self, event: AstrMessageEvent, uid: str | None = None):
+        """绑定UID格式：绑定uid[uid] 或 绑定uid [uid]"""
+        if not uid:
+            yield event.plain_result("用法: 绑定uid[UID] 或 绑定uid [UID]")
+            return
+            
+        # 调用现有的tmpbind逻辑，但使用UID格式
+        event.message_str = f"绑定 {uid}"
+        async for r in self.tmpbind(event):
+            yield r
 
-    @filter.command("成员更新")
-    async def cmd_evm_member_update(self, event: AstrMessageEvent, uid: str | None = None, payload: str | None = None):
-        orig = getattr(event, "message_str", "") or ""
-        try:
-            if uid and payload:
-                event.message_str = f"成员更新 {uid} {payload}"
-            async for r in self.evm_member_update(event):
-                yield r
-        finally:
-            try:
-                event.message_str = orig
-            except Exception:
-                pass
+    # 成员列表和成员更新功能已删除
 
     @filter.command("修改密码")
     async def cmd_evm_member_password(self, event: AstrMessageEvent, uid: str | None = None, password: str | None = None):
@@ -4353,47 +4338,7 @@ class TmpBotPlugin(Star):
         
         yield event.plain_result("\n".join(result_lines))
 
-    async def evm_member_list(self, event: AstrMessageEvent):
-        message_str = event.message_str.strip()
-        tokens = message_str.split()
-        page = 1
-        size = 10
-        if len(tokens) >= 2 and tokens[1].isdigit():
-            page = int(tokens[1])
-        if len(tokens) >= 3 and tokens[2].isdigit():
-            size = int(tokens[2])
-        resp = await self._evm_open_request("GET", "/members/list", params={"page": page, "pageSize": size})
-        if resp.get("error"):
-            yield event.plain_result(resp.get("msg") or "查询失败")
-            return
-        payload = resp.get("data")
-        data = payload.get("data") if isinstance(payload, dict) else payload
-        body = self._evm_format_data(data)
-        yield event.plain_result(f"成员列表\n{body}")
-
-    async def evm_member_update(self, event: AstrMessageEvent):
-        message_str = event.message_str.strip()
-        m = re.match(r"成员更新\s+(\S+)\s+(.+)$", message_str)
-        if not m:
-            yield event.plain_result("用法: 成员更新 [UID] {json}")
-            return
-        uid = m.group(1).strip()
-        raw_json = m.group(2).strip()
-        try:
-            payload = json.loads(raw_json)
-        except Exception:
-            yield event.plain_result("用法: 成员更新 [UID] {json}")
-            return
-        if not isinstance(payload, dict):
-            yield event.plain_result("成员更新仅支持对象 JSON")
-            return
-        resp = await self._evm_open_request("PUT", "/members/update", payload={"uid": uid, **payload})
-        if resp.get("error"):
-            yield event.plain_result(resp.get("msg") or "更新失败")
-            return
-        payload = resp.get("data")
-        msg = payload.get("msg") if isinstance(payload, dict) else None
-        yield event.plain_result(msg or "更新成功")
+    # 成员列表和成员更新功能已删除
 
     async def evm_member_password(self, event: AstrMessageEvent):
         # 添加群聊检测 - 最后一道防线
@@ -4425,21 +4370,20 @@ class TmpBotPlugin(Star):
 
 可用命令:
 1. 绑定 [TMP ID]
-2. 查询 [TMP ID]
-3. 定位 [TMP ID]
-4. 地图DLC
-5. 总里程排行
-6. 今日里程排行
-7. 足迹 [服务器简称] [TMP ID]
-8. 路况[s1/s2/p/a]
-9. 解绑
-10. 服务器
-11. 插件版本
-12. 菜单
-13. 信息 [UID]
-14. 成员列表 [页码] [每页数量]
-15. 成员更新 [UID] {json}
-16. 修改密码 [UID] [新密码]（仅私信）
+2. 绑定uid[UID] 或 绑定uid [UID]
+3. 查询 [TMP ID]
+4. 定位 [TMP ID]
+5. 地图DLC
+6. 总里程排行
+7. 今日里程排行
+8. 足迹 [服务器简称] [TMP ID]
+9. 路况[s1/s2/p/a]
+10. 解绑
+11. 服务器
+12. 插件版本
+13. 菜单
+14. 信息 [UID]
+15. 修改密码 [UID] [新密码]（仅私信）
 使用提示: 绑定后可直接发送 查询/定位/足迹 [服务器简称]
 """
         yield event.plain_result(help_text)
