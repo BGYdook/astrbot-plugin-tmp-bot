@@ -2317,14 +2317,6 @@ class TmpBotPlugin(Star):
                 event.message_str = orig
             except Exception:
                 pass
-
-    @filter.command("绑定uid")
-    async def cmd_bind_uid(self, event: AstrMessageEvent, uid: str | None = None):
-        """绑定UID格式：绑定uid[uid] 或 绑定uid [uid]"""
-        if not uid:
-            yield event.plain_result("用法: 绑定uid[UID] 或 绑定uid [UID]")
-            return
-            
         # 调用现有的tmpbind逻辑，但使用UID格式
         event.message_str = f"绑定 {uid}"
         async for r in self.tmpbind(event):
@@ -4361,20 +4353,19 @@ class TmpBotPlugin(Star):
 
 可用命令:
 1. 绑定 [TMP ID]
-2. 绑定uid[UID] 或 绑定uid [UID]
-3. 查询 [TMP ID]
-4. 定位 [TMP ID]
-5. 地图DLC
-6. 总里程排行
-7. 今日里程排行
-8. 足迹 [服务器简称] [TMP ID]
-9. 路况[s1/s2/p/a]
-10. 解绑
-11. 服务器
-12. 插件版本
-13. 菜单
-14. 信息 [UID]
-15. 修改密码 [UID] [新密码]（仅私信）
+2. 查询 [TMP ID]
+3. 定位 [TMP ID]
+4. 地图DLC
+5. 总里程排行
+6. 今日里程排行
+7. 足迹 [服务器简称] [TMP ID]
+8. 路况[s1/s2/p/a]
+9. 解绑
+10. 服务器
+11. 插件版本
+12. 菜单
+13. 信息 [UID]
+14. 修改密码 [UID] [新密码]（仅私信）
 使用提示: 绑定后可直接发送 查询/定位/足迹 [服务器简称]
 """
         yield event.plain_result(help_text)
