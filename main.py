@@ -2139,15 +2139,6 @@ class TmpBotPlugin(Star):
             async for r in self.tmpbind(event):
                 yield r
             return
-        if re.match(r'^绑定uid\s*\d+\s*$', msg):
-            # 提取UID并调用绑定功能
-            m = re.match(r'^绑定uid\s*(\d+)\s*$', msg)
-            if m:
-                uid = m.group(1)
-                event.message_str = f"绑定 {uid}"
-                async for r in self.tmpbind(event):
-                    yield r
-            return
         if re.match(r'^解绑\s*$', msg):
             async for r in self.tmpunbind(event):
                 yield r
