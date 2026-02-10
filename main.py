@@ -1221,60 +1221,6 @@ class TmpBotPlugin(Star):
             logger.error(f"查询玩家信息失败: {e}")
             raise NetworkException("查询失败")
 
-    async def _get_tmp_events(self) -> List[Dict[str, Any]]:
-        if not self.session:
-            raise NetworkException("插件未初始化，HTTP会话不可用")
-        url = "https://api.truckersmp.com/v2/events"
-        try:
-            async with self.session.get(url, timeout=10) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    payload = data.get("response") if isinstance(data, dict) else data
-                    if isinstance(payload, dict) and isinstance(payload.get("events"), list):
-                        payload = payload.get("events")
-                    if isinstance(payload, list):
-                        return payload
-                    return []
-                if response.status == 404:
-                    return []
-                raise ApiResponseException(f"API返回错误状态码: {response.status}")
-        except aiohttp.ClientError:
-            raise NetworkException("TruckersMP API 网络请求失败")
-        except asyncio.TimeoutError:
-            raise NetworkException("请求TruckersMP API超时")
-        except Exception as e:
-            logger.error(f"查询活动列表失败: {e}")
-            raise NetworkException("查询失败")
-
-    async def _get_tmp_event_info(self, event_id: str) -> Optional[Dict[str, Any]]:
-        if not self.session:
-            raise NetworkException("插件未初始化，HTTP会话不可用")
-        urls = [
-            f"https://api.truckersmp.com/v2/events/{event_id}",
-            f"https://api.truckersmp.com/v2/event/{event_id}",
-        ]
-        last_error: Optional[Exception] = None
-        for url in urls:
-            try:
-                async with self.session.get(url, timeout=10) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        payload = data.get("response") if isinstance(data, dict) else data
-                        if isinstance(payload, dict) and payload:
-                            return payload
-                        if isinstance(payload, list) and payload:
-                            return payload[0]
-                        return None
-                    if response.status == 404:
-                        continue
-                    last_error = ApiResponseException(f"API返回错误状态码: {response.status}")
-            except Exception as e:
-                last_error = e
-                continue
-        if last_error:
-            logger.error(f"查询活动信息失败: {last_error}")
-        return None
-
     async def _get_player_bans(self, tmp_id: str) -> List[Dict]:
         if not self.session: return []
 
@@ -2229,18 +2175,6 @@ class TmpBotPlugin(Star):
             async for r in self.tmphelp(event):
                 yield r
             return
-        if re.match(r'^活动列表(\s+\d+)?\s*$', msg):
-            async for r in self.tmpevent_list(event):
-                yield r
-            return
-        if re.match(r'^活动信息\s+\d+\s*$', msg):
-            async for r in self.tmpevent_info(event):
-                yield r
-            return
-        if re.match(r'^信息\s+\S+\s*$', msg):
-            async for r in self.evm_member_info(event):
-                yield r
-            return
         if re.match(r'^成员列表(\s+\d+)?(\s+\d+)?\s*$', msg):
             async for r in self.evm_member_list(event):
                 yield r
@@ -2378,34 +2312,6 @@ class TmpBotPlugin(Star):
         """显示本插件支持的指令与用法。"""
         async for r in self.tmphelp(event):
             yield r
-
-    @filter.command("活动列表")
-    async def cmd_tmp_event_list(self, event: AstrMessageEvent, limit: str | None = None):
-        orig = getattr(event, "message_str", "") or ""
-        try:
-            if limit:
-                event.message_str = f"活动列表 {limit}"
-            async for r in self.tmpevent_list(event):
-                yield r
-        finally:
-            try:
-                event.message_str = orig
-            except Exception:
-                pass
-
-    @filter.command("活动信息")
-    async def cmd_tmp_event_info(self, event: AstrMessageEvent, event_id: str | None = None):
-        orig = getattr(event, "message_str", "") or ""
-        try:
-            if event_id:
-                event.message_str = f"活动信息 {event_id}"
-            async for r in self.tmpevent_info(event):
-                yield r
-        finally:
-            try:
-                event.message_str = orig
-            except Exception:
-                pass
 
     @filter.command("信息")
     async def cmd_evm_member_info(self, event: AstrMessageEvent, uid: str | None = None):
@@ -4202,108 +4108,6 @@ class TmpBotPlugin(Star):
         except Exception:
             yield event.plain_result("网络请求失败，请检查网络或稍后重试。")
 
-    async def tmpevent_list(self, event: AstrMessageEvent):
-        message_str = (event.message_str or "").strip()
-        m = re.search(r"活动列表\s*(\d+)?", message_str)
-        limit = 5
-        if m and m.group(1):
-            try:
-                limit = int(m.group(1))
-            except Exception:
-                limit = 5
-        if limit < 1:
-            limit = 1
-        if limit > 20:
-            limit = 20
-        try:
-            events = await self._get_tmp_events()
-        except NetworkException as e:
-            yield event.plain_result(f"查询活动列表失败: {str(e)}")
-            return
-        except Exception:
-            yield event.plain_result("查询活动列表失败，请稍后重试。")
-            return
-        if not events:
-            yield event.plain_result("暂无活动信息")
-            return
-        def pick(d: Dict[str, Any], keys: List[str]) -> Optional[Any]:
-            for k in keys:
-                v = d.get(k)
-                if v not in (None, ""):
-                    return v
-            return None
-        lines: List[str] = []
-        for it in events[:limit]:
-            if not isinstance(it, dict):
-                lines.append(str(it))
-                continue
-            eid = pick(it, ["id", "eventId", "event_id"])
-            name = pick(it, ["name", "title", "eventName", "event_name"]) or "未命名活动"
-            start = pick(it, ["start_at", "start", "startDate", "start_time", "startTime"])
-            start_text = _format_timestamp_to_readable(str(start)) if start else "未知"
-            server = pick(it, ["server", "serverName", "server_name"])
-            game = pick(it, ["game", "gameName", "game_name"])
-            line = f"{eid}. {name}" if eid is not None else str(name)
-            line += f" | {start_text}"
-            if server:
-                line += f" | 服务器: {server}"
-            if game:
-                line += f" | 游戏: {game}"
-            lines.append(line)
-        header = "活动列表\n" + "=" * 10
-        yield event.plain_result(header + "\n" + "\n".join(lines))
-
-    async def tmpevent_info(self, event: AstrMessageEvent):
-        message_str = (event.message_str or "").strip()
-        m = re.search(r"活动信息\s*(\d+)", message_str)
-        if not m:
-            yield event.plain_result("用法: 活动信息 [活动ID]")
-            return
-        event_id = m.group(1).strip()
-        try:
-            info = await self._get_tmp_event_info(event_id)
-        except NetworkException as e:
-            yield event.plain_result(f"查询活动信息失败: {str(e)}")
-            return
-        except Exception:
-            yield event.plain_result("查询活动信息失败，请稍后重试。")
-            return
-        if not info or not isinstance(info, dict):
-            yield event.plain_result("未找到该活动")
-            return
-        def pick(d: Dict[str, Any], keys: List[str]) -> Optional[Any]:
-            for k in keys:
-                v = d.get(k)
-                if v not in (None, ""):
-                    return v
-            return None
-        name = pick(info, ["name", "title", "eventName", "event_name"]) or "未命名活动"
-        start = pick(info, ["start_at", "start", "startDate", "start_time", "startTime"])
-        end = pick(info, ["end_at", "end", "endDate", "end_time", "endTime"])
-        server = pick(info, ["server", "serverName", "server_name"])
-        game = pick(info, ["game", "gameName", "game_name"])
-        map_name = pick(info, ["map", "mapName", "map_name"])
-        url = pick(info, ["url", "link", "eventUrl", "event_url"])
-        desc = pick(info, ["description", "details", "content", "summary"])
-        if isinstance(desc, str) and len(desc) > 300:
-            desc = desc[:300].rstrip() + "..."
-        lines = [f"活动信息\n{'=' * 10}", f"名称: {name}"]
-        if start:
-            lines.append(f"开始: {_format_timestamp_to_readable(str(start))}")
-        if end:
-            lines.append(f"结束: {_format_timestamp_to_readable(str(end))}")
-        if server:
-            lines.append(f"服务器: {server}")
-        if game:
-            lines.append(f"游戏: {game}")
-        if map_name:
-            lines.append(f"地图: {map_name}")
-        if url:
-            lines.append(f"链接: {url}")
-        if desc:
-            lines.append(f"简介: {desc}")
-        yield event.plain_result("\n".join(lines))
-
     async def tmpversion(self, event: AstrMessageEvent):
         """[命令: 插件版本] 实时查询 TMP 联机插件版本信息。"""
         if not self.session:
@@ -4337,7 +4141,7 @@ class TmpBotPlugin(Star):
         if not uid:
             yield event.plain_result("用法: 信息 [UID]")
             return
-        resp = await self._evm_open_request("GET", f"/open-api/members/{uid}")
+        resp = await self._evm_open_request("GET", "/members/get", params={"uid": uid})
         if resp.get("error"):
             yield event.plain_result(resp.get("msg") or "查询失败")
             return
@@ -4392,7 +4196,7 @@ class TmpBotPlugin(Star):
             page = int(tokens[1])
         if len(tokens) >= 3 and tokens[2].isdigit():
             size = int(tokens[2])
-        resp = await self._evm_open_request("GET", "/open-api/members", params={"page": page, "pageSize": size})
+        resp = await self._evm_open_request("GET", "/members/list", params={"page": page, "pageSize": size})
         if resp.get("error"):
             yield event.plain_result(resp.get("msg") or "查询失败")
             return
@@ -4417,7 +4221,7 @@ class TmpBotPlugin(Star):
         if not isinstance(payload, dict):
             yield event.plain_result("成员更新仅支持对象 JSON")
             return
-        resp = await self._evm_open_request("PUT", f"/open-api/members/{uid}", payload=payload)
+        resp = await self._evm_open_request("PUT", "/members/update", payload={"uid": uid, **payload})
         if resp.get("error"):
             yield event.plain_result(resp.get("msg") or "更新失败")
             return
@@ -4439,7 +4243,7 @@ class TmpBotPlugin(Star):
         if len(password) < 6 or len(password) > 16:
             yield event.plain_result("密码长度需为 6-16 位")
             return
-        resp = await self._evm_open_request("POST", f"/open-api/members/{uid}/password", payload={"password": password})
+        resp = await self._evm_open_request("POST", "/members//password", params={"uid": uid}, payload={"password": password})
         if resp.get("error"):
             yield event.plain_result(resp.get("msg") or "修改失败")
             return
@@ -4463,13 +4267,11 @@ class TmpBotPlugin(Star):
 9. 解绑
 10. 服务器
 11. 插件版本
-12. 活动列表 [数量]
-13. 活动信息 [活动ID]
-14. 菜单
-15. 信息 [UID]
-16. 成员列表 [页码] [每页数量]
-17. 成员更新 [UID] {json}
-18. 修改密码 [UID] [新密码]（仅私信）
+12. 菜单
+13. 信息 [UID]
+14. 成员列表 [页码] [每页数量]
+15. 成员更新 [UID] {json}
+16. 修改密码 [UID] [新密码]（仅私信）
 使用提示: 绑定后可直接发送 查询/定位/足迹 [服务器简称]
 """
         yield event.plain_result(help_text)
