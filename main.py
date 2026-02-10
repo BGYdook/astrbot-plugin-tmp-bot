@@ -2175,6 +2175,10 @@ class TmpBotPlugin(Star):
             async for r in self.tmphelp(event):
                 yield r
             return
+        if re.match(r'^信息\s+(\S+)$', msg):
+            async for r in self.evm_member_info(event):
+                yield r
+            return
         if re.match(r'^成员列表(\s+\d+)?(\s+\d+)?\s*$', msg):
             async for r in self.evm_member_list(event):
                 yield r
@@ -4181,13 +4185,40 @@ class TmpBotPlugin(Star):
         if not isinstance(data, dict):
             yield event.plain_result("数据格式错误")
             return
-            
-        # 提取所需字段
-        uid = data.get("uid") or data.get("id") or "未知"
-        tmp_id = data.get("tmpId") or data.get("steamId") or data.get("steam_id") or "未知"
-        team_id = data.get("teamId") or data.get("team_id") or data.get("vtcId") or data.get("vtc_id") or "未知"
-        player_name = data.get("playerName") or data.get("player_name") or data.get("name") or data.get("username") or "未知"
-        team_role = data.get("teamRole") or data.get("team_role") or data.get("role") or "未知"
+        
+        # 调试：打印原始数据结构
+        import json
+        debug_data = json.dumps(data, ensure_ascii=False, indent=2)
+        logger.info(f"API返回数据: {debug_data}")
+        
+        # 提取所需字段 - 扩展字段名支持
+        uid = data.get("uid") or data.get("id") or data.get("userId") or data.get("user_id") or "未知"
+        tmp_id = data.get("tmpId") or data.get("tmpID") or data.get("steamId") or data.get("steam_id") or data.get("steamID") or "未知"
+        team_id = data.get("teamId") or data.get("teamID") or data.get("team_id") or data.get("vtcId") or data.get("vtc_id") or data.get("vtcID") or data.get("guildId") or data.get("guild_id") or "未知"
+        
+        # 玩家名称 - 尝试更多可能的字段名，包括嵌套对象
+        player_name = (data.get("playerName") or data.get("player_name") or data.get("name") or 
+                      data.get("username") or data.get("userName") or data.get("nick") or 
+                      data.get("nickname") or data.get("displayName") or data.get("display_name") or 
+                      data.get("nickName") or "未知")
+        
+        # 检查是否有user或player子对象
+        user_data = data.get("user") or data.get("player") or {}
+        if isinstance(user_data, dict) and player_name == "未知":
+            player_name = (user_data.get("name") or user_data.get("username") or 
+                          user_data.get("nick") or user_data.get("nickname") or 
+                          user_data.get("displayName") or user_data.get("display_name") or "未知")
+        
+        # 车队角色 - 尝试更多可能的字段名，包括嵌套对象
+        team_role = (data.get("teamRole") or data.get("team_role") or data.get("role") or 
+                    data.get("position") or data.get("rank") or data.get("title") or 
+                    data.get("job") or data.get("duty") or "未知")
+        
+        # 检查是否有team或role子对象
+        role_data = data.get("role") or data.get("position") or {}
+        if isinstance(role_data, dict) and team_role == "未知":
+            team_role = (role_data.get("name") or role_data.get("title") or 
+                        role_data.get("position") or "未知")
         points = data.get("points") or data.get("score") or data.get("积分") or 0
         event_count = data.get("eventCount") or data.get("event_count") or data.get("activityCount") or 0
         
