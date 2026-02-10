@@ -4156,6 +4156,11 @@ class TmpBotPlugin(Star):
             yield event.plain_result("查询版本信息失败，请稍后重试。")
 
     async def evm_member_info(self, event: AstrMessageEvent):
+        # 添加群聊检测
+        if self._is_group_message(event):
+            yield event.plain_result("为保证用户隐私安全，信息查询仅支持私信，请私信机器人操作。")
+            return
+            
         message_str = event.message_str.strip()
         m = re.search(r"信息\s*(\S+)", message_str)
         query = m.group(1).strip() if m else ""
