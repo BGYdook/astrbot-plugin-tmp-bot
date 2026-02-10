@@ -4398,7 +4398,7 @@ class TmpBotPlugin(Star):
         if len(password) < 6 or len(password) > 16:
             yield event.plain_result("密码长度需为 6-16 位")
             return
-        resp = await self._evm_open_request("POST", "/members//password", params={"uid": uid}, payload={"password": password})
+        resp = await self._evm_open_request("POST", "/members/password", params={"uid": uid}, payload={"password": password})
         if resp.get("error"):
             yield event.plain_result(resp.get("msg") or "修改失败")
             return
