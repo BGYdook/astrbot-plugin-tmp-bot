@@ -2188,7 +2188,7 @@ class TmpBotPlugin(Star):
                 yield r
             return
         if re.match(r'^修改密码\s+\S+\s+\S+\s*$', msg):
-            yield event.plain_result("为保证用户隐私安全，目前修改密码仅支持私信，请私信机器人操作。")
+            yield event.plain_result("为保证用户隐私安全，目前修改密码仅支持私信，请私信机器人操作")
             return
 
 
@@ -4388,9 +4388,6 @@ class TmpBotPlugin(Star):
         yield event.plain_result(msg or "更新成功")
 
     async def evm_member_password(self, event: AstrMessageEvent):
-        if self._is_group_message(event):
-            yield event.plain_result("修改密码仅支持私信，请私信机器人操作。")
-            return
         message_str = event.message_str.strip()
         m = re.match(r"修改密码\s+(\S+)\s+(\S+)$", message_str)
         if not m:
