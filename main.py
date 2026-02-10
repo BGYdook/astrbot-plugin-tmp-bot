@@ -2188,7 +2188,12 @@ class TmpBotPlugin(Star):
                 yield r
             return
         if re.match(r'^修改密码\s+\S+\s+\S+\s*$', msg):
-            yield event.plain_result("为保证用户隐私安全，目前修改密码仅支持私信，请私信机器人操作")
+            if self._is_group_message(event):
+                yield event.plain_result("为保证用户隐私安全，目前修改密码仅支持私信，请私信机器人操作")
+            else:
+                # 私聊中应该调用正式的修改密码函数
+                async for r in self.evm_member_password(event):
+                    yield r
             return
 
 
@@ -2363,9 +2368,22 @@ class TmpBotPlugin(Star):
 
     @filter.command("修改密码")
     async def cmd_evm_member_password(self, event: AstrMessageEvent, uid: str | None = None, password: str | None = None):
-        if self._is_group_message(event):
-            yield event.plain_result("为保证用户隐私安全，目前修改密码仅支持私信，请私信机器人操作。")
+        # 调试日志
+        logger.info(f"[修改密码] 开始处理 - 消息类型检测")
+        logger.info(f"[修改密码] event属性: {dir(event)}")
+        logger.info(f"[修改密码] group_id: {getattr(event, 'group_id', None)}")
+        logger.info(f"[修改密码] message_type: {getattr(event, 'message_type', None)}")
+        logger.info(f"[修改密码] type: {getattr(event, 'type', None)}")
+        
+        is_group = self._is_group_message(event)
+        logger.info(f"[修改密码] 群聊检测结果: {is_group}")
+        
+        if is_group:
+            logger.info(f"[修改密码] 检测到群聊，拒绝执行")
+            yield event.plain_result("修改密码仅支持私信，请私信机器人操作。")
             return
+            
+        logger.info(f"[修改密码] 私聊检测通过，继续处理")
         orig = getattr(event, "message_str", "") or ""
         try:
             if uid and password:
