@@ -4176,45 +4176,37 @@ class TmpBotPlugin(Star):
             return
         payload = resp.get("data")
         data = payload.get("data") if isinstance(payload, dict) else payload
-        team_id_cfg = self._cfg_str("evm_team_id", "").strip()
-        member_team_id = None
-        member_team_name = None
-        if isinstance(data, dict):
-            for k in ("teamId", "team_id", "vtcId", "vtc_id", "guildId", "guild_id", "companyId", "company_id"):
-                if k in data and data.get(k) not in (None, ""):
-                    member_team_id = str(data.get(k))
-                    break
-            for k in ("teamName", "team_name", "vtcName", "vtc_name", "guildName", "guild_name", "companyName", "company_name"):
-                if k in data and data.get(k) not in (None, ""):
-                    member_team_name = str(data.get(k))
-                    break
-            for k in ("team", "vtc", "guild", "company", "group"):
-                v = data.get(k)
-                if isinstance(v, dict):
-                    if member_team_id is None:
-                        for kk in ("id", "teamId", "vtcId", "guildId", "companyId"):
-                            if kk in v and v.get(kk) not in (None, ""):
-                                member_team_id = str(v.get(kk))
-                                break
-                    if member_team_name is None:
-                        for kk in ("name", "teamName", "vtcName", "guildName", "companyName"):
-                            if kk in v and v.get(kk) not in (None, ""):
-                                member_team_name = str(v.get(kk))
-                                break
-        is_member = None
-        if team_id_cfg:
-            is_member = bool(member_team_id and team_id_cfg == member_team_id)
-        title = "成员信息"
-        body = self._evm_format_data(data)
-        if is_member is not None:
-            flag = "是" if is_member else "否"
-            extra = f"\n是否本队: {flag}"
-            if member_team_id:
-                extra += f"\n车队ID: {member_team_id}"
-            if member_team_name:
-                extra += f"\n车队名称: {member_team_name}"
-            body = f"{body}{extra}"
-        yield event.plain_result(f"{title}\n{body}")
+        
+        # 按照指定格式格式化成员信息
+        if not isinstance(data, dict):
+            yield event.plain_result("数据格式错误")
+            return
+            
+        # 提取所需字段
+        uid = data.get("uid") or data.get("id") or "未知"
+        tmp_id = data.get("tmpId") or data.get("steamId") or data.get("steam_id") or "未知"
+        team_id = data.get("teamId") or data.get("team_id") or data.get("vtcId") or data.get("vtc_id") or "未知"
+        player_name = data.get("playerName") or data.get("player_name") or data.get("name") or data.get("username") or "未知"
+        team_role = data.get("teamRole") or data.get("team_role") or data.get("role") or "未知"
+        points = data.get("points") or data.get("score") or data.get("积分") or 0
+        event_count = data.get("eventCount") or data.get("event_count") or data.get("activityCount") or 0
+        
+        # 格式化输出
+        result_lines = [
+            f"🪪UID: {uid}",
+            f"🆔TMP编号: {tmp_id}",
+            f"🚚车队编号: {team_id}",
+            f"😀玩家名称: {player_name}",
+            f"👔车队角色: {team_role}"
+        ]
+        
+        # 当当前积分不为0时才显示
+        if points and points != 0:
+            result_lines.append(f"💰当前积分: {points}")
+        
+        result_lines.append(f"🕹️参与活动: {event_count}次")
+        
+        yield event.plain_result("\n".join(result_lines))
 
     async def evm_member_list(self, event: AstrMessageEvent):
         message_str = event.message_str.strip()
