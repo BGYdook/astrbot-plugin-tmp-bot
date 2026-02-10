@@ -2188,9 +2188,9 @@ class TmpBotPlugin(Star):
                 yield r
             return
         if re.match(r'^修改密码\s+\S+\s+\S+\s*$', msg):
-            async for r in self.evm_member_password(event):
-                yield r
+            yield event.plain_result("为保证用户隐私安全，目前修改密码仅支持私信，请私信机器人操作。")
             return
+
 
     
     
