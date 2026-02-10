@@ -2317,21 +2317,7 @@ class TmpBotPlugin(Star):
         """显示本插件支持的指令与用法。"""
         async for r in self.tmphelp(event):
             yield r
-
-    @filter.command("信息")
-    async def cmd_evm_member_info(self, event: AstrMessageEvent, uid: str | None = None):
-        orig = getattr(event, "message_str", "") or ""
-        try:
-            if uid:
-                event.message_str = f"信息 {uid}"
-            async for r in self.evm_member_info(event):
-                yield r
-        finally:
-            try:
-                event.message_str = orig
-            except Exception:
-                pass
-
+            
     @filter.command("成员列表")
     async def cmd_evm_member_list(self, event: AstrMessageEvent, page: str | None = None, size: str | None = None):
         orig = getattr(event, "message_str", "") or ""
