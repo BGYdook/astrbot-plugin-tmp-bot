@@ -1613,16 +1613,57 @@ class TmpBotPlugin(Star):
             return None
 
     async def _get_vtc_member_role(self, tmp_id: str, vtc_info: Optional[Dict] = None) -> Optional[str]:
-        """使用 da.vtcm.link 的 vtc/memberAll/role 接口查询玩家在车队内的角色。
+        """查询玩家在车队内的角色。
         优先策略：
-        1) 若传入 vtc_info 且包含 vtcId，则直接用 vtcId 查询成员列表并匹配 tmpId。
-        2) 若未传入或未包含 vtcId，则尝试从 TruckersMP player 接口获取 vtc.id。
-        3) 若仍无 vtcId，尝试直接用 memberAll/role?tmpId=tmp_id 回退查询（部分接口支持）。
-        4) 若有 vtc 名称但无 vtcId，先通过 /vtc/search?name= 搜索取得 vtcId，再查询成员列表。
-        返回值：匹配到的角色字符串或 None。
+        1) 尝试使用官方 TruckersMP VTC 角色查询 API: https://api.truckersmp.com/v2/vtc/{vtc_id}/role/{role_id}
+        2) 若官方API失败，回退到 da.vtcm.link 的 vtc/memberAll/role 接口
+        3) 若传入 vtc_info 且包含 vtcId，则直接用 vtcId 查询成员列表并匹配 tmpId
+        4) 若未传入或未包含 vtcId，则尝试从 TruckersMP player 接口获取 vtc.id
+        5) 若仍无 vtcId，尝试直接用 memberAll/role?tmpId=tmp_id 回退查询（部分接口支持）
+        6) 若有 vtc 名称但无 vtcId，先通过 /vtc/search?name= 搜索取得 vtcId，再查询成员列表
+        返回值：匹配到的角色字符串或 None
         """
         if not self.session:
             return None
+
+        # 0) 优先尝试官方 TruckersMP VTC 角色查询 API
+        # 需要先获取 vtc_id 和 role_id
+        try:
+            # 获取玩家信息以获取 VTC ID
+            player_info = await self._get_player_info(tmp_id)
+            vtc = player_info.get('vtc') if isinstance(player_info.get('vtc'), dict) else {}
+            vtc_id = vtc.get('id')
+            
+            if vtc_id:
+                # 获取 VTC 信息以获取角色 ID
+                vtc_info_url = f"https://api.truckersmp.com/v2/vtc/{vtc_id}"
+                logger.info(f"官方VTC查询: 获取VTC信息 {vtc_info_url}")
+                async with self.session.get(vtc_info_url, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
+                    if resp.status == 200:
+                        vtc_data = await resp.json()
+                        if vtc_data.get('error') is False:
+                            vtc_response = vtc_data.get('response', {})
+                            # 查找玩家在当前VTC中的角色
+                            members = vtc_response.get('members', [])
+                            for member in members:
+                                if str(member.get('user_id', '')) == str(tmp_id):
+                                    role_id = member.get('role_id')
+                                    if role_id:
+                                        # 获取角色详细信息
+                                        role_url = f"https://api.truckersmp.com/v2/vtc/{vtc_id}/role/{role_id}"
+                                        logger.info(f"官方VTC角色查询: {role_url}")
+                                        async with self.session.get(role_url, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as role_resp:
+                                            if role_resp.status == 200:
+                                                role_data = await role_resp.json()
+                                                if role_data.get('error') is False:
+                                                    role_info = role_data.get('response', {})
+                                                    role_name = role_info.get('name')
+                                                    if role_name:
+                                                        logger.info(f"官方VTC角色查询成功: {role_name}")
+                                                        return role_name
+                                    break
+        except Exception as e:
+            logger.info(f"官方VTC角色查询异常: {e}")
 
         # Helper: 解析成员列表并匹配 tmp_id，返回 role 或 None
         def _find_role_in_members(members) -> Optional[str]:
@@ -2082,8 +2123,8 @@ class TmpBotPlugin(Star):
             except Exception:
                 target_user_id = None
 
-        match = re.search(r'查询\s*(\d+)', message_str) 
-        input_id = match.group(1) if match else None
+        match = re.search(r'(查询|查)\s*(\d+)', message_str) 
+        input_id = match.group(2) if match else None
         
         tmp_id = None
         
@@ -2177,21 +2218,24 @@ class TmpBotPlugin(Star):
         body += f"💼所属分组: {perms_str}\n"
 
         # 车队信息：优先使用 player_info.vtc（若为字典），若缺少 role 则调用 VTCM API 获取
+        # 如检测到没有车队，则两个都不显示
         vtc = player_info.get('vtc') if isinstance(player_info.get('vtc'), dict) else {}
         vtc_name = vtc.get('name')
         vtc_role = vtc.get('role') or vtc.get('position') or stats_info.get('vtcRole')
+        
+        # 只有当有车队时才显示车队信息
         if vtc_name:
             body += f"🚚所属车队: {vtc_name}\n"
-        if not vtc_role and vtc_name:
-            try:
-                vtc_role_remote = await self._get_vtc_member_role(tmp_id, vtc)
-                if vtc_role_remote:
-                    vtc_role = vtc_role_remote
-                    logger.info(f"查询详情: 从 VTC API 获取到车队角色: {vtc_role}")
-            except Exception as e:
-                logger.info(f"查询详情: 获取 VTC 车队角色时发生异常: {e}", exc_info=False)
-        if vtc_role:
-            body += f"🚚车队职位: {vtc_role}\n"
+            if not vtc_role:
+                try:
+                    vtc_role_remote = await self._get_vtc_member_role(tmp_id, vtc)
+                    if vtc_role_remote:
+                        vtc_role = vtc_role_remote
+                        logger.info(f"查询详情: 从 VTC API 获取到车队角色: {vtc_role}")
+                except Exception as e:
+                    logger.info(f"查询详情: 获取 VTC 车队角色时发生异常: {e}", exc_info=False)
+            if vtc_role:
+                body += f"🚚车队职位: {vtc_role}\n"
         
         # --- 【核心逻辑】赞助信息 (基于 V2 player 接口字段) ---
         # 规则：
