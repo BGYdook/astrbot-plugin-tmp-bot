@@ -1970,10 +1970,26 @@ class TmpBotPlugin(Star):
         """查询玩家详细信息，支持绑定ID与@他人。"""
         orig = getattr(event, "message_str", "") or ""
         try:
+            # 调试信息
+            logger.info(f"[cmd_tmp_query] 原始 message_str: {orig}")
+            logger.info(f"[cmd_tmp_query] 传入 tmp_id: {tmp_id}")
+            
+            # 如果AstrBot框架传入了tmp_id，直接使用
+            # 如果没有tmp_id但orig不为空，尝试从orig提取
+            if not tmp_id and orig:
+                # 尝试匹配 "123456" 或 "123456" 格式
+                m = re.match(r'^(\d+)\s*$', orig.strip())
+                if m:
+                    tmp_id = m.group(1)
+                    logger.info(f"[cmd_tmp_query] 从 orig 提取到 tmp_id: {tmp_id}")
+            
             if tmp_id:
                 event.message_str = f"查询 {tmp_id}"
+                logger.info(f"[cmd_tmp_query] 设置 message_str 为: 查询 {tmp_id}")
             else:
                 event.message_str = "查询"
+                logger.info(f"[cmd_tmp_query] 设置 message_str 为: 查询")
+                
             async for r in self.tmpquery(event):
                 yield r
         finally:
@@ -1986,14 +2002,32 @@ class TmpBotPlugin(Star):
     async def cmd_tmp_query_alias(self, event: AstrMessageEvent, tmp_id: str | None = None):
         orig = getattr(event, "message_str", "") or ""
         try:
+            # 调试信息
+            logger.info(f"[cmd_tmp_query_alias] 原始 message_str: {orig}")
+            logger.info(f"[cmd_tmp_query_alias] 传入 tmp_id: {tmp_id}")
+            
+            # 如果AstrBot框架已经解析出tmp_id，直接使用
+            # 如果没有tmp_id但orig不为空，尝试从orig提取
             if not tmp_id and orig:
-                m = re.match(r'^查\s*(\d+)\s*$', orig.strip())
+                # 尝试匹配 "123456" 或 "123456" 格式（AstrBot可能只传了数字部分）
+                m = re.match(r'^(\d+)\s*$', orig.strip())
                 if m:
                     tmp_id = m.group(1)
+                    logger.info(f"[cmd_tmp_query_alias] 从 orig 提取到 tmp_id: {tmp_id}")
+                else:
+                    # 尝试匹配 "查123456" 或 "查 123456" 格式
+                    m = re.match(r'^查\s*(\d+)\s*$', orig.strip())
+                    if m:
+                        tmp_id = m.group(1)
+                        logger.info(f"[cmd_tmp_query_alias] 从 orig 提取到 tmp_id: {tmp_id}")
+            
             if tmp_id:
                 event.message_str = f"查询 {tmp_id}"
+                logger.info(f"[cmd_tmp_query_alias] 设置 message_str 为: 查询 {tmp_id}")
             else:
                 event.message_str = "查询"
+                logger.info(f"[cmd_tmp_query_alias] 设置 message_str 为: 查询")
+            
             async for r in self.tmpquery(event):
                 yield r
         finally:
@@ -2125,6 +2159,11 @@ class TmpBotPlugin(Star):
 
         match = re.search(r'(查询|查)\s*(\d+)', message_str) 
         input_id = match.group(2) if match else None
+        
+        # 调试信息
+        logger.info(f"[tmpquery] message_str: {message_str}")
+        logger.info(f"[tmpquery] match: {match}")
+        logger.info(f"[tmpquery] input_id: {input_id}")
         
         tmp_id = None
         
