@@ -909,30 +909,40 @@ class TmpBotPlugin(Star):
             raise NetworkException("插件未初始化，HTTP会话不可用")
         
         try:
-            # TruckyApp V2 Steam ID 转换接口
-            url = f"https://api.truckyapp.com/v2/truckersmp/player/get_by_steamid/{steam_id}"
+            # TruckersMP 官方 API - 直接通过 SteamID 查询玩家信息
+            url = f"https://api.truckersmp.com/v2/player/{steam_id}"
             
             async with self.session.get(url, timeout=10) as response:
                 if response.status == 200:
                     data = await response.json()
-                    tmp_id = data.get('response', {}).get('truckersmp_id')
                     
-                    if tmp_id:
-                        return str(tmp_id)
+                    if data.get('error') is False and data.get('response'):
+                        player_data = data.get('response', {})
+                        tmp_id = player_data.get('id')
+                        
+                        if tmp_id:
+                            logger.info(f"成功通过 SteamID {steam_id} 获取到 TMP ID: {tmp_id}")
+                            return str(tmp_id)
+                        else:
+                            raise SteamIdNotFoundException(f"Steam ID {steam_id} 未在 TruckersMP 中注册。")
                     else:
-                        raise SteamIdNotFoundException(f"Steam ID {steam_id} 未绑定或Trucky API未找到对应的TMP账号。")
+                        error_msg = data.get('descriptor', '未知错误')
+                        if 'not found' in error_msg.lower() or 'unable to find' in error_msg.lower():
+                            raise SteamIdNotFoundException(f"Steam ID {steam_id} 未在 TruckersMP 中注册。")
+                        else:
+                            raise ApiResponseException(f"API 返回错误: {error_msg}")
                 elif response.status == 404:
-                    raise SteamIdNotFoundException(f"Steam ID {steam_id} 未绑定或Trucky API未找到对应的TMP账号。")
+                    raise SteamIdNotFoundException(f"Steam ID {steam_id} 未在 TruckersMP 中注册。")
                 else:
-                    raise ApiResponseException(f"Steam ID转换API返回错误状态码: {response.status}")
+                    raise ApiResponseException(f"Steam ID查询API返回错误状态码: {response.status}")
         except aiohttp.ClientError:
-            raise NetworkException("Steam ID转换服务网络请求失败")
+            raise NetworkException("Steam ID查询服务网络请求失败")
         except asyncio.TimeoutError:
-            raise NetworkException("请求 Steam ID 转换服务超时")
+            raise NetworkException("请求 Steam ID 查询服务超时")
         except SteamIdNotFoundException:
             raise 
         except Exception as e:
-            logger.error(f"查询 TMP ID 失败: {e}")
+            logger.error(f"通过 SteamID 查询 TMP ID 失败: {e}")
             raise NetworkException("查询失败")
             
     def _get_steam_id_from_player_info(self, player_info: Dict) -> Optional[str]:
@@ -2089,13 +2099,17 @@ class TmpBotPlugin(Star):
         
         if input_id:
             if len(input_id) == 17 and input_id.startswith('7'):
+                # SteamID 格式检测
                 try:
                     tmp_id = await self._get_tmp_id_from_steam_id(input_id)
                 except SteamIdNotFoundException as e:
+                    # SteamID 未注册
                     yield event.plain_result(str(e))
                     return
                 except NetworkException as e:
-                    yield event.plain_result(f"查询失败: {str(e)}")
+                    # 网络错误，建议重试
+                    yield event.plain_result(f"SteamID查询失败: {str(e)}\n请稍后重试或使用TMP ID查询")
+                    return
                     return
             else:
                 tmp_id = input_id
@@ -2573,10 +2587,13 @@ class TmpBotPlugin(Star):
                 try:
                     tmp_id = await self._get_tmp_id_from_steam_id(input_id)
                 except SteamIdNotFoundException as e:
+                    # SteamID 未注册
                     yield event.plain_result(str(e))
                     return
                 except NetworkException as e:
-                    yield event.plain_result(f"查询失败: {str(e)}")
+                    # 网络错误，建议重试
+                    yield event.plain_result(f"SteamID查询失败: {str(e)}\n请稍后重试或使用TMP ID查询")
+                    return
                     return
             else:
                 tmp_id = input_id
@@ -2943,13 +2960,18 @@ class TmpBotPlugin(Star):
 
         if is_steam_id:
             try:
-                # 使用 TruckyApp 转换接口
+                # 使用 TruckersMP 官方 API 直接查询
                 tmp_id = await self._get_tmp_id_from_steam_id(input_id)
-            except SteamIdNotFoundException:
-                yield event.plain_result(f"Steam ID {input_id} 未在 TruckersMP 中注册，无法绑定。")
+            except SteamIdNotFoundException as e:
+                # SteamID 未注册
+                yield event.plain_result(str(e))
+                return
+            except NetworkException as e:
+                # 网络错误，建议重试
+                yield event.plain_result(f"SteamID绑定失败: {str(e)}\n请稍后重试或使用TMP ID绑定")
                 return
             except Exception:
-                yield event.plain_result("Steam ID 转换服务请求失败，请稍后再试。")
+                yield event.plain_result("Steam ID 查询服务请求失败，请直接使用TMP ID绑定。\n\n格式：绑定 [TMP ID]")
                 return
 
         try:
@@ -3037,10 +3059,13 @@ class TmpBotPlugin(Star):
                 try:
                     tmp_id = await self._get_tmp_id_from_steam_id(input_id)
                 except SteamIdNotFoundException as e:
+                    # SteamID 未注册
                     yield event.plain_result(str(e))
                     return
                 except NetworkException as e:
-                    yield event.plain_result(f"查询失败: {str(e)}")
+                    # 网络错误，建议重试
+                    yield event.plain_result(f"SteamID查询失败: {str(e)}\n请稍后重试或使用TMP ID查询")
+                    return
                     return
             else:
                 tmp_id = input_id
