@@ -1,5 +1,5 @@
  # astrbot-plugin-tmp-bot
-[![npm](https://img.shields.io/badge/npm-v1.7.3-blue)](https://github.com/BGYdook/astrbot-plugin-tmp-bot)
+[![npm](https://img.shields.io/badge/npm-v1.7.5-blue)](https://github.com/BGYdook/astrbot-plugin-tmp-bot)
 
 ![:astrbot_plugin_tmp_bot](https://count.getloli.com/@:astrbot_plugin_tmp-bot?theme=minecraft)
 
@@ -32,6 +32,13 @@ https://truckersmp.com/developers/api
 ## 非常感谢[晚安](https://github.com/nulijiazaizhong)提供的帮助
 
 ## 历史更新
+
+## 版本v1.7.5
+- 修改车队角色api为truckersmp官方api
+- 修改如请求到无车队则车队角色也不显示
+- 修改只能通过无前缀的方法输出回复
+- 修复不能使用steamid查询的问题
+- 修复“查”命令无法通过无前缀/不要空格查询用户信息
 
 ## 版本v1.7.4
 - 调整了服务器命令的输出形式，对齐koishi版本
