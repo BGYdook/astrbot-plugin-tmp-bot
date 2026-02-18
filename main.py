@@ -3,7 +3,7 @@
 
 """
 astrbot-plugin-tmp-bot
-欧卡2TMP查询插件 (版本 1.7.4)
+欧卡2TMP查询插件 (版本 1.7.5)
 """
 
 import re
