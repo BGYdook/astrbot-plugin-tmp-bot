@@ -3795,6 +3795,8 @@ class TmpBotPlugin(Star):
                     ets2_ver = data.get("supported_game_version") or data.get("supported_ets2_version") or "未知"
                     ats_ver = data.get("supported_ats_game_version") or data.get("supported_ats_version") or "未知"
                     protocol = data.get("protocol") or "未知"
+                    
+                    message = "TMP 插件版本信息\n" + "=" * 18 + "\n"
                     message += f"TMP 插件版本: {plugin_ver}\n"
                     message += f"欧卡支持版本: {ets2_ver}\n"
                     message += f"美卡支持版本: {ats_ver}"
