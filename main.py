@@ -1968,157 +1968,82 @@ class TmpBotPlugin(Star):
     @filter.command("查询")
     async def cmd_tmp_query(self, event: AstrMessageEvent, tmp_id: str | None = None):
         """查询玩家详细信息，支持绑定ID与@他人。"""
-        orig = getattr(event, "message_str", "") or ""
-        try:
-            # 调试信息
-            logger.info(f"[cmd_tmp_query] 原始 message_str: {orig}")
-            logger.info(f"[cmd_tmp_query] 传入 tmp_id: {tmp_id}")
-            
-            # 如果AstrBot框架传入了tmp_id，直接使用
-            # 如果没有tmp_id但orig不为空，尝试从orig提取
-            if not tmp_id and orig:
-                # 尝试匹配 "123456" 或 "123456" 格式
-                m = re.match(r'^(\d+)\s*$', orig.strip())
-                if m:
-                    tmp_id = m.group(1)
-                    logger.info(f"[cmd_tmp_query] 从 orig 提取到 tmp_id: {tmp_id}")
-            
-            if tmp_id:
-                event.message_str = f"查询 {tmp_id}"
-                logger.info(f"[cmd_tmp_query] 设置 message_str 为: 查询 {tmp_id}")
-            else:
-                event.message_str = "查询"
-                logger.info(f"[cmd_tmp_query] 设置 message_str 为: 查询")
-                
-            async for r in self.tmpquery(event):
-                yield r
-        finally:
-            try:
-                event.message_str = orig
-            except Exception:
-                pass
+        # 此函数仅用于在 AstrBot 行为列表中显示功能
+        # 实际处理通过事件监听器 _on_any_message_dispatch 完成
+        # 不处理任何实际的命令逻辑
+        return
 
     @filter.command("查")
     async def cmd_tmp_query_alias(self, event: AstrMessageEvent, tmp_id: str | None = None):
-        orig = getattr(event, "message_str", "") or ""
-        try:
-            # 调试信息
-            logger.info(f"[cmd_tmp_query_alias] 原始 message_str: {orig}")
-            logger.info(f"[cmd_tmp_query_alias] 传入 tmp_id: {tmp_id}")
-            
-            # 如果AstrBot框架已经解析出tmp_id，直接使用
-            # 如果没有tmp_id但orig不为空，尝试从orig提取
-            if not tmp_id and orig:
-                # 尝试匹配 "123456" 或 "123456" 格式（AstrBot可能只传了数字部分）
-                m = re.match(r'^(\d+)\s*$', orig.strip())
-                if m:
-                    tmp_id = m.group(1)
-                    logger.info(f"[cmd_tmp_query_alias] 从 orig 提取到 tmp_id: {tmp_id}")
-                else:
-                    # 尝试匹配 "查123456" 或 "查 123456" 格式
-                    m = re.match(r'^查\s*(\d+)\s*$', orig.strip())
-                    if m:
-                        tmp_id = m.group(1)
-                        logger.info(f"[cmd_tmp_query_alias] 从 orig 提取到 tmp_id: {tmp_id}")
-            
-            if tmp_id:
-                event.message_str = f"查询 {tmp_id}"
-                logger.info(f"[cmd_tmp_query_alias] 设置 message_str 为: 查询 {tmp_id}")
-            else:
-                event.message_str = "查询"
-                logger.info(f"[cmd_tmp_query_alias] 设置 message_str 为: 查询")
-            
-            async for r in self.tmpquery(event):
-                yield r
-        finally:
-            try:
-                event.message_str = orig
-            except Exception:
-                pass
+        """查询玩家详细信息（简写版）。"""
+        # 此函数仅用于在 AstrBot 行为列表中显示功能
+        # 实际处理通过事件监听器 _on_any_message_dispatch 完成
+        # 不处理任何实际的命令逻辑
+        return
 
     @filter.command("定位")
     async def cmd_tmp_locate(self, event: AstrMessageEvent, tmp_id: str | None = None):
         """查询并渲染玩家当前位置（底图+自动翻译位置）。"""
-        orig = getattr(event, "message_str", "") or ""
-        try:
-            if tmp_id:
-                event.message_str = f"定位 {tmp_id}"
-            else:
-                event.message_str = "定位"
-            async for r in self.tmplocate(event):
-                yield r
-        finally:
-            try:
-                event.message_str = orig
-            except Exception:
-                pass
+        # 此函数仅用于在 AstrBot 行为列表中显示功能
+        # 实际处理通过事件监听器 _on_any_message_dispatch 完成
+        # 不处理任何实际的命令逻辑
+        return
 
     @filter.command("路况")
     async def cmd_tmp_traffic(self, event: AstrMessageEvent, server: str | None = None):
         """查询指定服务器热门路段的实时路况信息。"""
-        orig = getattr(event, "message_str", "") or ""
-        try:
-            if server:
-                event.message_str = f"路况 {server}"
-            else:
-                event.message_str = "路况"
-            async for r in self.tmptraffic(event):
-                yield r
-        finally:
-            try:
-                event.message_str = orig
-            except Exception:
-                pass
+        # 此函数仅用于在 AstrBot 行为列表中显示功能
+        # 实际处理通过事件监听器 _on_any_message_dispatch 完成
+        # 不处理任何实际的命令逻辑
+        return
 
     @filter.command("总里程排行")
     async def cmd_tmp_rank_total(self, event: AstrMessageEvent):
         """查看玩家总里程排行榜前若干名。"""
-        async for r in self.tmprank_total(event):
-            yield r
+        # 此函数仅用于在 AstrBot 行为列表中显示功能
+        # 实际处理通过事件监听器 _on_any_message_dispatch 完成
+        # 不处理任何实际的命令逻辑
+        return
 
     @filter.command("今日里程排行")
     async def cmd_tmp_rank_today(self, event: AstrMessageEvent):
         """查看今日里程排行榜前若干名。"""
-        async for r in self.tmprank_today(event):
-            yield r
+        # 此函数仅用于在 AstrBot 行为列表中显示功能
+        # 实际处理通过事件监听器 _on_any_message_dispatch 完成
+        # 不处理任何实际的命令逻辑
+        return
 
     @filter.command("足迹")
     async def cmd_tmp_today_footprint(self, event: AstrMessageEvent, server: str | None = None, tmp_id: str | None = None):
-        orig = getattr(event, "message_str", "") or ""
-        try:
-            if server and tmp_id:
-                event.message_str = f"足迹 {server} {tmp_id}"
-            elif server:
-                event.message_str = f"足迹 {server}"
-            elif tmp_id:
-                event.message_str = f"足迹 {tmp_id}"
-            else:
-                event.message_str = "足迹"
-            async for r in self.tmptoday_footprint(event):
-                yield r
-        finally:
-            try:
-                event.message_str = orig
-            except Exception:
-                pass
+        """查询玩家今日足迹热力图。"""
+        # 此函数仅用于在 AstrBot 行为列表中显示功能
+        # 实际处理通过事件监听器 _on_any_message_dispatch 完成
+        # 不处理任何实际的命令逻辑
+        return
 
     @filter.command("服务器")
     async def cmd_tmp_server(self, event: AstrMessageEvent):
         """查看欧卡/美卡官方服务器的实时状态列表。"""
-        async for r in self.tmpserver(event):
-            yield r
+        # 此函数仅用于在 AstrBot 行为列表中显示功能
+        # 实际处理通过事件监听器 _on_any_message_dispatch 完成
+        # 不处理任何实际的命令逻辑
+        return
 
     @filter.command("插件版本")
     async def cmd_tmp_plugin_version(self, event: AstrMessageEvent):
         """查询当前TMP插件版本信息。"""
-        async for r in self.tmpversion(event):
-            yield r
+        # 此函数仅用于在 AstrBot 行为列表中显示功能
+        # 实际处理通过事件监听器 _on_any_message_dispatch 完成
+        # 不处理任何实际的命令逻辑
+        return
 
     @filter.command("菜单")
     async def cmd_tmp_help(self, event: AstrMessageEvent):
         """显示本插件支持的指令与用法。"""
-        async for r in self.tmphelp(event):
-            yield r
+        # 此函数仅用于在 AstrBot 行为列表中显示功能
+        # 实际处理通过事件监听器 _on_any_message_dispatch 完成
+        # 不处理任何实际的命令逻辑
+        return
 
 
     # 具体功能实现
@@ -2159,11 +2084,6 @@ class TmpBotPlugin(Star):
 
         match = re.search(r'(查询|查)\s*(\d+)', message_str) 
         input_id = match.group(2) if match else None
-        
-        # 调试信息
-        logger.info(f"[tmpquery] message_str: {message_str}")
-        logger.info(f"[tmpquery] match: {match}")
-        logger.info(f"[tmpquery] input_id: {input_id}")
         
         tmp_id = None
         
@@ -3875,8 +3795,6 @@ class TmpBotPlugin(Star):
                     ets2_ver = data.get("supported_game_version") or data.get("supported_ets2_version") or "未知"
                     ats_ver = data.get("supported_ats_game_version") or data.get("supported_ats_version") or "未知"
                     protocol = data.get("protocol") or "未知"
-
-                    message = "TMP 插件版本信息\n" + "=" * 18 + "\n"
                     message += f"TMP 插件版本: {plugin_ver}\n"
                     message += f"欧卡支持版本: {ets2_ver}\n"
                     message += f"美卡支持版本: {ats_ver}"
