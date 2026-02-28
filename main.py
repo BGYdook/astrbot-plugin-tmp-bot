@@ -17,6 +17,8 @@ import socket
 import hashlib
 import random
 import time
+import aiofiles
+from pathlib import Path
 from typing import Optional, List, Dict, Tuple, Any
 from datetime import datetime, timedelta
 
@@ -221,6 +223,19 @@ class TmpBotPlugin(Star):
         self._fullmap_lock = asyncio.Lock()
         self._fullmap_fetch_lock = asyncio.Lock()
         self._load_location_maps()
+        
+        # 封号检测和视频发送功能
+        self.ban_monitor_enabled = True
+        self.video_cache_dir = Path("tmp_video_cache")
+        self.video_cache_index_file = self.video_cache_dir / "cache_index.json"
+        self.video_cache_index = {}
+        self.sent_videos_cache = {}  # 记录已发送的视频 {tmp_id: {video_url: timestamp}}
+        self.pending_video_confirmations = {}  # 待确认的视频发送
+        
+        # 确保视频缓存目录存在
+        self.video_cache_dir.mkdir(exist_ok=True)
+        self.load_video_cache_index()
+        
         try:
             bind_path = self.config.get('bind_file')
             if not bind_path:
@@ -259,6 +274,192 @@ class TmpBotPlugin(Star):
         if v is None:
             return default
         return str(v)
+
+    # --- 视频缓存管理功能 ---
+    def load_video_cache_index(self):
+        """加载视频缓存索引"""
+        if self.video_cache_index_file.exists():
+            try:
+                with open(self.video_cache_index_file, 'r', encoding='utf-8') as f:
+                    self.video_cache_index = json.load(f)
+                logger.info(f"加载了 {len(self.video_cache_index)} 个视频缓存记录")
+            except Exception as e:
+                logger.warning(f"加载视频缓存索引失败: {e}")
+                self.video_cache_index = {}
+        else:
+            self.video_cache_index = {}
+
+    def save_video_cache_index(self):
+        """保存视频缓存索引"""
+        try:
+            with open(self.video_cache_index_file, 'w', encoding='utf-8') as f:
+                json.dump(self.video_cache_index, f, ensure_ascii=False, indent=2)
+            logger.debug("视频缓存索引已保存")
+        except Exception as e:
+            logger.error(f"保存视频缓存索引失败: {e}")
+
+    def is_video_cached(self, video_url):
+        """检查视频是否已缓存"""
+        return video_url in self.video_cache_index
+
+    def get_cached_video_path(self, video_url):
+        """获取缓存视频文件路径"""
+        if not self.is_video_cached(video_url):
+            return None
+        
+        cache_info = self.video_cache_index[video_url]
+        cache_path = Path(cache_info['path'])
+        
+        # 检查文件是否存在且未过期（7天）
+        if cache_path.exists():
+            cached_time = datetime.fromisoformat(cache_info['cached_time'])
+            if datetime.now() - cached_time < timedelta(days=7):
+                return cache_path
+            else:
+                # 过期了，删除
+                self.remove_cached_video(video_url)
+        
+        return None
+
+    def remove_cached_video(self, video_url):
+        """从缓存中移除视频"""
+        if video_url in self.video_cache_index:
+            cache_info = self.video_cache_index[video_url]
+            cache_path = Path(cache_info['path'])
+            
+            # 删除文件
+            if cache_path.exists():
+                try:
+                    cache_path.unlink()
+                    logger.info(f"删除缓存视频文件: {cache_path}")
+                except Exception as e:
+                    logger.error(f"删除缓存视频文件失败: {e}")
+            
+            # 从索引中移除
+            del self.video_cache_index[video_url]
+            self.save_video_cache_index()
+
+    def cleanup_expired_videos(self):
+        """清理过期视频缓存"""
+        expired_urls = []
+        current_time = datetime.now()
+        
+        for video_url, cache_info in self.video_cache_index.items():
+            cached_time = datetime.fromisoformat(cache_info['cached_time'])
+            if current_time - cached_time >= timedelta(days=7):
+                expired_urls.append(video_url)
+        
+        for url in expired_urls:
+            self.remove_cached_video(url)
+        
+        if expired_urls:
+            logger.info(f"清理了 {len(expired_urls)} 个过期视频缓存")
+        
+        return len(expired_urls)
+
+    def extract_video_urls(self, text):
+        """从文本中提取视频链接"""
+        video_urls = []
+        
+        # 正则表达式匹配各种视频平台链接
+        patterns = [
+            r'https?://(?:www\.)?youtube\.com/watch\?v=[\w-]+',
+            r'https?://(?:www\.)?youtu\.be/[\w-]+',
+            r'https?://(?:www\.)?streamable\.com/[\w-]+',
+            r'https?://(?:www\.)?vimeo\.com/[\w-]+',
+            r'https?://(?:www\.)?dailymotion\.com/video/[\w-]+',
+            r'https?://[^\s]+\.(?:mp4|webm|avi|mov)[^\s]*'
+        ]
+        
+        for pattern in patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            video_urls.extend(matches)
+        
+        return list(set(video_urls))  # 去重
+
+    async def download_video(self, video_url, max_size_mb=None):
+        """下载视频文件"""
+        # 检查是否已缓存
+        cached_path = self.get_cached_video_path(video_url)
+        if cached_path:
+            logger.info(f"使用缓存的视频: {video_url}")
+            return cached_path
+        
+        try:
+            async with self.session.get(video_url, timeout=30) as response:
+                if response.status == 200:
+                    # 检查文件大小（如果有限制）
+                    if max_size_mb:
+                        content_length = response.headers.get('Content-Length')
+                        if content_length and int(content_length) > max_size_mb * 1024 * 1024:
+                            raise ValueError(f"视频文件太大: {int(content_length) / 1024 / 1024:.1f}MB")
+                    
+                    # 生成文件名
+                    url_hash = hashlib.md5(video_url.encode()).hexdigest()
+                    ext_match = re.search(r'\.(mp4|webm|avi|mov)(?:\?|$)', video_url.lower())
+                    extension = ext_match.group(1) if ext_match else 'mp4'
+                    filename = f"video_{url_hash}.{extension}"
+                    file_path = self.video_cache_dir / filename
+                    
+                    # 下载文件
+                    async with aiofiles.open(file_path, 'wb') as f:
+                        async for chunk in response.content.iter_chunked(8192):
+                            await f.write(chunk)
+                    
+                    # 添加到缓存索引
+                    cache_info = {
+                        'path': str(file_path),
+                        'cached_time': datetime.now().isoformat(),
+                        'url': video_url,
+                        'size': file_path.stat().st_size,
+                        'content_type': response.headers.get('Content-Type', 'unknown')
+                    }
+                    
+                    self.video_cache_index[video_url] = cache_info
+                    self.save_video_cache_index()
+                    
+                    logger.info(f"视频下载完成: {video_url} -> {file_path}")
+                    return file_path
+                else:
+                    raise ValueError(f"视频下载失败，状态码: {response.status}")
+                    
+        except Exception as e:
+            logger.error(f"视频下载失败: {video_url} - {e}")
+            return None
+
+    async def check_player_ban_status(self, tmp_id):
+        """检查玩家封号状态"""
+        try:
+            url = f"https://api.truckersmp.com/v2/player/{tmp_id}"
+            async with self.session.get(url, timeout=10) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    
+                    if data.get('error') is False and data.get('response'):
+                        player_data = data.get('response', {})
+                        
+                        return {
+                            'tmp_id': tmp_id,
+                            'name': player_data.get('name'),
+                            'banned': player_data.get('banned', False),
+                            'banned_until': player_data.get('bannedUntil'),
+                            'bans_count': player_data.get('bansCount', 0),
+                            'steam_id': player_data.get('steamID'),
+                            'raw_data': player_data
+                        }
+                    else:
+                        logger.warning(f"获取玩家 {tmp_id} 数据失败: {data.get('descriptor', '未知错误')}")
+                        return None
+                elif response.status == 404:
+                    logger.warning(f"TMP ID {tmp_id} 未找到")
+                    return None
+                else:
+                    logger.error(f"检查封号状态失败，状态码: {response.status}")
+                    return None
+                    
+        except Exception as e:
+            logger.error(f"检查玩家封号状态异常: {e}")
+            return None
 
     async def initialize(self):
         # 统一 User-Agent，并更新版本号
@@ -3859,3 +4060,225 @@ class TmpBotPlugin(Star):
             await self.session.close()
             self.session = None
         logger.info("TMP Bot 插件已卸载")
+
+    # --- 封号检测和视频发送功能 ---
+    
+    async def process_ban_detection(self, tmp_id, player_name, event_context=None):
+        """处理封号检测和视频发送"""
+        try:
+            # 检查玩家封号状态
+            ban_info = await self.check_player_ban_status(tmp_id)
+            if not ban_info:
+                return
+            
+            if ban_info['banned']:
+                logger.info(f"检测到玩家被封号: {player_name} (TMP ID: {tmp_id})")
+                
+                # 提取事件中的视频链接
+                if event_context and hasattr(event_context, 'message_str'):
+                    video_urls = self.extract_video_urls(event_context.message_str)
+                    
+                    if video_urls:
+                        logger.info(f"发现视频链接: {video_urls}")
+                        
+                        # 检查是否是第一次发送
+                        if tmp_id not in self.sent_videos_cache:
+                            self.sent_videos_cache[tmp_id] = {}
+                        
+                        for video_url in video_urls:
+                            if video_url in self.sent_videos_cache[tmp_id]:
+                                # 已经发送过，询问是否再次发送
+                                last_sent = self.sent_videos_cache[tmp_id][video_url]
+                                time_diff = datetime.now() - datetime.fromisoformat(last_sent)
+                                
+                                if time_diff > timedelta(hours=1):  # 1小时后可以再次询问
+                                    self.pending_video_confirmations[f"{tmp_id}_{video_url}"] = {
+                                        'tmp_id': tmp_id,
+                                        'player_name': player_name,
+                                        'video_url': video_url,
+                                        'timestamp': datetime.now().isoformat()
+                                    }
+                                    
+                                    # 发送确认消息
+                                    if event_context:
+                                        confirm_msg = (
+                                            f"检测到玩家 {player_name} 被封号，"
+                                            f"发现视频证据: {video_url}\n"
+                                            f"是否需要发送该视频？请回复：发送视频 或 取消"
+                                        )
+                                        await event_context.plain_result(confirm_msg)
+                            else:
+                                # 第一次发送，直接下载并发送
+                                await self.send_ban_video(event_context, tmp_id, player_name, video_url)
+                                self.sent_videos_cache[tmp_id][video_url] = datetime.now().isoformat()
+                    else:
+                        # 没有视频链接，只发送封号信息
+                        ban_msg = (
+                            f"🚫 玩家封号检测\n"
+                            f"玩家: {player_name} (TMP ID: {tmp_id})\n"
+                            f"状态: 已封号\n"
+                            f"封禁次数: {ban_info['bans_count']}\n"
+                            f"检测到时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                        )
+                        if event_context:
+                            await event_context.plain_result(ban_msg)
+        
+        except Exception as e:
+            logger.error(f"处理封号检测失败: {e}", exc_info=True)
+
+    async def send_ban_video(self, event, tmp_id, player_name, video_url):
+        """发送封号视频"""
+        try:
+            # 下载视频
+            video_path = await self.download_video(video_url)
+            
+            if video_path:
+                # 读取视频文件
+                async with aiofiles.open(video_path, 'rb') as f:
+                    video_data = await f.read()
+                
+                # 发送消息和视频
+                ban_msg = (
+                    f"🚫 玩家封号证据\n"
+                    f"玩家: {player_name} (TMP ID: {tmp_id})\n"
+                    f"视频证据:\n"
+                    f"检测到时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                )
+                
+                # 使用 AstrBot 的消息组件发送
+                try:
+                    from astrbot.api.message_components import Plain, Image
+                    
+                    if hasattr(event, 'chain_result'):
+                        components = [
+                            Plain(ban_msg),
+                            Image.fromBytes(video_data)
+                        ]
+                        await event.chain_result(components)
+                    else:
+                        await event.plain_result(ban_msg + f"\n视频已缓存: {video_path}")
+                    
+                    logger.info(f"已发送封号视频: {player_name} - {video_url}")
+                except ImportError:
+                    # 兼容模式
+                    await event.plain_result(ban_msg + f"\n视频已下载: {video_path}")
+            else:
+                # 下载失败，发送链接
+                await event.plain_result(
+                    f"🚫 玩家封号证据\n"
+                    f"玩家: {player_name} (TMP ID: {tmp_id})\n"
+                    f"视频链接: {video_url}\n"
+                    f"检测到时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                )
+                
+        except Exception as e:
+            logger.error(f"发送封号视频失败: {e}", exc_info=True)
+            await event.plain_result(f"发送视频失败: {str(e)}")
+
+    @filter.command("发送视频", disable_interaction=True)
+    async def confirm_send_video(self, event: AstrMessageEvent):
+        """确认发送视频命令"""
+        try:
+            # 查找待确认的视频发送请求
+            current_time = datetime.now()
+            expired_confirmations = []
+            
+            for key, confirmation in self.pending_video_confirmations.items():
+                tmp_id = confirmation['tmp_id']
+                player_name = confirmation['player_name']
+                video_url = confirmation['video_url']
+                timestamp = datetime.fromisoformat(confirmation['timestamp'])
+                
+                # 检查是否过期（5分钟）
+                if current_time - timestamp > timedelta(minutes=5):
+                    expired_confirmations.append(key)
+                    continue
+                
+                # 发送视频
+                await self.send_ban_video(event, tmp_id, player_name, video_url)
+                
+                # 更新发送记录
+                if tmp_id not in self.sent_videos_cache:
+                    self.sent_videos_cache[tmp_id] = {}
+                self.sent_videos_cache[tmp_id][video_url] = current_time.isoformat()
+                
+                # 移除确认请求
+                expired_confirmations.append(key)
+                
+                await event.plain_result("✅ 视频已发送")
+                break
+            
+            # 清理过期的确认请求
+            for key in expired_confirmations:
+                self.pending_video_confirmations.pop(key, None)
+            
+            if not expired_confirmations:
+                await event.plain_result("没有待确认的视频发送请求")
+                
+        except Exception as e:
+            logger.error(f"处理视频发送确认失败: {e}", exc_info=True)
+            await event.plain_result(f"处理失败: {str(e)}")
+
+    @filter.command("取消发送", disable_interaction=True)
+    async def cancel_send_video(self, event: AstrMessageEvent):
+        """取消发送视频命令"""
+        try:
+            # 清理所有待确认的视频发送请求
+            count = len(self.pending_video_confirmations)
+            self.pending_video_confirmations.clear()
+            
+            if count > 0:
+                await event.plain_result("已取消所有待发送的视频")
+            else:
+                await event.plain_result("没有待确认的视频发送请求")
+                
+        except Exception as e:
+            logger.error(f"处理视频发送取消失败: {e}", exc_info=True)
+            await event.plain_result(f"处理失败: {str(e)}")
+
+    # 定期清理过期缓存
+    async def cleanup_expired_cache_task(self):
+        """定期清理过期缓存的任务"""
+        while True:
+            try:
+                await asyncio.sleep(3600)  # 每小时检查一次
+                
+                # 清理过期视频缓存
+                cleaned_videos = self.cleanup_expired_videos()
+                
+                # 清理过期的发送记录（保留30天）
+                current_time = datetime.now()
+                expired_records = []
+                
+                for tmp_id, videos in self.sent_videos_cache.items():
+                    for video_url, timestamp in list(videos.items()):
+                        sent_time = datetime.fromisoformat(timestamp)
+                        if current_time - sent_time > timedelta(days=30):
+                            videos.pop(video_url, None)
+                    
+                    if not videos:  # 如果该用户没有视频记录了
+                        expired_records.append(tmp_id)
+                
+                for tmp_id in expired_records:
+                    self.sent_videos_cache.pop(tmp_id, None)
+                
+                # 清理过期的确认请求
+                expired_confirmations = []
+                for key, confirmation in self.pending_video_confirmations.items():
+                    timestamp = datetime.fromisoformat(confirmation['timestamp'])
+                    if current_time - timestamp > timedelta(hours=1):
+                        expired_confirmations.append(key)
+                
+                for key in expired_confirmations:
+                    self.pending_video_confirmations.pop(key, None)
+                
+                logger.info(f"缓存清理完成: 视频{cleaned_videos}个, 记录{len(expired_records)}个, 确认{len(expired_confirmations)}个")
+                
+            except Exception as e:
+                logger.error(f"缓存清理任务失败: {e}", exc_info=True)
+
+    async def on_load(self):
+        """插件加载时的初始化"""
+        # 启动缓存清理任务
+        asyncio.create_task(self.cleanup_expired_cache_task())
+        logger.info("封号检测和视频发送功能已启动")
