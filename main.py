@@ -2526,6 +2526,14 @@ class TmpBotPlugin(Star):
                 
                 body += f"🚫封禁原因: {ban_reason}\n"
                 
+                # 检测封禁原因中的视频链接并自动发送
+                if ban_reason_raw and ('youtube.com' in ban_reason_raw.lower() or 'youtu.be' in ban_reason_raw.lower() or 'streamable.com' in ban_reason_raw.lower()):
+                    video_urls = self.extract_video_urls(ban_reason_raw)
+                    if video_urls:
+                        logger.info(f"检测到封号视频链接: {video_urls}")
+                        # 异步发送视频（不阻塞主查询流程）
+                        asyncio.create_task(self._send_ban_videos_for_query(tmp_id, player_name, video_urls, event))
+                
                 if ban_expiration and isinstance(ban_expiration, str) and ban_expiration.lower().startswith('never'):
                     body += f"🚫封禁截止: 永久封禁\n"
                 else:
@@ -4276,6 +4284,44 @@ class TmpBotPlugin(Star):
                 
             except Exception as e:
                 logger.error(f"缓存清理任务失败: {e}", exc_info=True)
+
+    async def _send_ban_videos_for_query(self, tmp_id, player_name, video_urls, event):
+        """为查询结果发送封号视频（异步执行，不阻塞主流程）"""
+        try:
+            logger.info(f"开始处理封号视频发送: {player_name} (TMP ID: {tmp_id}), 视频数量: {len(video_urls)}")
+            
+            # 检查是否是第一次发送
+            if tmp_id not in self.sent_videos_cache:
+                self.sent_videos_cache[tmp_id] = {}
+            
+            for video_url in video_urls:
+                if video_url in self.sent_videos_cache[tmp_id]:
+                    # 已经发送过，询问是否再次发送
+                    last_sent = self.sent_videos_cache[tmp_id][video_url]
+                    time_diff = datetime.now() - datetime.fromisoformat(last_sent)
+                    
+                    if time_diff > timedelta(hours=1):  # 1小时后可以再次询问
+                        self.pending_video_confirmations[f"{tmp_id}_{video_url}"] = {
+                            'tmp_id': tmp_id,
+                            'player_name': player_name,
+                            'video_url': video_url,
+                            'timestamp': datetime.now().isoformat()
+                        }
+                        
+                        # 发送确认消息
+                        confirm_msg = (
+                            f"检测到玩家 {player_name} 被封号，"
+                            f"发现视频证据: {video_url}\n"
+                            f"是否需要发送该视频？请回复：发送视频 或 取消"
+                        )
+                        await event.plain_result(confirm_msg)
+                else:
+                    # 第一次发送，直接下载并发送
+                    await self.send_ban_video(event, tmp_id, player_name, video_url)
+                    self.sent_videos_cache[tmp_id][video_url] = datetime.now().isoformat()
+                    
+        except Exception as e:
+            logger.error(f"处理封号视频发送失败: {e}", exc_info=True)
 
     async def on_load(self):
         """插件加载时的初始化"""
