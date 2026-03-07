@@ -46,12 +46,19 @@ except ImportError:
             return decorator
     filter = _DummyFilter()
     class AstrMessageEvent:
-        def __init__(self, message_str: str = "", sender_id: str = "0", match=None):
+        def __init__(self, message_str: str = "", sender_id: str = "0", match=None, group_id: str = None):
             self.message_str = message_str
             self._sender_id = sender_id
-            self._match = match 
+            self._match = match
+            self._group_id = group_id
         def get_sender_id(self) -> str:
             return self._sender_id
+        def get_group_id(self) -> str:
+            return self._group_id or ""
+        def is_group_message(self) -> bool:
+            return bool(self._group_id)
+        def is_private_message(self) -> bool:
+            return not self._group_id
         async def plain_result(self, msg):
             return msg
         async def chain_result(self, components):
@@ -1970,6 +1977,18 @@ class TmpBotPlugin(Star):
             async for r in self.tmphelp(event):
                 yield r
             return
+        if re.match(r'^活动列表(\s+\d+)?(\s+\d+)?\s*$', msg):
+            async for r in self.tmpevent(event):
+                yield r
+            return
+        if re.match(r'^成员查询(\s+\S+)?\s*$', msg):
+            async for r in self.tmpmember(event):
+                yield r
+            return
+        if re.match(r'^修改密码\s+\d+\s+\S+\s*$', msg):
+            async for r in self.tmppassword(event):
+                yield r
+            return
 
     
     
@@ -3833,24 +3852,330 @@ class TmpBotPlugin(Star):
 
     async def tmphelp(self, event: AstrMessageEvent):
         """[命令: 菜单] 显示本插件的命令使用说明。"""
-        help_text = """TMP查询插件使用说明
+        help_text = """TMP查询姬指令菜单
 
 可用命令:
 1. 绑定 [TMP ID]
 2. 查询 [TMP ID]
 3. 定位 [TMP ID]
-4. 地图DLC
+4. 路况[s1/s2/p/a]
 5. 总里程排行
 6. 今日里程排行
 7. 足迹 [服务器简称] [TMP ID]
-8. 路况[s1/s2/p/a]
-9. 解绑
-10. 服务器
-11. 插件版本
-12. 菜单
+8. 服务器
+9. 插件版本
+10. 活动列表
+11. 成员查询 [tmpId/qq]
+12. 修改密码 [uid] [新密码]
 使用提示: 绑定后可直接发送 查询/定位/足迹 [服务器简称]
 """
         yield event.plain_result(help_text)
+    
+    async def _get_event_list(self, page_size=10, page_num=1, event_name='', begin_time='', end_time='', state=''):
+        """查询VTCM平台活动列表"""
+        if not self.session:
+            return {"error": True}
+        
+        try:
+            # 获取VTCM API Token
+            token = self._cfg_str('vtcm_api_token', '').strip()
+            if not token:
+                logger.error("VTCM API Token未配置")
+                return {"error": True, "msg": "VTCM API Token未配置"}
+            
+            # 构建查询参数
+            params = {
+                'pageSize': page_size,
+                'pageNum': page_num,
+                'token': token
+            }
+            if event_name:
+                params['eventName'] = event_name
+            if begin_time:
+                params['beginTime'] = begin_time
+            if end_time:
+                params['endTime'] = end_time
+            if state:
+                params['state'] = state
+            
+            url = "https://open.vtcm.link/events"
+            logger.info(f"活动列表API请求: {url}, 参数: {params}")
+            
+            async with self.session.get(url, params=params, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
+                logger.info(f"活动列表API响应状态: {resp.status}")
+                if resp.status == 200:
+                    data = await resp.json()
+                    logger.info(f"活动列表API响应数据: {data}")
+                    # 检查API返回的数据结构
+                    if isinstance(data, dict):
+                        # 尝试不同的成功判断方式
+                        if data.get('code') == 200 or data.get('success') or data.get('ok'):
+                            # 尝试不同的数据字段
+                            return {"error": False, "data": data.get('data', data.get('result', data))}
+                        else:
+                            logger.error(f"活动列表API错误: {data}")
+                            return {"error": True}
+                    return {"error": False, "data": data}
+                else:
+                    return {"error": True}
+        except Exception as e:
+            logger.error(f"活动列表API错误: {e}")
+            return {"error": True}
+    
+    async def _get_member_info(self, uid='', tmp_id='', qq=''):
+        """查询VTCM平台成员信息"""
+        if not self.session:
+            return {"error": True}
+        
+        try:
+            # 获取VTCM API Token
+            token = self._cfg_str('vtcm_api_token', '').strip()
+            if not token:
+                logger.error("VTCM API Token未配置")
+                return {"error": True, "msg": "VTCM API Token未配置"}
+            
+            # 构建查询参数
+            params = {'token': token}
+            if uid:
+                params['uid'] = uid
+            if tmp_id:
+                params['tmpId'] = tmp_id
+            if qq:
+                params['qq'] = qq
+            
+            url = "https://open.vtcm.link/members/get"
+            logger.info(f"成员信息API请求: {url}, 参数: {params}")
+            
+            async with self.session.get(url, params=params, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
+                logger.info(f"成员信息API响应状态: {resp.status}")
+                if resp.status == 200:
+                    data = await resp.json()
+                    logger.info(f"成员信息API响应数据: {data}")
+                    # 检查API返回的数据结构
+                    if isinstance(data, dict):
+                        # 尝试不同的成功判断方式
+                        if data.get('code') == 200 or data.get('success') or data.get('ok'):
+                            # 尝试不同的数据字段
+                            return {"error": False, "data": data.get('data', data.get('result', data))}
+                        else:
+                            logger.error(f"成员信息API错误: {data}")
+                            return {"error": True}
+                    return {"error": False, "data": data}
+                else:
+                    return {"error": True}
+        except Exception as e:
+            logger.error(f"成员信息API错误: {e}")
+            return {"error": True}
+    
+    async def _change_password(self, uid, password):
+        """修改VTCM平台密码"""
+        if not self.session:
+            return {"error": True}
+        
+        try:
+            # 获取VTCM API Token
+            token = self._cfg_str('vtcm_api_token', '').strip()
+            if not token:
+                logger.error("VTCM API Token未配置")
+                return {"error": True, "msg": "VTCM API Token未配置"}
+            
+            url = f"https://open.vtcm.link/members/{uid}/password?token={token}"
+            logger.info(f"修改密码API请求: {url}")
+            async with self.session.post(url, json={"password": password}, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
+                logger.info(f"修改密码API响应状态: {resp.status}")
+                if resp.status == 200:
+                    data = await resp.json()
+                    logger.info(f"修改密码API响应数据: {data}")
+                    # 检查API返回的数据结构
+                    if isinstance(data, dict):
+                        # 尝试不同的成功判断方式
+                        if data.get('code') == 200 or data.get('success') or data.get('ok'):
+                            # 尝试不同的数据字段
+                            return {"error": False, "data": data.get('data', data.get('result', data))}
+                        else:
+                            logger.error(f"修改密码API错误: {data}")
+                            return {"error": True}
+                    return {"error": False, "data": data}
+                else:
+                    return {"error": True}
+        except Exception as e:
+            logger.error(f"修改密码API错误: {e}")
+            return {"error": True}
+    
+    @filter.command("活动列表")
+    async def tmpevent(self, event: AstrMessageEvent):
+        """[命令: 活动列表] 查询VTCM平台活动列表。"""
+        message_str = event.message_str.strip()
+        match = re.search(r'活动列表\s*(\d+)?\s*(\d+)?', message_str)
+        page_num = match.group(1) if match and match.group(1) else 1
+        page_size = match.group(2) if match and match.group(2) else 10
+        
+        try:
+            event_data = await self._get_event_list(page_size, page_num)
+            if event_data.get("error"):
+                error_msg = event_data.get("msg", "查询活动列表失败，请稍后重试")
+                yield event.plain_result(error_msg)
+                return
+            
+            # 构建消息
+            message = f"活动总数: {event_data['data'].get('total', 0)}\n\n"
+            
+            rows = event_data['data'].get('rows', [])
+            # 只显示前5条活动信息
+            display_rows = rows[:5]
+            for event_item in display_rows:
+                if message and not message.endswith('\n\n'):
+                    message += '\n\n'
+                
+                message += f"📅活动名称: {event_item.get('eventName', '未知')}"
+                message += f"\n🕐开始时间: {event_item.get('startTime', '未知')}"
+                message += f"\n🕐结束时间: {event_item.get('endTime', '未知')}"
+                state = event_item.get('state', 0)
+                state_text = '未开始' if state == 1 else '进行中' if state == 2 else '已结束'
+                message += f"\n📋状态: {state_text}"
+                if event_item.get('serverName'):
+                    message += f"\n🖥服务器: {event_item.get('serverName')}"
+                if event_item.get('autoCheckInEnable') == 1:
+                    message += '\n🔄自动签到: 启用'
+            
+            if not rows:
+                message += '暂无活动数据'
+            elif len(rows) > 5:
+                message += f'\n\n... 还有 {len(rows) - 5} 条活动未显示'
+            
+            yield event.plain_result(message)
+        except Exception as e:
+            logger.error(f"活动列表命令错误: {e}")
+            yield event.plain_result("查询活动列表失败，请稍后重试")
+    
+    @filter.command("成员查询")
+    async def tmpmember(self, event: AstrMessageEvent):
+        """[命令: 成员查询] 查询VTCM平台成员信息。"""
+        message_str = event.message_str.strip()
+        match = re.search(r'成员查询\s*(\S+)?', message_str)
+        query_param = match.group(1) if match else None
+        
+        try:
+            # 尝试判断查询参数类型
+            uid = ''
+            tmp_id = ''
+            qq = ''
+            
+            # 如果没有提供查询参数，检查用户是否已绑定
+            if not query_param:
+                user_id = event.get_sender_id()
+                bound_tmp_id = self._get_bound_tmp_id(user_id)
+                if bound_tmp_id:
+                    logger.info(f"用户已绑定，使用绑定的TMP ID: {bound_tmp_id}")
+                    tmp_id = bound_tmp_id
+                else:
+                    yield event.plain_result("请输入查询参数 (tmpId/qq) 或先使用「绑定 [TMP ID]」命令绑定您的账号")
+                    return
+            else:
+                # 记录查询参数
+                logger.info(f"成员查询参数: {query_param}")
+                
+                if query_param.isdigit():
+                    # 数字类型参数
+                    if len(query_param) >= 10:
+                        # 假设是qq
+                        qq = query_param
+                        logger.info(f"判断为QQ: {qq}")
+                    else:
+                        # 可能是uid或tmpId，先尝试作为tmpId
+                        tmp_id = query_param
+                        logger.info(f"判断为TMP ID: {tmp_id}")
+                else:
+                    # 非数字类型参数，可能是tmpId
+                    tmp_id = query_param
+                    logger.info(f"判断为TMP ID: {tmp_id}")
+            
+            member_data = await self._get_member_info(uid, tmp_id, qq)
+            if member_data.get("error"):
+                error_msg = member_data.get("msg", "查询成员信息失败，请稍后重试")
+                yield event.plain_result(error_msg)
+                return
+            
+            # 构建消息
+            data = member_data['data']
+            logger.info(f"成员信息数据: {data}")
+            
+            # 尝试不同的字段名
+            uid = data.get('uid') or data.get('user_id') or data.get('id') or '未知'
+            tmp_id = data.get('tmpId') or data.get('tmp_id') or data.get('tmpid') or '未知'
+            tmp_name = data.get('tmpName') or data.get('tmp_name') or data.get('name') or '未知'
+            tmp_role = data.get('tmpRole') or data.get('tmp_role') or data.get('role') or '未知'
+            team_number = data.get('teamNumber') or data.get('team_number') or data.get('team') or '未知'
+            steam_id = data.get('steamId') or data.get('steam_id') or '未知'
+            qq = data.get('qq') or data.get('QQ') or '未知'
+            email = data.get('email') or data.get('Email') or '未知'
+            join_date = data.get('joinDate') or data.get('join_date') or data.get('joined_at') or '未知'
+            quit_date = data.get('quitDate') or data.get('quit_date') or data.get('left_at') or None
+            state = data.get('state') or data.get('status') or 0
+            point = data.get('point') or data.get('points') or data.get('score') or 0
+            
+            message = f"🆔用户ID: {uid}"
+            message += f"\n🎮TMP ID: {tmp_id}"
+            message += f"\n😀TMP名称: {tmp_name}"
+            message += f"\n👔TMP角色: {tmp_role}"
+            message += f"\n🚚车队编号: {team_number}"
+            message += f"\n🔗Steam ID: {steam_id}"
+            message += f"\n💬QQ: {qq}"
+            message += f"\n📧邮箱: {email}"
+            message += f"\n📅加入日期: {join_date}"
+            if quit_date:
+                message += f"\n📅退出日期: {quit_date}"
+            state_text = '正常' if state == 1 else '异常'
+            message += f"\n📋状态: {state_text}"
+            message += f"\n🏆积分: {point}"
+            
+            yield event.plain_result(message)
+        except Exception as e:
+            logger.error(f"成员查询命令错误: {e}")
+            yield event.plain_result("查询成员信息失败，请稍后重试")
+    
+    @filter.command("修改密码")
+    async def tmppassword(self, event: AstrMessageEvent):
+        """[命令: 修改密码] 修改VTCM平台密码。"""
+        message_str = event.message_str.strip()
+        match = re.search(r'修改密码\s*(\d+)\s*(\S+)', message_str)
+        if not match:
+            yield event.plain_result("用法: 修改密码 [用户ID] [新密码]")
+            return
+        
+        uid = match.group(1)
+        password = match.group(2)
+        
+        if len(password) < 6:
+            yield event.plain_result("密码长度至少6位")
+            return
+        
+        try:
+            # 检查是否为群聊消息（通过获取群组ID来判断）
+            try:
+                # 尝试获取群组ID
+                group_id = event.get_group_id()
+                is_group = bool(group_id)
+            except AttributeError:
+                # 如果没有get_group_id方法，尝试其他方式
+                try:
+                    is_group = hasattr(event, 'group_id') and event.group_id
+                except:
+                    is_group = False
+            
+            if is_group:
+                yield event.plain_result("为保护个人信息安全，请私发机器人进行密码修改")
+                return
+            result = await self._change_password(uid, password)
+            if result.get("error"):
+                error_msg = result.get("msg", "修改密码失败，请稍后重试")
+                yield event.plain_result(error_msg)
+                return
+            
+            yield event.plain_result("密码修改成功")
+        except Exception as e:
+            logger.error(f"修改密码命令错误: {e}")
+            yield event.plain_result("修改密码失败，请稍后重试")
         
     async def terminate(self):
         """插件卸载时的清理工作：关闭HTTP会话。"""
@@ -3859,3 +4184,93 @@ class TmpBotPlugin(Star):
             await self.session.close()
             self.session = None
         logger.info("TMP Bot 插件已卸载")
+    
+    # 主动触发功能的方法
+    async def trigger_event_list(self, page_size=10, page_num=1):
+        """主动触发活动列表查询"""
+        try:
+            event_data = await self._get_event_list(page_size, page_num)
+            if event_data.get("error"):
+                return "查询活动列表失败"
+            
+            # 构建消息
+            message = f"活动总数: {event_data['data'].get('total', 0)}\n\n"
+            
+            rows = event_data['data'].get('rows', [])
+            # 只显示前5条活动信息
+            display_rows = rows[:5]
+            for event_item in display_rows:
+                if message and not message.endswith('\n\n'):
+                    message += '\n\n'
+                
+                message += f"📅活动名称: {event_item.get('eventName', '未知')}"
+                message += f"\n🕐开始时间: {event_item.get('startTime', '未知')}"
+                message += f"\n🕐结束时间: {event_item.get('endTime', '未知')}"
+                state = event_item.get('state', 0)
+                state_text = '未开始' if state == 1 else '进行中' if state == 2 else '已结束'
+                message += f"\n📋状态: {state_text}"
+                if event_item.get('serverName'):
+                    message += f"\n🖥服务器: {event_item.get('serverName')}"
+                if event_item.get('autoCheckInEnable') == 1:
+                    message += '\n🔄自动签到: 启用'
+            
+            if not rows:
+                message += '暂无活动数据'
+            elif len(rows) > 5:
+                message += f'\n\n... 还有 {len(rows) - 5} 条活动未显示'
+            
+            return message
+        except Exception as e:
+            logger.error(f"主动触发活动列表失败: {e}")
+            return "查询活动列表失败"
+    
+    async def trigger_member_query(self, uid='', tmp_id='', qq=''):
+        """主动触发成员查询"""
+        try:
+            if not uid and not tmp_id and not qq:
+                return "请输入查询参数 (uid/tmpId/qq)"
+            
+            member_data = await self._get_member_info(uid, tmp_id, qq)
+            if member_data.get("error"):
+                return "查询成员信息失败"
+            
+            # 构建消息
+            data = member_data['data']
+            message = f"🆔用户ID: {data.get('uid', '未知')}"
+            message += f"\n🎮TMP ID: {data.get('tmpId', '未知')}"
+            message += f"\n😀TMP名称: {data.get('tmpName', '未知')}"
+            message += f"\n👔TMP角色: {data.get('tmpRole', '未知')}"
+            message += f"\n🚚车队编号: {data.get('teamNumber', '未知')}"
+            message += f"\n🔗Steam ID: {data.get('steamId', '未知')}"
+            message += f"\n💬QQ: {data.get('qq', '未知')}"
+            message += f"\n📧邮箱: {data.get('email', '未知')}"
+            message += f"\n📅加入日期: {data.get('joinDate', '未知')}"
+            if data.get('quitDate'):
+                message += f"\n📅退出日期: {data.get('quitDate')}"
+            state = data.get('state', 0)
+            state_text = '正常' if state == 1 else '异常'
+            message += f"\n📋状态: {state_text}"
+            message += f"\n🏆积分: {data.get('point', 0)}"
+            
+            return message
+        except Exception as e:
+            logger.error(f"主动触发成员查询失败: {e}")
+            return "查询成员信息失败"
+    
+    async def trigger_password_change(self, uid, password):
+        """主动触发密码修改"""
+        try:
+            if not uid or not password:
+                return "请输入用户ID和新密码"
+            
+            if len(password) < 6:
+                return "密码长度至少6位"
+            
+            result = await self._change_password(uid, password)
+            if result.get("error"):
+                return "修改密码失败"
+            
+            return "密码修改成功"
+        except Exception as e:
+            logger.error(f"主动触发密码修改失败: {e}")
+            return "修改密码失败"

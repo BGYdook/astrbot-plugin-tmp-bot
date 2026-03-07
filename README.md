@@ -29,9 +29,15 @@ API 文档与数据来源：https://s.apifox.cn/38508a88-5ff4-4b29-b724-41f9d3d3
 
 https://truckersmp.com/developers/api
 
-## 非常感谢[晚安](https://github.com/nulijiazaizhong)提供的帮助
+## 合作伙伴
+### 非常感谢[晚安](https://github.com/nulijiazaizhong)和[鲸鱼~嗷呜](https://github.com/jingyu8127)提供的帮助
 
 ## 历史更新
+
+## 版本v1.7.6
+- 添加了"成员查询"功能
+- 添加了"修改密码"功能(仅私信)
+- 添加了"活动查询"功能
 
 ## 版本v1.7.5
 - 修改车队角色api为truckersmp官方api
