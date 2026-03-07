@@ -38,6 +38,7 @@ https://truckersmp.com/developers/api
 - 添加了"成员查询"功能
 - 添加了"修改密码"功能(仅私信)
 - 添加了"活动查询"功能
+以上添加的新功能，都需要在配置里面写token 请去qq找 `备长炭` qq号:79887143
 
 ## 版本v1.7.5
 - 修改车队角色api为truckersmp官方api
