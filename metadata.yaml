@@ -1,6 +1,6 @@
 name: astrbot-plugin-tmp-bot
 description: 欧洲卡车模拟2 TMP查询机器人 - 支持玩家信息查询、位置查询、服务器状态查询、里程排行榜、地图DLC、足迹等功能
-version: 1.7.5
+version: 1.7.6
 main: main.py
 author: BGYdook,晚安（Goodnight_An）
 homepage: https://github.com/BGYdook/astrbot-plugin-tmp-bot
@@ -16,6 +16,9 @@ features:
   - 总里程与今日里程排行榜
   - 地图DLC列表查询（图片输出）
   - 支持TMPID绑定功能
+  - VTCM平台活动列表查询
+  - VTCM平台成员信息查询
+  - VTCM平台密码修改
 
 # 支持的命令列表
 commands:
@@ -49,6 +52,15 @@ commands:
   - name: 帮助
     description: 查看插件命令帮助
     usage: 帮助
+  - name: 活动列表
+    description: 查询VTCM平台活动列表
+    usage: 活动列表 [页码] [每页条数]
+  - name: 成员查询
+    description: 查询VTCM平台成员信息
+    usage: 成员查询 [uid/tmpId/qq]
+  - name: 修改密码
+    description: 修改VTCM平台密码
+    usage: 修改密码 [用户ID] [新密码]
 
 # 使用说明
 usage: |

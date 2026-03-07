@@ -1,5 +1,5 @@
  # astrbot-plugin-tmp-bot
-[![npm](https://img.shields.io/badge/npm-v1.7.5-blue)](https://github.com/BGYdook/astrbot-plugin-tmp-bot)
+[![npm](https://img.shields.io/badge/npm-v1.7.6-blue)](https://github.com/BGYdook/astrbot-plugin-tmp-bot)
 
 ![:astrbot_plugin_tmp_bot](https://count.getloli.com/@:astrbot_plugin_tmp-bot?theme=minecraft)
 
@@ -29,9 +29,16 @@ API 文档与数据来源：https://s.apifox.cn/38508a88-5ff4-4b29-b724-41f9d3d3
 
 https://truckersmp.com/developers/api
 
-## 非常感谢[晚安](https://github.com/nulijiazaizhong)提供的帮助
+## 合作伙伴
+### 非常感谢[晚安](https://github.com/nulijiazaizhong)和[鲸鱼~嗷呜](https://github.com/jingyu8127)提供的帮助
 
 ## 历史更新
+
+## 版本v1.7.6
+- 添加了"成员查询"功能
+- 添加了"修改密码"功能(仅私信)
+- 添加了"活动查询"功能
+以上添加的新功能，都需要在配置里面写token 请去qq找 `备长炭` qq号:79887143
 
 ## 版本v1.7.5
 - 修改车队角色api为truckersmp官方api
