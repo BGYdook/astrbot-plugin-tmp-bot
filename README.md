@@ -1,5 +1,5 @@
  # astrbot-plugin-tmp-bot
-[![npm](https://img.shields.io/badge/npm-v1.7.6-blue)](https://github.com/BGYdook/astrbot-plugin-tmp-bot)
+[![npm](https://img.shields.io/badge/npm-v1.7.8-blue)](https://github.com/BGYdook/astrbot-plugin-tmp-bot)
 
 ![:astrbot_plugin_tmp_bot](https://count.getloli.com/@:astrbot_plugin_tmp-bot?theme=minecraft)
 
@@ -22,6 +22,15 @@
 | 总里程排行 | 总里程排行榜（自 2025-08-23 20:00 起统计） | 总里程排行 |
 | 今日里程排行 | 今日里程排行榜（每日 0 点重置） | 今日里程排行 |
 | 足迹 | 今日足迹（每日 0 点重置） | 足迹 |
+### 车队专属功能(需配置Token)
+| 指令 | 功能 | 示例 |
+|------|------|------|
+| 活动 | 查询车队未来五次活动 | 活动 |
+| 今日活动 | 查询今天车队的活动 | 今日活动 |
+| 信息 | 查询在车队内信息 | 信息 123 |
+| 修改密码 | 修改车队平台登录密码 | 修改密码 UID 新密码|
+| 新添成员 | 车队平台添加新成员 | 新添成员 [tmpId] [车队编号] [QQ号] |
+| 删除成员 | 删除车队平台成员 | 删除成员 [tmpId] |
 ### 接口与数据
 API 文档与数据来源：https://s.apifox.cn/38508a88-5ff4-4b29-b724-41f9d3d3336a
 
@@ -30,15 +39,27 @@ API 文档与数据来源：https://s.apifox.cn/38508a88-5ff4-4b29-b724-41f9d3d3
 https://truckersmp.com/developers/api
 
 ## 合作伙伴
-### 非常感谢[晚安](https://github.com/nulijiazaizhong)和[鲸鱼~嗷呜](https://github.com/jingyu8127)提供的帮助
+### 非常感谢[晚安](https://github.com/nulijiazaizhong)和[鲸鱼](https://github.com/jingyu8127)提供的帮助
 
 ## 历史更新
+
+## 版本v1.7.8
+- 新增 新添成员功能
+- 新增 删除成员功能
+- 以上添加的新功能需要在配置里面写token 请去QQ找 [`备长炭` QQ号:79887143](https://qm.qq.com/q/zxpOxP7gli)
+
+## 版本v1.7.7
+- 新增 车队平台专属菜单(开关和白名单)
+- 新增 功能今日活动
+- 修复 活动列表排列排序
+- 修改 原指令活动列表改为活动
+- 修改 原指令成员查询改为信息
 
 ## 版本v1.7.6
 - 添加了"成员查询"功能
 - 添加了"修改密码"功能(仅私信)
 - 添加了"活动查询"功能
-以上添加的新功能，都需要在配置里面写token 请去qq找 `备长炭` qq号:79887143
+- 以上添加的新功能需要在配置里面写token 请去QQ找 [`备长炭` QQ号:79887143](https://qm.qq.com/q/zxpOxP7gli)
 
 ## 版本v1.7.5
 - 修改车队角色api为truckersmp官方api
