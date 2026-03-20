@@ -66,11 +66,17 @@
     "title": "车队平台功能群白名单",
     "description": "只允许在指定群聊中使用车队平台功能，多个群ID用逗号(,)分隔。留空则允许所有群聊使用。"
   },
-  "vtcm_member_whitelist_groups": {
+  "vtcm_member_whitelist_users": {
     "type": "string",
     "default": "",
-    "title": "车队成员管理功能群白名单",
-    "description": "只允许指定群聊使用新添/删除成员功能，多个群用逗号(,)分隔。留空则允许所有群聊使用。"
+    "title": "车队成员管理功能个人白名单",
+    "description": "只允许指定用户使用功能，多个用户用逗号(,)分隔。留空则允许所有用户使用。"
+  },
+  "vtcm_point_feature_enable": {
+    "type": "bool",
+    "default": false,
+    "title": "启用加减积分功能",
+    "description": "开启后，将启用加积分和减积分功能。"
   }
   
 }

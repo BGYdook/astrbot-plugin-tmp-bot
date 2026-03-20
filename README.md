@@ -1,5 +1,5 @@
  # astrbot-plugin-tmp-bot
-[![npm](https://img.shields.io/badge/npm-v1.7.8-blue)](https://github.com/BGYdook/astrbot-plugin-tmp-bot)
+[![npm](https://img.shields.io/badge/npm-v1.8.0-blue)](https://github.com/BGYdook/astrbot-plugin-tmp-bot)
 
 ![:astrbot_plugin_tmp_bot](https://count.getloli.com/@:astrbot_plugin_tmp-bot?theme=minecraft)
 
@@ -31,6 +31,8 @@
 | 修改密码 | 修改车队平台登录密码 | 修改密码 UID 新密码|
 | 新添成员 | 车队平台添加新成员 | 新添成员 [tmpId] [车队编号] [QQ号] |
 | 删除成员 | 删除车队平台成员 | 删除成员 [tmpId] |
+| 加积分 | 加车队平台成员积分 | 加积分 [tmpId] [积分值] |
+| 减积分 | 减车队平台成员积分 | 减积分 [tmpId] [积分值] |
 ### 接口与数据
 API 文档与数据来源：https://s.apifox.cn/38508a88-5ff4-4b29-b724-41f9d3d3336a
 
@@ -43,10 +45,21 @@ https://truckersmp.com/developers/api
 
 ## 历史更新
 
+## 版本v1.8.0
+- 支持 信息功能支持艾特查询
+- 支持 加积分功能支持艾特查询
+- 支持 减积分功能支持艾特查询
+
+## 版本v1.7.9
+- 新增 加积分功能
+- 新增 减积分功能
+- 指令:成员管理(配置白名单才可使用)
+
 ## 版本v1.7.8
 - 新增 新添成员功能
 - 新增 删除成员功能
 - 以上添加的新功能需要在配置里面写token 请去QQ找 [`备长炭` QQ号:79887143](https://qm.qq.com/q/zxpOxP7gli)
+- 指令:成员管理(配置白名单才可使用)
 
 ## 版本v1.7.7
 - 新增 车队平台专属菜单(开关和白名单)
@@ -54,6 +67,7 @@ https://truckersmp.com/developers/api
 - 修复 活动列表排列排序
 - 修改 原指令活动列表改为活动
 - 修改 原指令成员查询改为信息
+- 配置车队群后才会生效
 
 ## 版本v1.7.6
 - 添加了"成员查询"功能
