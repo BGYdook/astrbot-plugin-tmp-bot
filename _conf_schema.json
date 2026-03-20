@@ -52,7 +52,31 @@
     "type": "string",
     "default": "",
     "title": "VTCM API Token",
-    "description": "用于调用VTCM开放API的认证令牌。"
+    "description": "车队平台API接口Token(Token获取QQ联系79887143)"
+  },
+  "vtcm_feature_enable": {
+    "type": "bool",
+    "default": true,
+    "title": "启用车队平台功能",
+    "description": "开启后，将启用活动、信息、修改密码等车队平台专属功能。"
+  },
+  "vtcm_whitelist_groups": {
+    "type": "string",
+    "default": "",
+    "title": "车队平台功能群白名单",
+    "description": "只允许在指定群聊中使用车队平台功能，多个群ID用逗号(,)分隔。留空则允许所有群聊使用。"
+  },
+  "vtcm_member_whitelist_users": {
+    "type": "string",
+    "default": "",
+    "title": "车队成员管理功能个人白名单",
+    "description": "只允许指定用户使用功能，多个用户用逗号(,)分隔。留空则允许所有用户使用。"
+  },
+  "vtcm_point_feature_enable": {
+    "type": "bool",
+    "default": false,
+    "title": "启用加减积分功能",
+    "description": "开启后，将启用加积分和减积分功能。"
   }
   
 }

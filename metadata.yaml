@@ -55,9 +55,9 @@ commands:
   - name: 活动列表
     description: 查询VTCM平台活动列表
     usage: 活动列表 [页码] [每页条数]
-  - name: 成员查询
+  - name: 信息
     description: 查询VTCM平台成员信息
-    usage: 成员查询 [uid/tmpId/qq]
+    usage: 信息 [uid/tmpId/qq]
   - name: 修改密码
     description: 修改VTCM平台密码
     usage: 修改密码 [用户ID] [新密码]

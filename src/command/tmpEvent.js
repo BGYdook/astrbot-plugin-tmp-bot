@@ -3,7 +3,7 @@ const evmOpenApi = require('../api/evmOpenApi')
 /**
  * 活动列表
  */
-module.exports = async (ctx, cfg, pageSize = 3, pageNum = 1, eventName = '', beginTime = '', endTime = '', state = '') => {
+module.exports = async (ctx, cfg, pageSize = 10, pageNum = 1, eventName = '', beginTime = '', endTime = '', state = '') => {
   // 获取token
   const token = cfg.vtcm_api_token || ''
   

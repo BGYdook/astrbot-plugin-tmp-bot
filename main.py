@@ -3,7 +3,7 @@
 
 """
 astrbot-plugin-tmp-bot
-欧卡2TMP查询插件 (版本 1.7.6)
+欧卡2TMP查询插件 (版本 1.8.0)
 """
 
 import re
@@ -227,6 +227,7 @@ class TmpBotPlugin(Star):
         self._fullmap_task: Optional[asyncio.Task] = None
         self._fullmap_lock = asyncio.Lock()
         self._fullmap_fetch_lock = asyncio.Lock()
+
         self._load_location_maps()
         try:
             bind_path = self.config.get('bind_file')
@@ -281,6 +282,7 @@ class TmpBotPlugin(Star):
         logger.info(f"TMP Bot 插件HTTP会话已创建，超时 {timeout_sec}s")
         self._fullmap_task = None
 
+
     def _get_fullmap_interval(self) -> int:
         v = self._cfg_int('ets2map_fullmap_interval_seconds', 60)
         return 60 if v < 60 else v
@@ -295,6 +297,211 @@ class TmpBotPlugin(Star):
         while True:
             await self._fetch_fullmap()
             await asyncio.sleep(self._get_fullmap_interval())
+
+    def _start_file_list_task(self) -> None:
+        """启动文件清单定时任务"""
+        if self._file_list_task and not self._file_list_task.done():
+            return
+        self._file_list_task = asyncio.create_task(self._file_list_loop())
+
+    async def _file_list_loop(self) -> None:
+        """文件清单定时循环（每10分钟）"""
+        # 首次运行等待30秒，让插件完全初始化
+        await asyncio.sleep(30)
+        while True:
+            try:
+                await self._check_file_list_update()
+            except Exception as e:
+                logger.error(f"文件清单检查出错: {e}")
+            # 每10分钟检查一次
+            await asyncio.sleep(600)
+
+    async def _check_file_list_update(self) -> None:
+        """检查文件清单是否有更新"""
+        if not self.session:
+            return
+        
+        # 检查车队平台功能是否启用
+        vtcm_feature_enable = self._cfg_bool('vtcm_feature_enable', True)
+        if not vtcm_feature_enable:
+            return
+        
+        async with self._file_list_lock:
+            try:
+                file_list_data = await self._get_tmp_file_list()
+                if file_list_data.get("error"):
+                    logger.error(f"获取文件清单失败: {file_list_data.get('msg', '未知错误')}")
+                    return
+                
+                files = file_list_data.get('data', [])
+                if not files:
+                    return
+                
+                # 检测更新的文件
+                updated_files = []
+                new_files = []
+                
+                for file_item in files:
+                    file_path = file_item.get('filePath', '')
+                    file_md5 = file_item.get('md5', '')
+                    
+                    if not file_path or not file_md5:
+                        continue
+                    
+                    if file_path in self._file_list_cache:
+                        # 检查MD5是否变化
+                        if self._file_list_cache[file_path] != file_md5:
+                            updated_files.append(file_item)
+                            self._file_list_cache[file_path] = file_md5
+                    else:
+                        # 新文件
+                        new_files.append(file_item)
+                        self._file_list_cache[file_path] = file_md5
+                
+                # 如果有更新，发送通知
+                if updated_files or new_files:
+                    await self._send_file_update_notification(updated_files, new_files)
+                
+            except Exception as e:
+                logger.error(f"检查文件清单更新出错: {e}")
+
+    async def _send_file_update_notification(self, updated_files: list, new_files: list) -> None:
+        """发送文件更新通知到配置的群聊（发送当天日期前后两天更新的文件）"""
+        # 获取当前日期及前后两天
+        now = datetime.now()
+        today = now.strftime('%Y-%m-%d')
+        yesterday = (now - timedelta(days=1)).strftime('%Y-%m-%d')
+        tomorrow = (now + timedelta(days=1)).strftime('%Y-%m-%d')
+        
+        # 定义允许的日期列表
+        allowed_dates = [yesterday, today, tomorrow]
+        
+        # 过滤出前后两天内更新的文件
+        recent_new_files = []
+        recent_updated_files = []
+        
+        for file_item in new_files:
+            update_time = file_item.get('updateTime', '')
+            if update_time:
+                # 提取日期部分（格式：YYYY-MM-DD HH:MM:SS）
+                file_date = update_time[:10] if len(update_time) >= 10 else update_time
+                if file_date in allowed_dates:
+                    recent_new_files.append(file_item)
+        
+        for file_item in updated_files:
+            update_time = file_item.get('updateTime', '')
+            if update_time:
+                # 提取日期部分
+                file_date = update_time[:10] if len(update_time) >= 10 else update_time
+                if file_date in allowed_dates:
+                    recent_updated_files.append(file_item)
+        
+        # 如果没有前后两天内更新的文件，不发送通知
+        if not recent_new_files and not recent_updated_files:
+            logger.info(f"前后两天内({yesterday} ~ {tomorrow})没有文件更新，跳过发送通知")
+            return
+        
+        # 构建消息
+        message = f"🔄 TMP文件更新通知 ({yesterday} ~ {tomorrow})\n\n"
+        
+        if recent_new_files:
+            message += f"📦 新增文件 ({len(recent_new_files)}个):\n"
+            for i, file_item in enumerate(recent_new_files[:5], 1):
+                file_type = file_item.get('type', 0)
+                type_text = 'UI' if file_type == 1 else '核心' if file_type == 3 else '其他'
+                message += f"  {i}. [{type_text}] {file_item.get('filePath', '未知')}\n"
+            if len(recent_new_files) > 5:
+                message += f"  ... 还有 {len(recent_new_files) - 5} 个新文件\n"
+            message += "\n"
+        
+        if recent_updated_files:
+            message += f"📝 更新文件 ({len(recent_updated_files)}个):\n"
+            for i, file_item in enumerate(recent_updated_files[:5], 1):
+                file_type = file_item.get('type', 0)
+                type_text = 'UI' if file_type == 1 else '核心' if file_type == 3 else '其他'
+                message += f"  {i}. [{type_text}] {file_item.get('filePath', '未知')}\n"
+                message += f"     更新时间: {file_item.get('updateTime', '未知')}\n"
+            if len(recent_updated_files) > 5:
+                message += f"  ... 还有 {len(recent_updated_files) - 5} 个更新文件\n"
+        
+        # 直接执行全局发送
+        logger.info("执行文件清单全局发送")
+        await self._send_file_list_to_all_groups(message)
+    
+    async def _send_file_list_to_all_groups(self, message: str) -> None:
+        """发送文件清单消息到所有群聊（全局发送）"""
+        try:
+            # 尝试通过context获取群聊列表
+            group_list = []
+            
+            # 方法1: 通过context获取
+            if hasattr(self.context, 'get_group_list'):
+                try:
+                    result = await self.context.get_group_list()
+                    if result:
+                        group_list.extend(result)
+                        logger.info(f"通过context获取到 {len(result)} 个群聊")
+                except Exception as e:
+                    logger.debug(f"通过context获取群聊列表失败: {e}")
+            
+            # 方法2: 通过adapters获取
+            if not group_list and hasattr(self.context, 'adapters'):
+                try:
+                    for adapter in self.context.adapters:
+                        if hasattr(adapter, 'get_group_list'):
+                            result = await adapter.get_group_list()
+                            if result:
+                                group_list.extend(result)
+                                logger.info(f"通过adapter获取到 {len(result)} 个群聊")
+                except Exception as e:
+                    logger.debug(f"通过adapters获取群聊列表失败: {e}")
+            
+            # 方法3: 通过platform获取
+            if not group_list and hasattr(self.context, 'platform'):
+                try:
+                    platform = self.context.platform
+                    if hasattr(platform, 'get_group_list'):
+                        result = await platform.get_group_list()
+                        if result:
+                            group_list.extend(result)
+                            logger.info(f"通过platform获取到 {len(result)} 个群聊")
+                except Exception as e:
+                    logger.debug(f"通过platform获取群聊列表失败: {e}")
+            
+            # 方法4: 尝试通过context的provider获取
+            if not group_list and hasattr(self.context, 'provider'):
+                try:
+                    provider = self.context.provider
+                    if hasattr(provider, 'get_group_list'):
+                        result = await provider.get_group_list()
+                        if result:
+                            group_list.extend(result)
+                            logger.info(f"通过provider获取到 {len(result)} 个群聊")
+                except Exception as e:
+                    logger.debug(f"通过provider获取群聊列表失败: {e}")
+            
+            # 方法5: 使用收集到的群聊ID
+            if not group_list and self._collected_groups:
+                group_list = list(self._collected_groups)
+                logger.info(f"使用收集到的群聊ID，共 {len(group_list)} 个群聊")
+            
+            if group_list:
+                # 去重
+                group_list = list(set(group_list))
+                logger.info(f"总共获取到 {len(group_list)} 个群聊，开始发送消息")
+                
+                # 发送到所有群聊
+                for group_id in group_list:
+                    try:
+                        await self.context.send_message(group_id, message)
+                        logger.info(f"已发送文件更新通知到群 {group_id}")
+                    except Exception as e:
+                        logger.error(f"发送文件更新通知到群 {group_id} 失败: {e}")
+            else:
+                logger.warning("无法获取群聊列表，无法执行全局发送")
+                    
+        except Exception as e:
+            logger.error(f"全局发送文件清单消息失败: {e}")
 
     async def _fetch_fullmap(self) -> None:
         if not self.session:
@@ -1889,6 +2096,8 @@ class TmpBotPlugin(Star):
 
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def _on_any_message_dispatch(self, event: AstrMessageEvent, *args, **kwargs):
+
+        
         target_event = event
         if not hasattr(target_event, "message_str"):
             if args:
@@ -1906,6 +2115,7 @@ class TmpBotPlugin(Star):
 
         message_obj = getattr(target_event, "message_obj", None)
         has_at = False
+        at_user_id = None
         if message_obj is not None:
             try:
                 chain = getattr(message_obj, "message", None) or []
@@ -1915,6 +2125,16 @@ class TmpBotPlugin(Star):
                         seg_type = seg.get("type") or seg_type
                     if isinstance(seg_type, str) and seg_type.lower() == "at":
                         has_at = True
+                        # 提取被艾特用户的ID
+                        uid = (
+                            getattr(seg, "qq", None)
+                            or getattr(seg, "user_id", None)
+                            or getattr(seg, "id", None)
+                        )
+                        if isinstance(seg, dict):
+                            uid = seg.get("qq") or seg.get("user_id") or seg.get("id") or uid
+                        if uid is not None:
+                            at_user_id = str(uid)
                         break
                     uid = (
                         getattr(seg, "qq", None)
@@ -1928,6 +2148,7 @@ class TmpBotPlugin(Star):
                         break
             except Exception:
                 has_at = False
+                at_user_id = None
 
         if re.match(r'^(查询|查)(\s*\d+)?\s*$', msg) or (re.match(r'^(查询|查)(\s|$)', msg) and has_at):
             async for r in self.tmpquery(event):
@@ -1977,19 +2198,560 @@ class TmpBotPlugin(Star):
             async for r in self.tmphelp(event):
                 yield r
             return
-        if re.match(r'^活动列表(\s+\d+)?(\s+\d+)?\s*$', msg):
-            async for r in self.tmpevent(event):
+        
+        if re.match(r'^成员管理\s*$', msg):
+            # 检查车队成员管理功能个人白名单
+            vtcm_member_whitelist_users = self._cfg_str('vtcm_member_whitelist_users', '').strip()
+            if vtcm_member_whitelist_users:
+                try:
+                    user_id = str(event.get_sender_id()) if hasattr(event, 'get_sender_id') else ''
+                    if not user_id:
+                        user_id = str(event.user_id) if hasattr(event, 'user_id') and event.user_id else ''
+                    if user_id:
+                        # 分割并去除空格
+                        whitelist_users = [u.strip() for u in vtcm_member_whitelist_users.split(',')]
+                        if user_id not in whitelist_users:
+                            yield event.plain_result("您未授权使用成员管理功能")
+                            return
+                except:
+                    pass
+            async for r in self.tmp_member_help(event):
                 yield r
             return
-        if re.match(r'^成员查询(\s+\S+)?\s*$', msg):
-            async for r in self.tmpmember(event):
-                yield r
+        
+        if re.match(r'^新添成员\s+\d+\s+\d+\s+\d+\s*$', msg):
+            match = re.search(r'新添成员\s*(\d+)\s*(\d+)\s*(\d+)', msg)
+            if not match:
+                yield event.plain_result("用法: 新添成员 [tmpId] [车队编号] [QQ号]")
+                return
+            
+            tmp_id = match.group(1)
+            team_number = match.group(2)
+            qq = match.group(3)
+            
+            # 检查车队成员管理功能个人白名单
+            vtcm_member_whitelist_users = self._cfg_str('vtcm_member_whitelist_users', '').strip()
+            if vtcm_member_whitelist_users:
+                try:
+                    user_id = str(event.get_sender_id()) if hasattr(event, 'get_sender_id') else ''
+                    if not user_id:
+                        user_id = str(event.user_id) if hasattr(event, 'user_id') and event.user_id else ''
+                    if user_id:
+                        # 分割并去除空格
+                        whitelist_users = [u.strip() for u in vtcm_member_whitelist_users.split(',')]
+                        if user_id not in whitelist_users:
+                            yield event.plain_result("您未授权使用成员管理功能")
+                            return
+                except:
+                    pass
+            
+            try:
+                result = await self._add_member(tmp_id, team_number, qq)
+                if result.get("error"):
+                    error_msg = result.get("msg", "添加成员失败，此人已存在")
+                    yield event.plain_result(error_msg)
+                    return
+                
+                # 获取新添加成员的信息
+                member_info = result.get("member_info", {})
+                if member_info:
+                    # 构建成员信息消息
+                    member_message = "成员添加成功！\n\n"
+                    member_message += f"🆔用户ID: {member_info.get('uid', '未知')}\n"
+                    member_message += f"🎮TMP ID: {member_info.get('tmpId', '未知')}\n"
+                    member_message += f"😀TMP名称: {member_info.get('tmpName', '未知')}\n"
+                    member_message += f"👔TMP角色: {member_info.get('tmpRole', '未知')}\n"
+                    member_message += f"🚚车队编号: {member_info.get('teamNumber', '未知')}\n"
+                    if member_info.get('qq'):
+                        member_message += f"💬QQ: {member_info.get('qq')}\n"
+                    if member_info.get('email'):
+                        member_message += f"📧邮箱: {member_info.get('email')}\n"
+                    member_message += f"🔐初始密码: 123456\n"
+                    yield event.plain_result(member_message)
+                else:
+                    yield event.plain_result("成员添加成功")
+            except Exception as e:
+                logger.error(f"新添成员命令错误: {e}")
+                yield event.plain_result("添加成员失败，此人已存在")
             return
+        
+        if re.match(r'^删除成员\s+\d+\s*$', msg):
+            match = re.search(r'删除成员\s*(\d+)', msg)
+            if not match:
+                yield event.plain_result("用法: 删除成员 [tmpId]")
+                return
+            
+            tmp_id = match.group(1)
+            
+            # 检查车队成员管理功能个人白名单
+            vtcm_member_whitelist_users = self._cfg_str('vtcm_member_whitelist_users', '').strip()
+            if vtcm_member_whitelist_users:
+                try:
+                    user_id = str(event.get_sender_id()) if hasattr(event, 'get_sender_id') else ''
+                    if not user_id:
+                        user_id = str(event.user_id) if hasattr(event, 'user_id') and event.user_id else ''
+                    if user_id:
+                        # 分割并去除空格
+                        whitelist_users = [u.strip() for u in vtcm_member_whitelist_users.split(',')]
+                        if user_id not in whitelist_users:
+                            yield event.plain_result("您未授权使用成员管理功能")
+                            return
+                except:
+                    pass
+            
+            try:
+                result = await self._remove_member(tmp_id)
+                if result.get("error"):
+                    error_msg = result.get("msg", "删除成员失败，请稍后重试")
+                    yield event.plain_result(error_msg)
+                    return
+                
+                # 获取被删除成员的信息
+                member_info = result.get("member_info", {})
+                if member_info:
+                    # 构建成员信息消息
+                    member_message = "成员删除成功！\n\n"
+                    member_message += f"🆔用户ID: {member_info.get('uid', '未知')}\n"
+                    member_message += f"🎮TMP ID: {member_info.get('tmpId', '未知')}\n"
+                    member_message += f"😀TMP名称: {member_info.get('tmpName', '未知')}\n"
+                    member_message += f"👔TMP角色: {member_info.get('tmpRole', '未知')}\n"
+                    member_message += f"🚚车队编号: {member_info.get('teamNumber', '未知')}\n"
+                    if member_info.get('qq'):
+                        member_message += f"💬QQ: {member_info.get('qq')}\n"
+                    if member_info.get('email'):
+                        member_message += f"📧邮箱: {member_info.get('email')}\n"
+                    yield event.plain_result(member_message)
+                else:
+                    yield event.plain_result("成员删除成功")
+            except Exception as e:
+                logger.error(f"删除成员命令错误: {e}")
+                yield event.plain_result("删除成员失败，请稍后重试")
+            return
+        
+        if re.match(r'^加积分\s+(\d+|@\S+)\s+\d+\s*$', msg) or (msg.startswith("加积分") and has_at):
+            tmp_id = None
+            quantity = None
+            
+            if has_at and at_user_id:
+                # 艾特用户的情况
+                # 匹配消息末尾的数字作为积分数量
+                match = re.search(r'加积分.*?(\d+)$', msg)
+                if not match:
+                    yield event.plain_result("用法: 加积分 @用户 [积分数量]")
+                    return
+                quantity = int(match.group(1))
+                # 从绑定数据中获取被艾特用户的TMP ID
+                tmp_id = self._get_bound_tmp_id(at_user_id)
+                if not tmp_id:
+                    yield event.plain_result("该用户未绑定TMP ID，请先绑定后再操作")
+                    return
+            else:
+                # 普通输入TMP ID的情况
+                match = re.search(r'加积分\s*(\d+)\s*(\d+)', msg)
+                if not match:
+                    yield event.plain_result("用法: 加积分 [TMP ID] [积分数量]")
+                    return
+                tmp_id = match.group(1)
+                quantity = int(match.group(2))
+            
+            # 检查加减积分功能是否启用
+            vtcm_point_feature_enable = self._cfg_bool('vtcm_point_feature_enable', False)
+            if not vtcm_point_feature_enable:
+                yield event.plain_result("加减积分功能未启用")
+                return
+            
+            # 检查车队成员管理功能个人白名单
+            vtcm_member_whitelist_users = self._cfg_str('vtcm_member_whitelist_users', '').strip()
+            if vtcm_member_whitelist_users:
+                try:
+                    user_id = str(event.get_sender_id()) if hasattr(event, 'get_sender_id') else ''
+                    if not user_id:
+                        user_id = str(event.user_id) if hasattr(event, 'user_id') and event.user_id else ''
+                    if user_id:
+                        # 分割并去除空格
+                        whitelist_users = [u.strip() for u in vtcm_member_whitelist_users.split(',')]
+                        if user_id not in whitelist_users:
+                            yield event.plain_result("您未授权使用成员管理功能")
+                            return
+                except:
+                    pass
+            
+            try:
+                # 通过tmpId查询用户信息，获取uid
+                member_data = await self._get_member_info('', tmp_id, '')
+                if member_data.get("error"):
+                    error_msg = member_data.get("msg", "查询成员信息失败，请稍后重试")
+                    yield event.plain_result(error_msg)
+                    return
+                
+                member_info = member_data['data']
+                uid = member_info.get('uid') or member_info.get('user_id') or member_info.get('id')
+                if not uid:
+                    yield event.plain_result("未找到成员UID")
+                    return
+                
+                # 执行加积分操作
+                result = await self._change_point(uid, 1, quantity)
+                if result.get("error"):
+                    error_msg = result.get("msg", "加积分失败，请稍后重试")
+                    yield event.plain_result(error_msg)
+                    return
+                
+                # 再次查询成员信息，获取更新后的积分
+                updated_member_data = await self._get_member_info('', tmp_id, '')
+                updated_member_info = updated_member_data.get('data', {})
+                
+                # 构建成员信息消息
+                member_message = "积分添加成功！\n\n"
+                member_message += f"🆔用户ID: {uid}\n"
+                member_message += f"🎮TMP ID: {tmp_id}\n"
+                member_message += f"😀TMP名称: {updated_member_info.get('tmpName', '未知')}\n"
+                member_message += f"🚚车队编号: {updated_member_info.get('teamNumber', '未知')}\n"
+                member_message += f"🏆当前积分: {updated_member_info.get('point', 0)}\n"
+                member_message += f"➕本次添加: {quantity} 积分"
+                
+                yield event.plain_result(member_message)
+            except Exception as e:
+                logger.error(f"加积分命令错误: {e}")
+                yield event.plain_result("加积分失败，请稍后重试")
+            return
+        
+        if re.match(r'^减积分\s+(\d+|@\S+)\s+\d+\s*$', msg) or (msg.startswith("减积分") and has_at):
+            tmp_id = None
+            quantity = None
+            
+            if has_at and at_user_id:
+                # 艾特用户的情况
+                # 匹配消息末尾的数字作为积分数量
+                match = re.search(r'减积分.*?(\d+)$', msg)
+                if not match:
+                    yield event.plain_result("用法: 减积分 @用户 [积分数量]")
+                    return
+                quantity = int(match.group(1))
+                # 从绑定数据中获取被艾特用户的TMP ID
+                tmp_id = self._get_bound_tmp_id(at_user_id)
+                if not tmp_id:
+                    yield event.plain_result("该用户未绑定TMP ID，请先绑定后再操作")
+                    return
+            else:
+                # 普通输入TMP ID的情况
+                match = re.search(r'减积分\s*(\d+)\s*(\d+)', msg)
+                if not match:
+                    yield event.plain_result("用法: 减积分 [TMP ID] [积分数量]")
+                    return
+                tmp_id = match.group(1)
+                quantity = int(match.group(2))
+            
+            # 检查加减积分功能是否启用
+            vtcm_point_feature_enable = self._cfg_bool('vtcm_point_feature_enable', False)
+            if not vtcm_point_feature_enable:
+                yield event.plain_result("加减积分功能未启用")
+                return
+            
+            # 检查车队成员管理功能个人白名单
+            vtcm_member_whitelist_users = self._cfg_str('vtcm_member_whitelist_users', '').strip()
+            if vtcm_member_whitelist_users:
+                try:
+                    user_id = str(event.get_sender_id()) if hasattr(event, 'get_sender_id') else ''
+                    if not user_id:
+                        user_id = str(event.user_id) if hasattr(event, 'user_id') and event.user_id else ''
+                    if user_id:
+                        # 分割并去除空格
+                        whitelist_users = [u.strip() for u in vtcm_member_whitelist_users.split(',')]
+                        if user_id not in whitelist_users:
+                            yield event.plain_result("您未授权使用成员管理功能")
+                            return
+                except:
+                    pass
+            
+            try:
+                # 通过tmpId查询用户信息，获取uid
+                member_data = await self._get_member_info('', tmp_id, '')
+                if member_data.get("error"):
+                    error_msg = member_data.get("msg", "查询成员信息失败，请稍后重试")
+                    yield event.plain_result(error_msg)
+                    return
+                
+                member_info = member_data['data']
+                uid = member_info.get('uid') or member_info.get('user_id') or member_info.get('id')
+                if not uid:
+                    yield event.plain_result("未找到成员UID")
+                    return
+                
+                # 执行减积分操作
+                result = await self._change_point(uid, 2, quantity)
+                if result.get("error"):
+                    error_msg = result.get("msg", "减积分失败，请稍后重试")
+                    yield event.plain_result(error_msg)
+                    return
+                
+                # 再次查询成员信息，获取更新后的积分
+                updated_member_data = await self._get_member_info('', tmp_id, '')
+                updated_member_info = updated_member_data.get('data', {})
+                
+                # 构建成员信息消息
+                member_message = "积分扣除成功！\n\n"
+                member_message += f"🆔用户ID: {uid}\n"
+                member_message += f"🎮TMP ID: {tmp_id}\n"
+                member_message += f"😀TMP名称: {updated_member_info.get('tmpName', '未知')}\n"
+                member_message += f"🚚车队编号: {updated_member_info.get('teamNumber', '未知')}\n"
+                member_message += f"🏆当前积分: {updated_member_info.get('point', 0)}\n"
+                member_message += f"➖本次扣除: {quantity} 积分"
+                
+                yield event.plain_result(member_message)
+            except Exception as e:
+                logger.error(f"减积分命令错误: {e}")
+                yield event.plain_result("减积分失败，请稍后重试")
+            return
+        
+        # 检查车队平台功能是否启用
+        vtcm_feature_enable = self._cfg_bool('vtcm_feature_enable', True)
+        if not vtcm_feature_enable:
+            return
+        
+        # 检查群白名单
+        vtcm_whitelist_groups = self._cfg_str('vtcm_whitelist_groups', '').strip()
+        if vtcm_whitelist_groups:
+            try:
+                group_id = str(event.get_group_id()) if hasattr(event, 'get_group_id') else ''
+                if not group_id:
+                    group_id = str(event.group_id) if hasattr(event, 'group_id') and event.group_id else ''
+                if group_id:
+                    # 分割并去除空格
+                    whitelist_groups = [g.strip() for g in vtcm_whitelist_groups.split(',')]
+                    if group_id not in whitelist_groups:
+                        return
+            except:
+                pass
+        
+        if re.match(r'^活动(\s+\d+)?(\s+\d+)?\s*$', msg):
+            match = re.search(r'活动\s*(\d+)?\s*(\d+)?', msg)
+            page_num = match.group(1) if match and match.group(1) else 1
+            page_size = match.group(2) if match and match.group(2) else 10
+            
+            try:
+                event_data = await self._get_event_list(page_size, page_num)
+                if event_data.get("error"):
+                    error_msg = event_data.get("msg", "查询活动列表失败，请稍后重试")
+                    yield event.plain_result(error_msg)
+                    return
+                
+                message = f"活动列表\n\n"
+                
+                rows = event_data['data'].get('rows', [])
+                # 按开始时间正序排序
+                rows.sort(key=lambda x: x.get('startTime') or '')
+                
+                # 获取当前日期
+                today = datetime.now().strftime('%Y-%m-%d')
+                
+                # 找到第一个开始日期 > 今天的活动索引
+                start_index = 0
+                for i, event_item in enumerate(rows):
+                    start_time = event_item.get('startTime', '')
+                    if start_time and start_time >= today:
+                        start_index = i
+                        break
+                
+                # 从找到的位置开始，往后取5条
+                display_rows = rows[start_index:start_index + 5]
+                
+                for event_item in display_rows:
+                    if message and not message.endswith('\n\n'):
+                        message += '\n\n'
+                    
+                    message += f"📅活动名称: {event_item.get('eventName', '未知')}"
+                    message += f"\n🕐开始时间: {event_item.get('startTime', '未知')}"
+                    message += f"\n🕐结束时间: {event_item.get('endTime', '未知')}"
+                    if event_item.get('serverName'):
+                        message += f"\n🖥服务器: {event_item.get('serverName')}"
+                    if event_item.get('autoCheckInEnable') == 1:
+                        message += '\n🔄自动签到: 启用'
+                
+                if not rows:
+                    message += '暂无活动数据'
+                elif len(display_rows) == 0:
+                    message += '暂无今天及之后的活动'
+                elif start_index + 5 < len(rows):
+                    message += f'\n\n... 还有 {len(rows) - start_index - 5} 条活动未显示'
+                
+                yield event.plain_result(message)
+            except Exception as e:
+                logger.error(f"活动命令错误: {e}")
+                yield event.plain_result("查询活动列表失败，请稍后重试")
+            return
+        
+        if re.match(r'^今日活动\s*$', msg):
+            try:
+                # 获取今日日期
+                today = datetime.now().strftime('%Y-%m-%d')
+                
+                # 调用API获取活动列表（获取较多数据以便筛选）
+                event_data = await self._get_event_list(page_size=100, page_num=1)
+                if event_data.get("error"):
+                    error_msg = event_data.get("msg", "查询今日活动失败，请稍后重试")
+                    yield event.plain_result(error_msg)
+                    return
+                
+                rows = event_data['data'].get('rows', [])
+                
+                # 过滤出今日开始的活动
+                today_events = []
+                for event_item in rows:
+                    start_time = event_item.get('startTime', '')
+                    if start_time and start_time.startswith(today):
+                        today_events.append(event_item)
+                
+                if not today_events:
+                    yield event.plain_result(f"📅 {today}\n今日暂无活动")
+                    return
+                
+                message = f"📅 今日活动 ({today})\n"
+                message += "=" * 20 + "\n\n"
+                
+                for i, event_item in enumerate(today_events[:10], 1):
+                    if i > 1:
+                        message += '\n\n'
+                    
+                    message += f"📅{event_item.get('eventName', '未知')}"
+                    message += f"\n🕐开始: {event_item.get('startTime', '未知')}"
+                    message += f"\n🕐结束: {event_item.get('endTime', '未知')}"
+                    if event_item.get('serverName'):
+                        message += f"\n🖥服务器: {event_item.get('serverName')}"
+                    if event_item.get('autoCheckInEnable') == 1:
+                        message += '\n🔄自动签到: 启用'
+                
+                if len(today_events) > 10:
+                    message += f'\n\n... 还有 {len(today_events) - 10} 条活动未显示'
+                
+                yield event.plain_result(message)
+            except Exception as e:
+                logger.error(f"今日活动命令错误: {e}")
+                yield event.plain_result("查询今日活动失败，请稍后重试")
+            return
+        
+        if re.match(r'^信息(\s+\S+)?\s*$', msg) or (msg.startswith("信息") and has_at):
+            match = re.search(r'信息\s*(\S+)?', msg)
+            query_param = match.group(1) if match else None
+            
+            try:
+                uid = ''
+                tmp_id = ''
+                qq = ''
+                
+                if has_at and at_user_id:
+                    # 艾特用户的情况
+                    logger.info(f"艾特用户ID: {at_user_id}")
+                    # 从绑定数据中获取被艾特用户的TMP ID
+                    tmp_id = self._get_bound_tmp_id(at_user_id)
+                    if not tmp_id:
+                        yield event.plain_result("该用户未绑定TMP ID，请先绑定后再操作")
+                        return
+                elif not query_param:
+                    # 无参数的情况，查询自己
+                    user_id = event.get_sender_id()
+                    bound_tmp_id = self._get_bound_tmp_id(user_id)
+                    if bound_tmp_id:
+                        logger.info(f"用户已绑定，使用绑定的TMP ID: {bound_tmp_id}")
+                        tmp_id = bound_tmp_id
+                    else:
+                        yield event.plain_result("请输入查询参数 (tmpId/qq) 或先使用「绑定 [TMP ID]」命令绑定您的账号")
+                        return
+                else:
+                    # 普通输入参数的情况
+                    logger.info(f"信息参数: {query_param}")
+                    
+                    if query_param.isdigit():
+                        if len(query_param) >= 10:
+                            qq = query_param
+                            logger.info(f"判断为QQ: {qq}")
+                        else:
+                            tmp_id = query_param
+                            logger.info(f"判断为TMP ID: {tmp_id}")
+                    else:
+                        tmp_id = query_param
+                        logger.info(f"判断为TMP ID: {tmp_id}")
+                
+                member_data = await self._get_member_info(uid, tmp_id, qq)
+                if member_data.get("error"):
+                    error_msg = member_data.get("msg", "查询成员信息失败，请稍后重试")
+                    yield event.plain_result(error_msg)
+                    return
+                
+                data = member_data['data']
+                logger.info(f"成员信息数据: {data}")
+                
+                uid = data.get('uid') or data.get('user_id') or data.get('id') or '未知'
+                tmp_id = data.get('tmpId') or data.get('tmp_id') or data.get('tmpid') or '未知'
+                tmp_name = data.get('tmpName') or data.get('tmp_name') or data.get('name') or '未知'
+                tmp_role = data.get('tmpRole') or data.get('tmp_role') or data.get('role') or '未知'
+                team_number = data.get('teamNumber') or data.get('team_number') or data.get('team') or '未知'
+                steam_id = data.get('steamId') or data.get('steam_id') or '未知'
+                qq = data.get('qq') or data.get('QQ') or '未知'
+                email = data.get('email') or data.get('Email') or '未知'
+                join_date = data.get('joinDate') or data.get('join_date') or data.get('joined_at') or '未知'
+                quit_date = data.get('quitDate') or data.get('quit_date') or data.get('left_at') or None
+                state = data.get('state') or data.get('status') or 0
+                point = data.get('point') or data.get('points') or data.get('score') or 0
+                
+                message = f"🆔用户ID: {uid}"
+                message += f"\n🎮TMP ID: {tmp_id}"
+                message += f"\n😀TMP名称: {tmp_name}"
+                message += f"\n👔TMP角色: {tmp_role}"
+                message += f"\n🚚车队编号: {team_number}"
+                message += f"\n🔗Steam ID: {steam_id}"
+                message += f"\n💬QQ: {qq}"
+                message += f"\n📧邮箱: {email}"
+                message += f"\n📅加入日期: {join_date}"
+                if quit_date:
+                    message += f"\n📅退出日期: {quit_date}"
+                state_text = '正常' if state == 1 else '异常'
+                message += f"\n📋状态: {state_text}"
+                message += f"\n🏆积分: {point}"
+                
+                yield event.plain_result(message)
+            except Exception as e:
+                logger.error(f"信息命令错误: {e}")
+                yield event.plain_result("查询成员信息失败，请稍后重试")
+            return
+        
         if re.match(r'^修改密码\s+\d+\s+\S+\s*$', msg):
-            async for r in self.tmppassword(event):
-                yield r
+            match = re.search(r'修改密码\s*(\d+)\s*(\S+)', msg)
+            if not match:
+                yield event.plain_result("用法: 修改密码 [用户ID] [新密码]")
+                return
+            
+            uid = match.group(1)
+            password = match.group(2)
+            
+            if len(password) < 6:
+                yield event.plain_result("密码长度至少6位")
+                return
+            
+            try:
+                try:
+                    group_id = event.get_group_id()
+                    is_group = bool(group_id)
+                except AttributeError:
+                    try:
+                        is_group = hasattr(event, 'group_id') and event.group_id
+                    except:
+                        is_group = False
+                
+                if is_group:
+                    yield event.plain_result("为保护个人信息安全，请私发机器人进行密码修改")
+                    return
+                result = await self._change_password(uid, password)
+                if result.get("error"):
+                    error_msg = result.get("msg", "修改密码失败，请稍后重试")
+                    yield event.plain_result(error_msg)
+                    return
+                
+                yield event.plain_result("密码修改成功")
+            except Exception as e:
+                logger.error(f"修改密码命令错误: {e}")
+                yield event.plain_result("修改密码失败，请稍后重试")
             return
-
     
     
     # 额外 AstrBot 正式指令包装（用于行为统计，保留无前缀用法）
@@ -3864,12 +4626,89 @@ class TmpBotPlugin(Star):
 7. 足迹 [服务器简称] [TMP ID]
 8. 服务器
 9. 插件版本
-10. 活动列表
-11. 成员查询 [tmpId/qq]
-12. 修改密码 [uid] [新密码]
 使用提示: 绑定后可直接发送 查询/定位/足迹 [服务器简称]
 """
         yield event.plain_result(help_text)
+        
+        # 检查车队平台功能是否启用
+        vtcm_feature_enable = self._cfg_bool('vtcm_feature_enable', True)
+        if not vtcm_feature_enable:
+            return
+        
+        # 检查群白名单
+        vtcm_whitelist_groups = self._cfg_str('vtcm_whitelist_groups', '').strip()
+        if vtcm_whitelist_groups:
+            try:
+                group_id = str(event.get_group_id()) if hasattr(event, 'get_group_id') else ''
+                if not group_id:
+                    group_id = str(event.group_id) if hasattr(event, 'group_id') and event.group_id else ''
+                if group_id:
+                    # 分割并去除空格
+                    whitelist_groups = [g.strip() for g in vtcm_whitelist_groups.split(',')]
+                    if group_id not in whitelist_groups:
+                        return
+            except:
+                return
+        
+        vtcm_help_text = """车队平台专属菜单
+
+1. 活动
+2. 今日活动
+3. 信息 [tmpId/qq](车队平台信息)
+4. 修改密码 [uid] [新密码](车队平台账号)
+"""
+        yield event.plain_result(vtcm_help_text)
+    
+    async def tmp_member_help(self, event: AstrMessageEvent):
+        """[命令: 成员管理] 显示车队成员管理功能菜单。"""
+        # 检查车队平台功能是否启用
+        vtcm_feature_enable = self._cfg_bool('vtcm_feature_enable', True)
+        if not vtcm_feature_enable:
+            yield event.plain_result("车队平台功能未启用")
+            return
+        
+        # 检查车队成员管理功能个人白名单
+        vtcm_member_whitelist_users = self._cfg_str('vtcm_member_whitelist_users', '').strip()
+        if vtcm_member_whitelist_users:
+            try:
+                user_id = str(event.get_sender_id()) if hasattr(event, 'get_sender_id') else ''
+                if not user_id:
+                    user_id = str(event.user_id) if hasattr(event, 'user_id') and event.user_id else ''
+                if user_id:
+                    # 分割并去除空格
+                    whitelist_users = [u.strip() for u in vtcm_member_whitelist_users.split(',')]
+                    if user_id not in whitelist_users:
+                        yield event.plain_result("您未授权使用成员管理功能")
+                        return
+            except:
+                yield event.plain_result("权限检查失败")
+                return
+        
+        member_help_text = """车队成员管理菜单
+
+1. 新添成员 [tmpId] [车队编号] [QQ号]
+2. 删除成员 [tmpId]
+"""
+        
+        # 检查加减积分功能是否启用
+        vtcm_point_feature_enable = self._cfg_bool('vtcm_point_feature_enable', False)
+        if vtcm_point_feature_enable:
+            member_help_text += """3. 加积分 [用户ID] [积分数量]
+4. 减积分 [用户ID] [积分数量]
+
+使用说明:
+- 新添成员: 自动设置邮箱为QQ号@qq.com，密码为123456
+- 删除成员: 只需提供tmpId即可
+- 加积分: 为指定用户添加积分
+- 减积分: 为指定用户扣除积分
+"""
+        else:
+            member_help_text += """
+使用说明:
+- 新添成员: 自动设置邮箱为QQ号@qq.com，密码为123456
+- 删除成员: 只需提供tmpId即可
+"""
+        yield event.plain_result(member_help_text)
     
     async def _get_event_list(self, page_size=10, page_num=1, event_name='', begin_time='', end_time='', state=''):
         """查询VTCM平台活动列表"""
@@ -3921,6 +4760,8 @@ class TmpBotPlugin(Star):
         except Exception as e:
             logger.error(f"活动列表API错误: {e}")
             return {"error": True}
+    
+
     
     async def _get_member_info(self, uid='', tmp_id='', qq=''):
         """查询VTCM平台成员信息"""
@@ -4002,181 +4843,187 @@ class TmpBotPlugin(Star):
             logger.error(f"修改密码API错误: {e}")
             return {"error": True}
     
-    @filter.command("活动列表")
-    async def tmpevent(self, event: AstrMessageEvent):
-        """[命令: 活动列表] 查询VTCM平台活动列表。"""
-        message_str = event.message_str.strip()
-        match = re.search(r'活动列表\s*(\d+)?\s*(\d+)?', message_str)
-        page_num = match.group(1) if match and match.group(1) else 1
-        page_size = match.group(2) if match and match.group(2) else 10
+    async def _add_member(self, tmp_id, team_number, qq):
+        """添加VTCM平台成员"""
+        if not self.session:
+            return {"error": True}
         
         try:
-            event_data = await self._get_event_list(page_size, page_num)
-            if event_data.get("error"):
-                error_msg = event_data.get("msg", "查询活动列表失败，请稍后重试")
-                yield event.plain_result(error_msg)
-                return
+            # 获取VTCM API Token
+            token = self._cfg_str('vtcm_api_token', '').strip()
+            if not token:
+                logger.error("VTCM API Token未配置")
+                return {"error": True, "msg": "VTCM API Token未配置"}
             
-            # 构建消息
-            message = f"活动总数: {event_data['data'].get('total', 0)}\n\n"
+            # 构建请求数据
+            today = datetime.now().strftime('%Y-%m-%d')
+            request_data = {
+                "tmpId": int(tmp_id),
+                "teamNumberGenerateEnable": 0,
+                "teamNumber": int(team_number),
+                "qq": qq,
+                "email": f"{qq}@qq.com",
+                "password": "123456",
+                "joinDate": today,
+                "quitDate": None,
+                "state": 1
+            }
             
-            rows = event_data['data'].get('rows', [])
-            # 只显示前5条活动信息
-            display_rows = rows[:5]
-            for event_item in display_rows:
-                if message and not message.endswith('\n\n'):
-                    message += '\n\n'
-                
-                message += f"📅活动名称: {event_item.get('eventName', '未知')}"
-                message += f"\n🕐开始时间: {event_item.get('startTime', '未知')}"
-                message += f"\n🕐结束时间: {event_item.get('endTime', '未知')}"
-                state = event_item.get('state', 0)
-                state_text = '未开始' if state == 1 else '进行中' if state == 2 else '已结束'
-                message += f"\n📋状态: {state_text}"
-                if event_item.get('serverName'):
-                    message += f"\n🖥服务器: {event_item.get('serverName')}"
-                if event_item.get('autoCheckInEnable') == 1:
-                    message += '\n🔄自动签到: 启用'
-            
-            if not rows:
-                message += '暂无活动数据'
-            elif len(rows) > 5:
-                message += f'\n\n... 还有 {len(rows) - 5} 条活动未显示'
-            
-            yield event.plain_result(message)
+            url = f"https://open.vtcm.link/members/save?token={token}"
+            logger.info(f"添加成员API请求: {url}, 数据: {request_data}")
+            async with self.session.post(url, json=request_data, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
+                logger.info(f"添加成员API响应状态: {resp.status}")
+                if resp.status == 200:
+                    api_data = await resp.json()
+                    logger.info(f"添加成员API响应数据: {api_data}")
+                    # 检查API返回的数据结构
+                    if isinstance(api_data, dict):
+                        # 尝试不同的成功判断方式
+                        if api_data.get('code') == 200 or api_data.get('success') or api_data.get('ok'):
+                            # 尝试不同的数据字段
+                            # 添加成功后，查询成员信息
+                            member_data = await self._get_member_info('', tmp_id, '')
+                            if not member_data.get("error"):
+                                return {"error": False, "data": api_data.get('data', api_data.get('result', api_data)), "member_info": member_data['data']}
+                            else:
+                                # 如果查询失败，仍然返回添加成功
+                                return {"error": False, "data": api_data.get('data', api_data.get('result', api_data))}
+                        else:
+                            logger.error(f"添加成员API错误: {api_data}")
+                            return {"error": True}
+                    return {"error": False, "data": api_data}
+                else:
+                    return {"error": True}
         except Exception as e:
-            logger.error(f"活动列表命令错误: {e}")
-            yield event.plain_result("查询活动列表失败，请稍后重试")
+            logger.error(f"添加成员API错误: {e}")
+            return {"error": True}
     
-    @filter.command("成员查询")
-    async def tmpmember(self, event: AstrMessageEvent):
-        """[命令: 成员查询] 查询VTCM平台成员信息。"""
-        message_str = event.message_str.strip()
-        match = re.search(r'成员查询\s*(\S+)?', message_str)
-        query_param = match.group(1) if match else None
+    async def _remove_member(self, tmp_id):
+        """删除VTCM平台成员"""
+        if not self.session:
+            return {"error": True}
         
         try:
-            # 尝试判断查询参数类型
-            uid = ''
-            tmp_id = ''
-            qq = ''
-            
-            # 如果没有提供查询参数，检查用户是否已绑定
-            if not query_param:
-                user_id = event.get_sender_id()
-                bound_tmp_id = self._get_bound_tmp_id(user_id)
-                if bound_tmp_id:
-                    logger.info(f"用户已绑定，使用绑定的TMP ID: {bound_tmp_id}")
-                    tmp_id = bound_tmp_id
-                else:
-                    yield event.plain_result("请输入查询参数 (tmpId/qq) 或先使用「绑定 [TMP ID]」命令绑定您的账号")
-                    return
-            else:
-                # 记录查询参数
-                logger.info(f"成员查询参数: {query_param}")
-                
-                if query_param.isdigit():
-                    # 数字类型参数
-                    if len(query_param) >= 10:
-                        # 假设是qq
-                        qq = query_param
-                        logger.info(f"判断为QQ: {qq}")
-                    else:
-                        # 可能是uid或tmpId，先尝试作为tmpId
-                        tmp_id = query_param
-                        logger.info(f"判断为TMP ID: {tmp_id}")
-                else:
-                    # 非数字类型参数，可能是tmpId
-                    tmp_id = query_param
-                    logger.info(f"判断为TMP ID: {tmp_id}")
-            
-            member_data = await self._get_member_info(uid, tmp_id, qq)
+            # 先通过tmp_id查询成员信息，获取uid
+            member_data = await self._get_member_info('', tmp_id, '')
             if member_data.get("error"):
-                error_msg = member_data.get("msg", "查询成员信息失败，请稍后重试")
-                yield event.plain_result(error_msg)
-                return
+                logger.error(f"查询成员信息失败: {member_data.get('msg', '未知错误')}")
+                return {"error": True, "msg": "查询成员信息失败，无法获取UID"}
             
-            # 构建消息
-            data = member_data['data']
-            logger.info(f"成员信息数据: {data}")
+            # 提取uid
+            member_info = member_data['data']
+            uid = member_info.get('uid') or member_info.get('user_id') or member_info.get('id')
+            if not uid:
+                logger.error("无法从成员信息中获取UID")
+                return {"error": True, "msg": "无法获取成员UID"}
             
-            # 尝试不同的字段名
-            uid = data.get('uid') or data.get('user_id') or data.get('id') or '未知'
-            tmp_id = data.get('tmpId') or data.get('tmp_id') or data.get('tmpid') or '未知'
-            tmp_name = data.get('tmpName') or data.get('tmp_name') or data.get('name') or '未知'
-            tmp_role = data.get('tmpRole') or data.get('tmp_role') or data.get('role') or '未知'
-            team_number = data.get('teamNumber') or data.get('team_number') or data.get('team') or '未知'
-            steam_id = data.get('steamId') or data.get('steam_id') or '未知'
-            qq = data.get('qq') or data.get('QQ') or '未知'
-            email = data.get('email') or data.get('Email') or '未知'
-            join_date = data.get('joinDate') or data.get('join_date') or data.get('joined_at') or '未知'
-            quit_date = data.get('quitDate') or data.get('quit_date') or data.get('left_at') or None
-            state = data.get('state') or data.get('status') or 0
-            point = data.get('point') or data.get('points') or data.get('score') or 0
+            # 获取VTCM API Token
+            token = self._cfg_str('vtcm_api_token', '').strip()
+            if not token:
+                logger.error("VTCM API Token未配置")
+                return {"error": True, "msg": "VTCM API Token未配置"}
             
-            message = f"🆔用户ID: {uid}"
-            message += f"\n🎮TMP ID: {tmp_id}"
-            message += f"\n😀TMP名称: {tmp_name}"
-            message += f"\n👔TMP角色: {tmp_role}"
-            message += f"\n🚚车队编号: {team_number}"
-            message += f"\n🔗Steam ID: {steam_id}"
-            message += f"\n💬QQ: {qq}"
-            message += f"\n📧邮箱: {email}"
-            message += f"\n📅加入日期: {join_date}"
-            if quit_date:
-                message += f"\n📅退出日期: {quit_date}"
-            state_text = '正常' if state == 1 else '异常'
-            message += f"\n📋状态: {state_text}"
-            message += f"\n🏆积分: {point}"
+            # 构建请求数据（使用uid数组格式）
+            request_data = [int(uid)]
             
-            yield event.plain_result(message)
+            url = f"https://open.vtcm.link/members/remove?token={token}"
+            logger.info(f"删除成员API请求: {url}, 数据: {request_data}")
+            async with self.session.post(url, json=request_data, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
+                logger.info(f"删除成员API响应状态: {resp.status}")
+                if resp.status == 200:
+                    api_data = await resp.json()
+                    logger.info(f"删除成员API响应数据: {api_data}")
+                    # 检查API返回的数据结构
+                    if isinstance(api_data, dict):
+                        # 尝试不同的成功判断方式
+                        if api_data.get('code') == 200 or api_data.get('success') or api_data.get('ok'):
+                            # 尝试不同的数据字段
+                            return {"error": False, "data": api_data.get('data', api_data.get('result', api_data)), "member_info": member_info}
+                        else:
+                            logger.error(f"删除成员API错误: {api_data}")
+                            return {"error": True}
+                    return {"error": False, "data": api_data, "member_info": member_info}
+                else:
+                    return {"error": True}
         except Exception as e:
-            logger.error(f"成员查询命令错误: {e}")
-            yield event.plain_result("查询成员信息失败，请稍后重试")
+            logger.error(f"删除成员API错误: {e}")
+            return {"error": True}
+    
+    async def _change_point(self, uid, change_type, quantity, reason=None):
+        """修改VTCM平台成员积分"""
+        if not self.session:
+            return {"error": True}
+        
+        try:
+            # 获取VTCM API Token
+            token = self._cfg_str('vtcm_api_token', '').strip()
+            if not token:
+                logger.error("VTCM API Token未配置")
+                return {"error": True, "msg": "VTCM API Token未配置"}
+            
+            # 构建请求数据
+            request_data = {
+                "uid": int(uid),
+                "changeType": change_type,
+                "quantity": quantity,
+                "reason": reason
+            }
+            
+            url = f"https://open.vtcm.link/members/point/change?token={token}"
+            logger.info(f"修改积分API请求: {url}, 数据: {request_data}")
+            async with self.session.post(url, json=request_data, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
+                logger.info(f"修改积分API响应状态: {resp.status}")
+                if resp.status == 200:
+                    api_data = await resp.json()
+                    logger.info(f"修改积分API响应数据: {api_data}")
+                    # 检查API返回的数据结构
+                    if isinstance(api_data, dict):
+                        # 尝试不同的成功判断方式
+                        if api_data.get('code') == 200 or api_data.get('success') or api_data.get('ok'):
+                            # 尝试不同的数据字段
+                            return {"error": False, "data": api_data.get('data', api_data.get('result', api_data))}
+                        else:
+                            logger.error(f"修改积分API错误: {api_data}")
+                            return {"error": True}
+                    return {"error": False, "data": api_data}
+                else:
+                    return {"error": True}
+        except Exception as e:
+            logger.error(f"修改积分API错误: {e}")
+            return {"error": True}
+    
+    @filter.command("活动")
+    async def tmpevent(self, event: AstrMessageEvent):
+        """查询VTCM平台活动列表。"""
+        # 此函数仅用于在 AstrBot 行为列表中显示功能
+        # 实际处理通过事件监听器 _on_any_message_dispatch 完成
+        # 不处理任何实际的命令逻辑
+        return
+    
+    @filter.command("信息")
+    async def tmpmember(self, event: AstrMessageEvent):
+        """查询VTCM平台成员信息。"""
+        # 此函数仅用于在 AstrBot 行为列表中显示功能
+        # 实际处理通过事件监听器 _on_any_message_dispatch 完成
+        # 不处理任何实际的命令逻辑
+        return
     
     @filter.command("修改密码")
-    async def tmppassword(self, event: AstrMessageEvent):
-        """[命令: 修改密码] 修改VTCM平台密码。"""
-        message_str = event.message_str.strip()
-        match = re.search(r'修改密码\s*(\d+)\s*(\S+)', message_str)
-        if not match:
-            yield event.plain_result("用法: 修改密码 [用户ID] [新密码]")
-            return
-        
-        uid = match.group(1)
-        password = match.group(2)
-        
-        if len(password) < 6:
-            yield event.plain_result("密码长度至少6位")
-            return
-        
-        try:
-            # 检查是否为群聊消息（通过获取群组ID来判断）
-            try:
-                # 尝试获取群组ID
-                group_id = event.get_group_id()
-                is_group = bool(group_id)
-            except AttributeError:
-                # 如果没有get_group_id方法，尝试其他方式
-                try:
-                    is_group = hasattr(event, 'group_id') and event.group_id
-                except:
-                    is_group = False
-            
-            if is_group:
-                yield event.plain_result("为保护个人信息安全，请私发机器人进行密码修改")
-                return
-            result = await self._change_password(uid, password)
-            if result.get("error"):
-                error_msg = result.get("msg", "修改密码失败，请稍后重试")
-                yield event.plain_result(error_msg)
-                return
-            
-            yield event.plain_result("密码修改成功")
-        except Exception as e:
-            logger.error(f"修改密码命令错误: {e}")
-            yield event.plain_result("修改密码失败，请稍后重试")
-        
+    async def tmp_change_password(self, event: AstrMessageEvent):
+        """修改VTCM平台密码。"""
+        # 此函数仅用于在 AstrBot 行为列表中显示功能
+        # 实际处理通过事件监听器 _on_any_message_dispatch 完成
+        # 不处理任何实际的命令逻辑
+        return
+    
+    @filter.command("成员管理")
+    async def tmp_member_help_cmd(self, event: AstrMessageEvent):
+        """显示车队成员管理功能菜单。"""
+        # 此函数仅用于在 AstrBot 行为列表中显示功能
+        # 实际处理通过事件监听器 _on_any_message_dispatch 完成
+        # 不处理任何实际的命令逻辑
+        return
+
     async def terminate(self):
         """插件卸载时的清理工作：关闭HTTP会话。"""
         self._fullmap_task = None
@@ -4194,7 +5041,7 @@ class TmpBotPlugin(Star):
                 return "查询活动列表失败"
             
             # 构建消息
-            message = f"活动总数: {event_data['data'].get('total', 0)}\n\n"
+            message = f"活动列表\n\n"
             
             rows = event_data['data'].get('rows', [])
             # 只显示前5条活动信息
@@ -4206,9 +5053,6 @@ class TmpBotPlugin(Star):
                 message += f"📅活动名称: {event_item.get('eventName', '未知')}"
                 message += f"\n🕐开始时间: {event_item.get('startTime', '未知')}"
                 message += f"\n🕐结束时间: {event_item.get('endTime', '未知')}"
-                state = event_item.get('state', 0)
-                state_text = '未开始' if state == 1 else '进行中' if state == 2 else '已结束'
-                message += f"\n📋状态: {state_text}"
                 if event_item.get('serverName'):
                     message += f"\n🖥服务器: {event_item.get('serverName')}"
                 if event_item.get('autoCheckInEnable') == 1:
@@ -4225,7 +5069,7 @@ class TmpBotPlugin(Star):
             return "查询活动列表失败"
     
     async def trigger_member_query(self, uid='', tmp_id='', qq=''):
-        """主动触发成员查询"""
+        """主动触发信息指令"""
         try:
             if not uid and not tmp_id and not qq:
                 return "请输入查询参数 (uid/tmpId/qq)"
@@ -4254,7 +5098,7 @@ class TmpBotPlugin(Star):
             
             return message
         except Exception as e:
-            logger.error(f"主动触发成员查询失败: {e}")
+            logger.error(f"主动触发信息指令失败: {e}")
             return "查询成员信息失败"
     
     async def trigger_password_change(self, uid, password):
