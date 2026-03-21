@@ -3,7 +3,7 @@
 
 """
 astrbot-plugin-tmp-bot
-欧卡2TMP查询插件 (版本 1.8.0)
+欧卡2TMP查询插件 (版本 1.8.1)
 """
 
 import re
@@ -209,7 +209,7 @@ class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
 
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.7.4", "https://github.com/BGYdook/astrbot-plugin-tmp-bot")
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.8.1", "https://github.com/BGYdook/astrbot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context, config=None):  # 接收 context 和 config
         super().__init__(context)              # 将 context 传给父类
@@ -2328,7 +2328,8 @@ class TmpBotPlugin(Star):
                 yield event.plain_result("删除成员失败，请稍后重试")
             return
         
-        if re.match(r'^加积分\s+(\d+|@\S+)\s+\d+\s*$', msg) or (msg.startswith("加积分") and has_at):
+        if re.match(r'^加积分\s+(\S+)\s+\d+\s*$', msg) or (msg.startswith("加积分") and has_at):
+            uid = None
             tmp_id = None
             quantity = None
             
@@ -2346,13 +2347,29 @@ class TmpBotPlugin(Star):
                     yield event.plain_result("该用户未绑定TMP ID，请先绑定后再操作")
                     return
             else:
-                # 普通输入TMP ID的情况
-                match = re.search(r'加积分\s*(\d+)\s*(\d+)', msg)
+                # 普通输入参数的情况
+                match = re.search(r'加积分\s+(\S+)\s+(\d+)', msg)
                 if not match:
-                    yield event.plain_result("用法: 加积分 [TMP ID] [积分数量]")
+                    yield event.plain_result("用法: 加积分 [TMP ID/UID] [积分数量]")
                     return
-                tmp_id = match.group(1)
+                param = match.group(1)
                 quantity = int(match.group(2))
+                
+                # 自动识别参数类型：依次尝试不同的参数类型
+                # 1. 先尝试作为TMP ID查询
+                member_data = await self._get_member_info('', param, '')
+                if not member_data.get("error"):
+                    tmp_id = param
+                    logger.info(f"加积分自动识别为TMP ID: {tmp_id}")
+                else:
+                    # 2. 再尝试作为UID查询
+                    member_data = await self._get_member_info(param, '', '')
+                    if not member_data.get("error"):
+                        uid = param
+                        logger.info(f"加积分自动识别为UID: {uid}")
+                    else:
+                        yield event.plain_result("未找到该用户信息，请检查输入的参数是否正确")
+                        return
             
             # 检查加减积分功能是否启用
             vtcm_point_feature_enable = self._cfg_bool('vtcm_point_feature_enable', False)
@@ -2377,34 +2394,43 @@ class TmpBotPlugin(Star):
                     pass
             
             try:
-                # 通过tmpId查询用户信息，获取uid
-                member_data = await self._get_member_info('', tmp_id, '')
+                # 根据参数类型查询用户信息
+                if uid:
+                    # 直接使用UID查询用户信息
+                    member_data = await self._get_member_info(uid, '', '')
+                else:
+                    # 通过tmpId查询用户信息，获取uid
+                    member_data = await self._get_member_info('', tmp_id, '')
+                
                 if member_data.get("error"):
                     error_msg = member_data.get("msg", "查询成员信息失败，请稍后重试")
                     yield event.plain_result(error_msg)
                     return
                 
                 member_info = member_data['data']
-                uid = member_info.get('uid') or member_info.get('user_id') or member_info.get('id')
-                if not uid:
+                final_uid = member_info.get('uid') or member_info.get('user_id') or member_info.get('id')
+                if not final_uid:
                     yield event.plain_result("未找到成员UID")
                     return
                 
                 # 执行加积分操作
-                result = await self._change_point(uid, 1, quantity)
+                result = await self._change_point(final_uid, 1, quantity)
                 if result.get("error"):
                     error_msg = result.get("msg", "加积分失败，请稍后重试")
                     yield event.plain_result(error_msg)
                     return
                 
                 # 再次查询成员信息，获取更新后的积分
-                updated_member_data = await self._get_member_info('', tmp_id, '')
+                if uid:
+                    updated_member_data = await self._get_member_info(uid, '', '')
+                else:
+                    updated_member_data = await self._get_member_info('', tmp_id, '')
                 updated_member_info = updated_member_data.get('data', {})
                 
                 # 构建成员信息消息
                 member_message = "积分添加成功！\n\n"
-                member_message += f"🆔用户ID: {uid}\n"
-                member_message += f"🎮TMP ID: {tmp_id}\n"
+                member_message += f"🆔用户ID: {final_uid}\n"
+                member_message += f"🎮TMP ID: {updated_member_info.get('tmpId', '未知')}\n"
                 member_message += f"😀TMP名称: {updated_member_info.get('tmpName', '未知')}\n"
                 member_message += f"🚚车队编号: {updated_member_info.get('teamNumber', '未知')}\n"
                 member_message += f"🏆当前积分: {updated_member_info.get('point', 0)}\n"
@@ -2416,7 +2442,8 @@ class TmpBotPlugin(Star):
                 yield event.plain_result("加积分失败，请稍后重试")
             return
         
-        if re.match(r'^减积分\s+(\d+|@\S+)\s+\d+\s*$', msg) or (msg.startswith("减积分") and has_at):
+        if re.match(r'^减积分\s+(\S+)\s+\d+\s*$', msg) or (msg.startswith("减积分") and has_at):
+            uid = None
             tmp_id = None
             quantity = None
             
@@ -2434,13 +2461,29 @@ class TmpBotPlugin(Star):
                     yield event.plain_result("该用户未绑定TMP ID，请先绑定后再操作")
                     return
             else:
-                # 普通输入TMP ID的情况
-                match = re.search(r'减积分\s*(\d+)\s*(\d+)', msg)
+                # 普通输入参数的情况
+                match = re.search(r'减积分\s+(\S+)\s+(\d+)', msg)
                 if not match:
-                    yield event.plain_result("用法: 减积分 [TMP ID] [积分数量]")
+                    yield event.plain_result("用法: 减积分 [TMP ID/UID] [积分数量]")
                     return
-                tmp_id = match.group(1)
+                param = match.group(1)
                 quantity = int(match.group(2))
+                
+                # 自动识别参数类型：依次尝试不同的参数类型
+                # 1. 先尝试作为TMP ID查询
+                member_data = await self._get_member_info('', param, '')
+                if not member_data.get("error"):
+                    tmp_id = param
+                    logger.info(f"减积分自动识别为TMP ID: {tmp_id}")
+                else:
+                    # 2. 再尝试作为UID查询
+                    member_data = await self._get_member_info(param, '', '')
+                    if not member_data.get("error"):
+                        uid = param
+                        logger.info(f"减积分自动识别为UID: {uid}")
+                    else:
+                        yield event.plain_result("未找到该用户信息，请检查输入的参数是否正确")
+                        return
             
             # 检查加减积分功能是否启用
             vtcm_point_feature_enable = self._cfg_bool('vtcm_point_feature_enable', False)
@@ -2465,34 +2508,43 @@ class TmpBotPlugin(Star):
                     pass
             
             try:
-                # 通过tmpId查询用户信息，获取uid
-                member_data = await self._get_member_info('', tmp_id, '')
+                # 根据参数类型查询用户信息
+                if uid:
+                    # 直接使用UID查询用户信息
+                    member_data = await self._get_member_info(uid, '', '')
+                else:
+                    # 通过tmpId查询用户信息，获取uid
+                    member_data = await self._get_member_info('', tmp_id, '')
+                
                 if member_data.get("error"):
                     error_msg = member_data.get("msg", "查询成员信息失败，请稍后重试")
                     yield event.plain_result(error_msg)
                     return
                 
                 member_info = member_data['data']
-                uid = member_info.get('uid') or member_info.get('user_id') or member_info.get('id')
-                if not uid:
+                final_uid = member_info.get('uid') or member_info.get('user_id') or member_info.get('id')
+                if not final_uid:
                     yield event.plain_result("未找到成员UID")
                     return
                 
                 # 执行减积分操作
-                result = await self._change_point(uid, 2, quantity)
+                result = await self._change_point(final_uid, 2, quantity)
                 if result.get("error"):
                     error_msg = result.get("msg", "减积分失败，请稍后重试")
                     yield event.plain_result(error_msg)
                     return
                 
                 # 再次查询成员信息，获取更新后的积分
-                updated_member_data = await self._get_member_info('', tmp_id, '')
+                if uid:
+                    updated_member_data = await self._get_member_info(uid, '', '')
+                else:
+                    updated_member_data = await self._get_member_info('', tmp_id, '')
                 updated_member_info = updated_member_data.get('data', {})
                 
                 # 构建成员信息消息
                 member_message = "积分扣除成功！\n\n"
-                member_message += f"🆔用户ID: {uid}\n"
-                member_message += f"🎮TMP ID: {tmp_id}\n"
+                member_message += f"🆔用户ID: {final_uid}\n"
+                member_message += f"🎮TMP ID: {updated_member_info.get('tmpId', '未知')}\n"
                 member_message += f"😀TMP名称: {updated_member_info.get('tmpName', '未知')}\n"
                 member_message += f"🚚车队编号: {updated_member_info.get('teamNumber', '未知')}\n"
                 member_message += f"🏆当前积分: {updated_member_info.get('point', 0)}\n"
@@ -2647,6 +2699,12 @@ class TmpBotPlugin(Star):
                     if not tmp_id:
                         yield event.plain_result("该用户未绑定TMP ID，请先绑定后再操作")
                         return
+                    # 通过TMP ID查询用户信息
+                    member_data = await self._get_member_info('', tmp_id, '')
+                    if member_data.get("error"):
+                        error_msg = member_data.get("msg", "查询成员信息失败，请稍后重试")
+                        yield event.plain_result(error_msg)
+                        return
                 elif not query_param:
                     # 无参数的情况，查询自己
                     user_id = event.get_sender_id()
@@ -2654,29 +2712,40 @@ class TmpBotPlugin(Star):
                     if bound_tmp_id:
                         logger.info(f"用户已绑定，使用绑定的TMP ID: {bound_tmp_id}")
                         tmp_id = bound_tmp_id
+                        # 通过TMP ID查询用户信息
+                        member_data = await self._get_member_info('', tmp_id, '')
+                        if member_data.get("error"):
+                            error_msg = member_data.get("msg", "查询成员信息失败，请稍后重试")
+                            yield event.plain_result(error_msg)
+                            return
                     else:
-                        yield event.plain_result("请输入查询参数 (tmpId/qq) 或先使用「绑定 [TMP ID]」命令绑定您的账号")
+                        yield event.plain_result("请输入查询参数 (tmpId/uid/qq) 或先使用「绑定 [TMP ID]」命令绑定您的账号")
                         return
                 else:
                     # 普通输入参数的情况
                     logger.info(f"信息参数: {query_param}")
                     
-                    if query_param.isdigit():
-                        if len(query_param) >= 10:
-                            qq = query_param
-                            logger.info(f"判断为QQ: {qq}")
-                        else:
-                            tmp_id = query_param
-                            logger.info(f"判断为TMP ID: {tmp_id}")
-                    else:
+                    # 自动识别参数类型：依次尝试不同的参数类型
+                    # 1. 先尝试作为TMP ID查询
+                    member_data = await self._get_member_info('', query_param, '')
+                    if not member_data.get("error"):
                         tmp_id = query_param
-                        logger.info(f"判断为TMP ID: {tmp_id}")
-                
-                member_data = await self._get_member_info(uid, tmp_id, qq)
-                if member_data.get("error"):
-                    error_msg = member_data.get("msg", "查询成员信息失败，请稍后重试")
-                    yield event.plain_result(error_msg)
-                    return
+                        logger.info(f"自动识别为TMP ID: {tmp_id}")
+                    else:
+                        # 2. 再尝试作为UID查询
+                        member_data = await self._get_member_info(query_param, '', '')
+                        if not member_data.get("error"):
+                            uid = query_param
+                            logger.info(f"自动识别为UID: {uid}")
+                        else:
+                            # 3. 最后尝试作为QQ查询
+                            member_data = await self._get_member_info('', '', query_param)
+                            if not member_data.get("error"):
+                                qq = query_param
+                                logger.info(f"自动识别为QQ: {qq}")
+                            else:
+                                yield event.plain_result("未找到该用户信息，请检查输入的参数是否正确")
+                                return
                 
                 data = member_data['data']
                 logger.info(f"成员信息数据: {data}")
