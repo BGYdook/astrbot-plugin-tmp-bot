@@ -1,5 +1,5 @@
  # astrbot-plugin-tmp-bot
-[![npm](https://img.shields.io/badge/npm-v1.8.0-blue)](https://github.com/BGYdook/astrbot-plugin-tmp-bot)
+[![npm](https://img.shields.io/badge/npm-v1.8.1-blue)](https://github.com/BGYdook/astrbot-plugin-tmp-bot)
 
 ![:astrbot_plugin_tmp_bot](https://count.getloli.com/@:astrbot_plugin_tmp-bot?theme=minecraft)
 
@@ -44,6 +44,11 @@ https://truckersmp.com/developers/api
 ### 非常感谢[晚安](https://github.com/nulijiazaizhong)和[鲸鱼](https://github.com/jingyu8127)提供的帮助
 
 ## 历史更新
+
+## 版本v1.8.1
+- 修复 信息功能在查询时无法使用UID的问题
+- 修复 加积分功能在修改时无法使用UID的问题
+- 修复 减积分功能在修改时无法使用UID的问题
 
 ## 版本v1.8.0
 - 支持 信息功能支持艾特查询
