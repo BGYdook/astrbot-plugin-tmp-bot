@@ -439,10 +439,14 @@ class TmpBotPlugin(Star):
                             try:
                                 await self.context.send_message(fmt, message)
                                 sent = True
+                                logger.info(f"新账号监控: session格式 {fmt} 发送成功")
                                 break
-                            except Exception:
-                                continue
-                    logger.info(f"新账号监控: 已发送 {len(new_players)} 条新注册通知到 QQ {target_qq}")
+                            except Exception as e:
+                                logger.info(f"新账号监控: session格式 {fmt} 失败: {e}")
+                    if sent:
+                        logger.info(f"新账号监控: 已发送 {len(new_players)} 条新注册通知到 QQ {target_qq}")
+                    else:
+                        logger.error(f"新账号监控: 所有发送方式均失败，消息未能发送到 QQ {target_qq}")
                 except Exception as e:
                     logger.error(f"新账号监控: 发送失败: {e}")
 
