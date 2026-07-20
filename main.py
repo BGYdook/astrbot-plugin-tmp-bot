@@ -3,7 +3,7 @@
 
 """
 astrbot-plugin-tmp-bot
-欧卡2TMP查询插件 (版本 1.8.1)
+欧卡2TMP查询插件 (版本 1.8.2)
 """
 
 import re
@@ -209,7 +209,7 @@ class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
 
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.8.1", "https://github.com/BGYdook/astrbot-plugin-tmp-bot")
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.8.2", "https://github.com/BGYdook/astrbot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context, config=None):  # 接收 context 和 config
         super().__init__(context)              # 将 context 传给父类
@@ -1149,15 +1149,15 @@ class TmpBotPlugin(Star):
                     raise SteamIdNotFoundException(f"Steam ID {steam_id} 未在 TruckersMP 中注册。")
                 else:
                     raise ApiResponseException(f"Steam ID查询API返回错误状态码: {response.status}")
-        except aiohttp.ClientError:
-            raise NetworkException("Steam ID查询服务网络请求失败")
-        except asyncio.TimeoutError:
-            raise NetworkException("请求 Steam ID 查询服务超时")
         except SteamIdNotFoundException:
-            raise 
+            raise
+        except aiohttp.ClientError:
+            raise SteamIdNotFoundException("Steam ID查询服务网络请求失败")
+        except asyncio.TimeoutError:
+            raise SteamIdNotFoundException("请求 Steam ID 查询服务超时")
         except Exception as e:
             logger.error(f"通过 SteamID 查询 TMP ID 失败: {e}")
-            raise NetworkException("查询失败")
+            raise SteamIdNotFoundException(f"Steam ID {steam_id} 查询失败，请检查ID是否正确")
             
     def _get_steam_id_from_player_info(self, player_info: Dict) -> Optional[str]:
         steam_id = player_info.get('steamID64')
@@ -1836,6 +1836,90 @@ class TmpBotPlugin(Star):
             logger.error(f"文本转图片渲染失败: {e}", exc_info=True)
             return None
 
+    async def _get_vtc_history(self, tmp_id: str) -> List[Dict[str, Any]]:
+        """查询玩家的历史VTC（车队）记录。
+        主接口: TruckyApp v2/truckersmp/player（含 vtc + vtcHistory）
+        备用: da.vtcm.link, evmapi.tianyi.world
+        最后回退: TruckersMP 官方 API
+        """
+        if not self.session:
+            return []
+
+        def _build_item(name: str, tag: str = '', role: str = '',
+                        join_date: str = '', leave_date: str = '') -> Dict[str, Any]:
+            return {'vtcName': name, 'vtcTag': tag, 'role': role,
+                    'joinDate': join_date, 'leaveDate': leave_date}
+
+        # 1) TruckyApp truckersmp/player — 双层包装 {response: {error: false, response: {vtc, vtcHistory}}}
+        try:
+            url = f"https://api.truckyapp.com/v2/truckersmp/player?playerID={tmp_id}"
+            logger.info(f"VTC历史: TruckyApp -> {url}")
+            async with self.session.get(url, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    outer = data.get('response', data) if isinstance(data, dict) else {}
+                    inner = outer.get('response') if isinstance(outer, dict) else None
+                    if isinstance(inner, dict) and outer.get('error') is False:
+                        # 检查是否开启了 VTC 历史显示
+                        display_vtc_history = inner.get('displayVTCHistory')
+                        if display_vtc_history is False:
+                            logger.info("VTC历史: 用户设置了VTC历史为私密状态")
+                            return None  # None 表示私密
+                        result: List[Dict[str, Any]] = []
+                        # 不包含当前车队，只返回历史车队
+                        history = inner.get('vtcHistory')
+                        if isinstance(history, list):
+                            for h in history:
+                                if isinstance(h, dict):
+                                    result.append(_build_item(
+                                        name=h.get('name', ''),
+                                        tag=h.get('tag', ''),
+                                        role=h.get('role', ''),
+                                        join_date=h.get('joinDate', ''),
+                                        leave_date=h.get('leftDate', ''),
+                                    ))
+                        if result:
+                            logger.info(f"VTC历史: TruckyApp 获取到 {len(result)} 条记录")
+                            return result
+                        logger.info("VTC历史: TruckyApp 响应中无 VTC 数据")
+                    else:
+                        logger.info(f"VTC历史: TruckyApp error={outer.get('error')}")
+                else:
+                    logger.info(f"VTC历史: TruckyApp HTTP {resp.status}")
+        except Exception as e:
+            logger.error(f"VTC历史: TruckyApp 请求异常: {e}")
+
+        # 2) da.vtcm.link
+        try:
+            url = f"https://da.vtcm.link/vtc/history?tmpId={tmp_id}"
+            logger.info(f"VTC历史: da.vtcm.link -> {url}")
+            async with self.session.get(url, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    items = data.get('data') or data.get('response') or []
+                    if isinstance(items, list) and items:
+                        logger.info(f"VTC历史: da.vtcm.link 获取到 {len(items)} 条记录")
+                        return items
+        except Exception as e:
+            logger.error(f"VTC历史: da.vtcm.link 异常: {e}")
+
+        # 3) evmapi.tianyi.world
+        try:
+            url = f"https://evmapi.tianyi.world/vtc/history?tmpId={tmp_id}"
+            logger.info(f"VTC历史: evmapi.tianyi.world -> {url}")
+            async with self.session.get(url, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    items = data.get('data') or data.get('response') or []
+                    if isinstance(items, list) and items:
+                        logger.info(f"VTC历史: evmapi.tianyi.world 获取到 {len(items)} 条记录")
+                        return items
+        except Exception as e:
+            logger.error(f"VTC历史: evmapi.tianyi.world 异常: {e}")
+
+        # 不使用官方 API 回退 - 官方 API 只返回当前 VTC，不是历史记录
+        return []
+
     async def _get_vtc_member_role(self, tmp_id: str, vtc_info: Optional[Dict] = None) -> Optional[str]:
         """查询玩家在车队内的角色。
         优先策略：
@@ -2196,6 +2280,11 @@ class TmpBotPlugin(Star):
             return
         if re.match(r'^菜单\s*$', msg):
             async for r in self.tmphelp(event):
+                yield r
+            return
+        
+        if re.match(r'^历史车队(\s*\d+)?\s*$', msg) or (msg.startswith("历史车队") and has_at):
+            async for r in self.tmpvtc_history(event):
                 yield r
             return
         
@@ -3224,7 +3313,7 @@ class TmpBotPlugin(Star):
             body += f"📶所在位置: {location_display}\n"
         else:
             body += f"📶在线状态: 离线\n"
-            body += f"📶上次在线: {last_online_formatted}\n"
+            body += f"📶上次在线: {last_online_formatted}"
         
         # 头像（强制按组件发送）
         show_avatar_cfg = self._cfg_bool('query_show_avatar_enable', True)
@@ -3248,8 +3337,6 @@ class TmpBotPlugin(Star):
                     logger.error("查询详情: 生成 Image(URL) 组件失败，跳过头像", exc_info=True)
             else:
                 logger.info("查询详情: 无可用头像URL，跳过头像组件")
-            # 确保正文从新的一行开始（适配不同适配器的换行处理）
-            components.append(Plain("\r\n"))
             components.append(Plain(body))
             yield event.chain_result(components)
             return
@@ -3840,7 +3927,7 @@ class TmpBotPlugin(Star):
         if self._bind_tmp_id(user_id, tmp_id, player_name):
             
             message = f"绑定成功！\n"
-            message += f"已将您的账号与TMP玩家 {player_name} (ID: {tmp_id}) 绑定\n"         
+            message += f"已将您的账号与TMP玩家 {player_name} (ID: {tmp_id}) 绑定"         
             yield event.plain_result(message)
         else:
             yield event.plain_result("绑定失败，请稍后重试")
@@ -4681,6 +4768,114 @@ class TmpBotPlugin(Star):
         except Exception:
             yield event.plain_result("查询版本信息失败，请稍后重试。")
 
+    async def tmpvtc_history(self, event: AstrMessageEvent):
+        """[命令: 历史车队] 查询玩家的历史VTC (车队) 记录。支持输入 TMP ID 或绑定查询。"""
+        message_str = event.message_str.strip()
+        user_id = event.get_sender_id()
+
+        target_user_id = None
+        message_obj = getattr(event, "message_obj", None)
+        if message_obj is not None:
+            try:
+                chain = getattr(message_obj, "message", None) or []
+                for seg in chain:
+                    seg_type = getattr(seg, "type", None)
+                    if isinstance(seg, dict):
+                        seg_type = seg.get("type") or seg_type
+                    if isinstance(seg_type, str) and seg_type.lower() == "at":
+                        uid = (
+                            getattr(seg, "qq", None)
+                            or getattr(seg, "user_id", None)
+                            or getattr(seg, "id", None)
+                        )
+                        if isinstance(seg, dict):
+                            uid = seg.get("qq") or seg.get("user_id") or seg.get("id") or uid
+                        if uid:
+                            target_user_id = str(uid)
+                            break
+                    uid2 = getattr(seg, "qq", None)
+                    if isinstance(seg, dict):
+                        uid2 = seg.get("qq") or uid2
+                    if uid2:
+                        target_user_id = str(uid2)
+                        break
+            except Exception:
+                target_user_id = None
+
+        match = re.search(r'历史车队\s*(\d+)?', message_str)
+        input_id = match.group(1) if match else None
+
+        tmp_id = None
+        if input_id:
+            if len(input_id) == 17 and input_id.startswith('7'):
+                try:
+                    tmp_id = await self._get_tmp_id_from_steam_id(input_id)
+                except SteamIdNotFoundException as e:
+                    yield event.plain_result(str(e))
+                    return
+                except NetworkException as e:
+                    yield event.plain_result(f"SteamID查询失败: {str(e)}\n请稍后重试或使用TMP ID查询")
+                    return
+            else:
+                tmp_id = input_id
+        else:
+            bind_user_id = target_user_id or user_id
+            tmp_id = self._get_bound_tmp_id(bind_user_id)
+
+        if not tmp_id:
+            yield event.plain_result("请输入正确的玩家编号 TMP ID，或者先绑定账号")
+            return
+
+        try:
+            player_info = await self._get_player_info(tmp_id)
+        except PlayerNotFoundException as e:
+            yield event.plain_result(str(e))
+            return
+        except Exception as e:
+            yield event.plain_result(f"查询失败: {str(e)}")
+            return
+
+        player_name = player_info.get('name', '未知')
+
+        try:
+            vtc_history = await self._get_vtc_history(tmp_id)
+        except Exception as e:
+            logger.error(f"历史车队查询异常: {e}")
+            yield event.plain_result("查询历史车队失败，请稍后重试")
+            return
+
+        if vtc_history is None:
+            yield event.plain_result("该用户的历史车队为私密状态")
+            return
+        if not vtc_history:
+            yield event.plain_result("暂无历史车队记录")
+            return
+
+        lines = []
+        for idx, vtc_item in enumerate(vtc_history, 1):
+            vtc_name = vtc_item.get('vtcName') or vtc_item.get('name') or vtc_item.get('vtc_name') or '未知'
+            vtc_tag = vtc_item.get('vtcTag') or vtc_item.get('tag') or vtc_item.get('vtc_tag', '')
+            join_date = vtc_item.get('joinDate') or vtc_item.get('join_date') or vtc_item.get('joinedAt', '')
+            leave_date = vtc_item.get('leaveDate') or vtc_item.get('leave_date') or vtc_item.get('leftAt', '')
+            role = vtc_item.get('role') or vtc_item.get('position') or vtc_item.get('vtcRole', '')
+
+            entry = f"{idx}. {vtc_name}"
+            if vtc_tag:
+                entry += f" [{vtc_tag}]"
+            if role:
+                entry += f"\n   职位: {role}"
+            if join_date:
+                entry += f"\n   加入时间: {join_date}"
+            if leave_date:
+                entry += f"\n   离开时间: {leave_date}"
+            lines.append(entry)
+
+        message = "\n".join(lines)
+        if len(vtc_history) > 10:
+            message += f"\n\n... 共 {len(vtc_history)} 条记录，仅显示前10条"
+
+        yield event.plain_result(message)
+
     async def tmphelp(self, event: AstrMessageEvent):
         """[命令: 菜单] 显示本插件的命令使用说明。"""
         help_text = """TMP查询姬指令菜单
@@ -4695,7 +4890,8 @@ class TmpBotPlugin(Star):
 7. 足迹 [服务器简称] [TMP ID]
 8. 服务器
 9. 插件版本
-使用提示: 绑定后可直接发送 查询/定位/足迹 [服务器简称]
+10. 历史车队 [TMP ID]
+使用提示: 绑定后可直接发送 查询/定位/足迹/历史车队 [服务器简称]
 """
         yield event.plain_result(help_text)
         
@@ -5085,6 +5281,11 @@ class TmpBotPlugin(Star):
         # 不处理任何实际的命令逻辑
         return
     
+    @filter.command("历史车队")
+    async def cmd_tmp_vtc_history(self, event: AstrMessageEvent):
+        """查询玩家的历史VTC车队记录。"""
+        return
+
     @filter.command("成员管理")
     async def tmp_member_help_cmd(self, event: AstrMessageEvent):
         """显示车队成员管理功能菜单。"""
