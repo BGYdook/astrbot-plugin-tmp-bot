@@ -414,7 +414,30 @@ class TmpBotPlugin(Star):
 
                 # 尝试发送私聊消息
                 try:
-                    await self.context.send_message(target_qq, message)
+                    # 获取平台适配器并直接调用发私信
+                    from astrbot.api.all import Context
+                    sent = False
+                    if hasattr(self.context, 'platform') and self.context.platform:
+                        try:
+                            await self.context.platform.send_private_msg(target_qq, message)
+                            sent = True
+                        except Exception as plat_err:
+                            logger.info(f"新账号监控: platform.send_private_msg 失败: {plat_err}")
+                    if not sent and hasattr(self.context, 'adapters'):
+                        adapters_dict = self.context.adapters or {}
+                        for adapter_name, adapter in adapters_dict.items():
+                            try:
+                                if hasattr(adapter, 'send_private_msg'):
+                                    await adapter.send_private_msg(target_qq, message)
+                                    sent = True
+                                    break
+                            except Exception:
+                                continue
+                    if not sent:
+                        # 最后尝试 session 格式：default:user_id:private
+                        session_str = f"default:{target_qq}:private"
+                        await self.context.send_message(session_str, message)
+                        sent = True
                     logger.info(f"新账号监控: 已发送 {len(new_players)} 条新注册通知到 QQ {target_qq}")
                 except Exception as e:
                     logger.error(f"新账号监控: 发送失败: {e}")
