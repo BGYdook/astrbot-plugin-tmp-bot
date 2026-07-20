@@ -434,10 +434,14 @@ class TmpBotPlugin(Star):
                             except Exception:
                                 continue
                     if not sent:
-                        # 最后尝试 session 格式：adapter:message_type:user_id
-                        session_str = f"default:private:{target_qq}"
-                        await self.context.send_message(session_str, message)
-                        sent = True
+                        # 尝试不同的 session 格式
+                        for fmt in (f"aiocqhttp:{target_qq}", f"aiocqhttp:Friend:{target_qq}", f"aiocqhttp:friend:{target_qq}"):
+                            try:
+                                await self.context.send_message(fmt, message)
+                                sent = True
+                                break
+                            except Exception:
+                                continue
                     logger.info(f"新账号监控: 已发送 {len(new_players)} 条新注册通知到 QQ {target_qq}")
                 except Exception as e:
                     logger.error(f"新账号监控: 发送失败: {e}")
