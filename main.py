@@ -415,34 +415,38 @@ class TmpBotPlugin(Star):
                 # 尝试发送私聊消息
                 try:
                     sent = False
-                    # 尝试直接用纯 QQ 号作为 session（某些平台支持不加 MessageType）
-                    if not sent:
+                    # 1) 尝试所有 session 格式
+                    for fmt in (
+                        f"aiocqhttp:{target_qq}",
+                        f"aiocqhttp:Friend:{target_qq}",
+                        f"aiocqhttp:PRIVATE:{target_qq}",
+                        f"aiocqhttp:FRIEND_MESSAGE:{target_qq}",
+                    ):
                         try:
-                            await self.context.send_message(target_qq, message)
+                            await self.context.send_message(fmt, message)
                             sent = True
-                            logger.info(f"新账号监控: send_message(纯QQ号) 成功")
+                            logger.info(f"新账号监控: session={fmt} 成功")
+                            break
                         except Exception as e:
-                            logger.debug(f"新账号监控: send_message(纯QQ号) 失败: {e}")
-                    # 尝试 MessageType=person
-                    if not sent:
-                        try:
-                            await self.context.send_message(f"aiocqhttp:person:{target_qq}", message)
-                            sent = True
-                            logger.info("新账号监控: session aiocqhttp:person 成功")
-                        except Exception as e:
-                            logger.debug(f"新账号监控: aiocqhttp:person 失败: {e}")
-                    # 遍历适配器，通过 call_api 调用 OneBot 标准的 send_private_msg
+                            logger.info(f"新账号监控: session={fmt} 失败: {e}")
+                    # 2) 遍历适配器的 call_api
                     if not sent and hasattr(self.context, 'adapters'):
-                        adapters_dict = self.context.adapters or {}
-                        for adapter_name, adapter in adapters_dict.items():
-                            if hasattr(adapter, 'call_api'):
+                        for ad_name, ad in (self.context.adapters or {}).items():
+                            if not hasattr(ad, 'call_api'):
+                                continue
+                            for action, kw in (
+                                ('send_msg', {'message_type': 'private', 'user_id': int(target_qq), 'message': message}),
+                                ('send_private_msg', {'user_id': int(target_qq), 'message': message}),
+                            ):
                                 try:
-                                    resp = await adapter.call_api('send_private_msg', user_id=int(target_qq), message=message)
+                                    await ad.call_api(action, **kw)
                                     sent = True
-                                    logger.info(f"新账号监控: adapter.call_api(send_private_msg) 成功")
+                                    logger.info(f"新账号监控: {ad_name}.call_api({action}) 成功")
                                     break
                                 except Exception as e:
-                                    logger.debug(f"新账号监控: adapter.call_api(send_private_msg) 失败: {e}")
+                                    logger.info(f"新账号监控: {ad_name}.call_api({action}) 失败: {e}")
+                            if sent:
+                                break
                     if sent:
                         logger.info(f"新账号监控: 已发送 {len(new_players)} 条新注册通知到 QQ {target_qq}")
                     else:
