@@ -3279,7 +3279,7 @@ class TmpBotPlugin(Star):
             body += f"📶所在位置: {location_display}\n"
         else:
             body += f"📶在线状态: 离线\n"
-            body += f"📶上次在线: {last_online_formatted}\n"
+            body += f"📶上次在线: {last_online_formatted}"
         
         # 头像（强制按组件发送）
         show_avatar_cfg = self._cfg_bool('query_show_avatar_enable', True)
