@@ -1838,135 +1838,102 @@ class TmpBotPlugin(Star):
 
     async def _get_vtc_history(self, tmp_id: str) -> List[Dict[str, Any]]:
         """查询玩家的历史VTC（车队）记录。
-        按顺序尝试多个 API 端点。多级回退确保总能有数据返回。
+        主接口: TruckyApp v2/truckersmp/player（含 vtc + vtcHistory）
+        备用: da.vtcm.link, evmapi.tianyi.world
+        最后回退: TruckersMP 官方 API
         """
         if not self.session:
             return []
 
-        def _extract_items(data: Any) -> Optional[List[Dict[str, Any]]]:
-            """从各类 API 响应中提取 VTC 历史列表。"""
-            if isinstance(data, list):
-                return data if data else None
-            if not isinstance(data, dict):
-                return None
-            # 跳过只有 error/response 结构的官方 TMP API（仅含当前 VTC）
-            keys = set(data.keys())
-            if keys == {'error', 'response'}:
-                return None
-            # 遍历常见数据容器字段
-            for key in ('data', 'response', 'result', 'rows', 'list', 'items', 'records',
-                        'vtcHistory', 'history', 'vtc_history', 'vtcList', 'vtcs'):
-                items = data.get(key)
-                if isinstance(items, list) and items:
-                    return items
-            # 递归检查 data 下的字典是否本身就是容器
-            for key in ('data', 'response'):
-                val = data.get(key)
-                if isinstance(val, dict):
-                    # da.vtcm.link 风格: {code:200, data: {...}}
-                    inner = val.get('data') or val.get('response') or val.get('items') or val.get('list')
-                    if isinstance(inner, list) and inner:
-                        return inner
-                    # 也可能是直接一个 VTC 对象列表在 data 内部
-                    for ik in ('vtcHistory', 'history', 'vtcs', 'records'):
-                        inner2 = val.get(ik)
-                        if isinstance(inner2, list) and inner2:
-                            return inner2
-            return None
+        def _build_item(name: str, tag: str = '', role: str = '',
+                        join_date: str = '', leave_date: str = '') -> Dict[str, Any]:
+            return {'vtcName': name, 'vtcTag': tag, 'role': role,
+                    'joinDate': join_date, 'leaveDate': leave_date}
 
-        # 端点列表（按优先级）
-        endpoints = [
-            ("da.vtcm.link", f"https://da.vtcm.link/vtc/history?tmpId={tmp_id}"),
-            ("da.vtcm.link(alt)", f"https://da.vtcm.link/player/vtcHistory?tmpId={tmp_id}"),
-            ("evmapi.tianyi.world", f"https://evmapi.tianyi.world/vtc/history?tmpId={tmp_id}"),
-            # TruckyApp V2 玩家接口（可能含 VTC 历史）
-            ("TruckyApp v2", f"https://api.truckyapp.com/v2/player/{tmp_id}"),
-        ]
-
-        for name, url in endpoints:
-            try:
-                logger.info(f"VTC历史: 尝试 {name} -> {url}")
-                async with self.session.get(url, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
-                    status = resp.status
-                    if status != 200:
-                        logger.info(f"VTC历史: {name} HTTP {status}")
-                        continue
-                    raw_text = await resp.text()
-                    logger.info(f"VTC历史: {name} 响应前400字符: {raw_text[:400]}")
-                    try:
-                        data = json.loads(raw_text)
-                    except json.JSONDecodeError:
-                        continue
-                    items = _extract_items(data)
-                    if items:
-                        # 进一步验证：确保返回的数据确实包含 VTC 名称
-                        valid_items = []
-                        for it in items:
-                            if isinstance(it, dict):
-                                name_field = it.get('vtcName') or it.get('name') or it.get('vtc_name') or it.get('company')
-                                if name_field:
-                                    valid_items.append(it)
-                        if valid_items:
-                            logger.info(f"VTC历史: {name} 成功获取 {len(valid_items)} 条有效记录")
-                            return valid_items
-                        logger.info(f"VTC历史: {name} 返回 {len(items)} 条数据但均无 VTC 名称字段")
-                    else:
-                        logger.info(f"VTC历史: {name} 无法提取数据, keys={list(data.keys()) if isinstance(data, dict) else type(data).__name__}")
-            except Exception as e:
-                logger.error(f"VTC历史: {name} 请求异常: {e.__class__.__name__}: {e}")
-
-        # 最后回退：使用已有的 player_info + 官方 API 构建当前 VTC 记录
-        logger.info(f"VTC历史: 外部接口全部失败，使用官方 API 获取当前 VTC")
+        # 1) TruckyApp truckersmp/player — 双层包装 {response: {error: false, response: {vtc, vtcHistory}}}
         try:
-            player_url = f"https://api.truckersmp.com/v2/player/{tmp_id}"
-            async with self.session.get(player_url, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
+            url = f"https://api.truckyapp.com/v2/truckersmp/player?playerID={tmp_id}"
+            logger.info(f"VTC历史: TruckyApp -> {url}")
+            async with self.session.get(url, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    outer = data.get('response', data) if isinstance(data, dict) else {}
+                    inner = outer.get('response') if isinstance(outer, dict) else None
+                    if isinstance(inner, dict) and outer.get('error') is False:
+                        result: List[Dict[str, Any]] = []
+                        cur_vtc = inner.get('vtc')
+                        if isinstance(cur_vtc, dict) and cur_vtc.get('id'):
+                            result.append(_build_item(
+                                name=cur_vtc.get('name', ''),
+                                tag=cur_vtc.get('tag', ''),
+                                role=cur_vtc.get('role', ''),
+                            ))
+                        history = inner.get('vtcHistory')
+                        if isinstance(history, list):
+                            for h in history:
+                                if isinstance(h, dict):
+                                    result.append(_build_item(
+                                        name=h.get('name', ''),
+                                        tag=h.get('tag', ''),
+                                        role=h.get('role', ''),
+                                        join_date=h.get('joinDate', ''),
+                                        leave_date=h.get('leftDate', ''),
+                                    ))
+                        if result:
+                            logger.info(f"VTC历史: TruckyApp 获取到 {len(result)} 条记录")
+                            return result
+                        logger.info("VTC历史: TruckyApp 响应中无 VTC 数据")
+                    else:
+                        logger.info(f"VTC历史: TruckyApp error={outer.get('error')}")
+                else:
+                    logger.info(f"VTC历史: TruckyApp HTTP {resp.status}")
+        except Exception as e:
+            logger.error(f"VTC历史: TruckyApp 请求异常: {e}")
+
+        # 2) da.vtcm.link
+        try:
+            url = f"https://da.vtcm.link/vtc/history?tmpId={tmp_id}"
+            logger.info(f"VTC历史: da.vtcm.link -> {url}")
+            async with self.session.get(url, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    items = data.get('data') or data.get('response') or []
+                    if isinstance(items, list) and items:
+                        logger.info(f"VTC历史: da.vtcm.link 获取到 {len(items)} 条记录")
+                        return items
+        except Exception as e:
+            logger.error(f"VTC历史: da.vtcm.link 异常: {e}")
+
+        # 3) evmapi.tianyi.world
+        try:
+            url = f"https://evmapi.tianyi.world/vtc/history?tmpId={tmp_id}"
+            logger.info(f"VTC历史: evmapi.tianyi.world -> {url}")
+            async with self.session.get(url, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    items = data.get('data') or data.get('response') or []
+                    if isinstance(items, list) and items:
+                        logger.info(f"VTC历史: evmapi.tianyi.world 获取到 {len(items)} 条记录")
+                        return items
+        except Exception as e:
+            logger.error(f"VTC历史: evmapi.tianyi.world 异常: {e}")
+
+        # 4) 官方 TruckersMP API - 仅当前 VTC
+        try:
+            url = f"https://api.truckersmp.com/v2/player/{tmp_id}"
+            logger.info(f"VTC历史: 回退 官方 API -> {url}")
+            async with self.session.get(url, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     if data.get('error') is False and data.get('response'):
                         vtc = data['response'].get('vtc')
                         if isinstance(vtc, dict) and vtc.get('id'):
-                            # 顺便获取详细角色信息
-                            vtc_items = []
-                            vtc_id = vtc.get('id')
-                            vtc_name = vtc.get('name', '')
-                            vtc_tag = vtc.get('tag', '')
-                            role = vtc.get('role', '')
-                            join_date = ''
-                            try:
-                                vtc_url = f"https://api.truckersmp.com/v2/vtc/{vtc_id}"
-                                async with self.session.get(vtc_url, timeout=self._cfg_int('api_timeout_seconds', 10)) as vtc_resp:
-                                    if vtc_resp.status == 200:
-                                        vtc_data = await vtc_resp.json()
-                                        if vtc_data.get('error') is False:
-                                            members = vtc_data.get('response', {}).get('members', [])
-                                            for member in members:
-                                                if str(member.get('user_id', '')) == str(tmp_id):
-                                                    role_id = member.get('role_id')
-                                                    if role_id:
-                                                        try:
-                                                            role_url = f"https://api.truckersmp.com/v2/vtc/{vtc_id}/role/{role_id}"
-                                                            async with self.session.get(role_url, timeout=self._cfg_int('api_timeout_seconds', 10)) as role_resp:
-                                                                if role_resp.status == 200:
-                                                                    rd = await role_resp.json()
-                                                                    if rd.get('error') is False:
-                                                                        role = rd.get('response', {}).get('name', role)
-                                                        except Exception:
-                                                            pass
-                                                    join_date = member.get('joinDate', '') or member.get('join_date', '')
-                                                    break
-                            except Exception:
-                                pass
-                            vtc_items.append({
-                                'vtcName': vtc_name,
-                                'vtcTag': vtc_tag,
-                                'role': role,
-                                'joinDate': join_date,
-                                'leaveDate': '',
-                            })
-                            logger.info(f"VTC历史: 官方API回退成功，当前 VTC: {vtc_name}")
-                            return vtc_items
+                            result = [_build_item(name=vtc.get('name', ''), tag=vtc.get('tag', ''),
+                                                  role=vtc.get('role', ''))]
+                            logger.info(f"VTC历史: 官方 API 返回当前 VTC")
+                            return result
         except Exception as e:
-            logger.error(f"VTC历史: 官方 API 回退也失败了: {e}")
+            logger.error(f"VTC历史: 官方 API 异常: {e}")
 
         return []
 
