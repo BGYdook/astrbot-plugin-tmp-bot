@@ -426,33 +426,44 @@ class TmpBotPlugin(Star):
 
     async def _get_recent_players(self, count: int = 10) -> List[Dict[str, Any]]:
         """获取TMP最近注册的玩家列表。
-        使用 da.vtcm.link API 获取最新注册的账号。
+        TMP ID 是自增的，从当前已知最大ID递减查询来获取最近注册的玩家。
         """
         if not self.session:
             return []
-        try:
-            url = f"https://da.vtcm.link/player/newest?size={count}"
-            logger.info(f"新账号监控: 请求 {url}")
-            async with self.session.get(url, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    items = data.get('data') or data.get('response') or []
-                    if isinstance(items, list):
-                        return items
-        except Exception as e:
-            logger.error(f"新账号监控: API请求异常: {e}")
-            # 回退：使用官方 API 的最新注册玩家
+        # 从文件中读取当前已知最大ID，从该ID往前查找新注册玩家
+        max_id = self._new_account_last_max_id
+        if max_id <= 0:
+            max_id = 6180000  # 合理的起始ID（2026年基准）
+        players: List[Dict[str, Any]] = []
+        # 每次查 count*2 个ID，因为有些ID可能不存在
+        search_count = count * 2
+        start_id = max_id + search_count  # 从当前最大ID+偏移量开始查
+        for offset in range(search_count):
+            tid = start_id - offset
+            if tid <= 0:
+                break
             try:
-                url2 = f"https://api.truckersmp.com/v2/player/recent"
-                async with self.session.get(url2, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp2:
-                    if resp2.status == 200:
-                        data2 = await resp2.json()
-                        items2 = data2.get('response', [])
-                        if isinstance(items2, list):
-                            return items2[:count]
+                url = f"https://api.truckersmp.com/v2/player/{tid}"
+                async with self.session.get(url, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        if data.get('error') is False and data.get('response'):
+                            player = data['response']
+                            pid = player.get('id')
+                            if pid and int(pid) > self._new_account_last_max_id:
+                                players.append({
+                                    'id': pid,
+                                    'name': player.get('name', ''),
+                                    'joinDate': player.get('joinDate', ''),
+                                    'steamID64': player.get('steamID64', ''),
+                                    'vtc': player.get('vtc', {}),
+                                })
+                                if len(players) >= count:
+                                    break
             except Exception:
-                pass
-        return []
+                continue  # 跳过错误，继续查下一个
+        logger.info(f"新账号监控: 通过递减ID找到 {len(players)} 个新玩家")
+        return players
 
     def _start_file_list_task(self) -> None:
         """启动文件清单定时任务"""
