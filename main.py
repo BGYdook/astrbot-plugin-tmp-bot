@@ -1860,14 +1860,13 @@ class TmpBotPlugin(Star):
                     outer = data.get('response', data) if isinstance(data, dict) else {}
                     inner = outer.get('response') if isinstance(outer, dict) else None
                     if isinstance(inner, dict) and outer.get('error') is False:
+                        # 检查是否开启了 VTC 历史显示
+                        display_vtc_history = inner.get('displayVTCHistory')
+                        if display_vtc_history is False:
+                            logger.info("VTC历史: 用户设置了VTC历史为私密状态")
+                            return None  # None 表示私密
                         result: List[Dict[str, Any]] = []
-                        cur_vtc = inner.get('vtc')
-                        if isinstance(cur_vtc, dict) and cur_vtc.get('id'):
-                            result.append(_build_item(
-                                name=cur_vtc.get('name', ''),
-                                tag=cur_vtc.get('tag', ''),
-                                role=cur_vtc.get('role', ''),
-                            ))
+                        # 不包含当前车队，只返回历史车队
                         history = inner.get('vtcHistory')
                         if isinstance(history, list):
                             for h in history:
@@ -4861,6 +4860,9 @@ class TmpBotPlugin(Star):
             yield event.plain_result("查询历史车队失败，请稍后重试")
             return
 
+        if vtc_history is None:
+            yield event.plain_result("该用户的历史车队为私密状态")
+            return
         if not vtc_history:
             yield event.plain_result("暂无历史车队记录")
             return
