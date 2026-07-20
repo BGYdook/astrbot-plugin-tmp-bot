@@ -225,6 +225,8 @@ class TmpBotPlugin(Star):
         self._fullmap_last_fetch_ts: float = 0.0
         self._fullmap_next_fetch_ts: float = 0.0
         self._fullmap_task: Optional[asyncio.Task] = None
+        self._new_account_monitor_task: Optional[asyncio.Task] = None
+        self._new_account_last_ids: set = set()
         self._fullmap_lock = asyncio.Lock()
         self._fullmap_fetch_lock = asyncio.Lock()
 
@@ -281,6 +283,17 @@ class TmpBotPlugin(Star):
         )
         logger.info(f"TMP Bot 插件HTTP会话已创建，超时 {timeout_sec}s")
         self._fullmap_task = None
+        self._start_new_account_monitor_task()
+        # 加载上次监控的最大 TMP ID
+        self._new_account_last_max_id = 0
+        try:
+            root = os.getcwd() if hasattr(self, 'bind_file') else os.getcwd()
+            sid_path = os.path.join(root, 'data', 'tmp_last_max_id.txt')
+            if os.path.exists(sid_path):
+                with open(sid_path, 'r') as f:
+                    self._new_account_last_max_id = int(f.read().strip() or '0')
+        except Exception:
+            self._new_account_last_max_id = 0
 
 
     def _get_fullmap_interval(self) -> int:
@@ -297,6 +310,149 @@ class TmpBotPlugin(Star):
         while True:
             await self._fetch_fullmap()
             await asyncio.sleep(self._get_fullmap_interval())
+
+    def _start_new_account_monitor_task(self) -> None:
+        """启动新账号监控后台任务（按可配置的间隔）。"""
+        if self._new_account_monitor_task and not self._new_account_monitor_task.done():
+            return
+        self._new_account_monitor_task = asyncio.create_task(self._new_account_monitor_loop())
+
+    async def _new_account_monitor_loop(self) -> None:
+        """新账号监控循环 - 按可配置的间隔查询最新注册账号，通知指定用户。
+        首次启用时会立即发送调试通知（显示最近注册的玩家）。
+        """
+        await asyncio.sleep(10)  # 启动后等待10秒
+        _first_run = True
+        while True:
+            interval_minutes = max(5, self._cfg_int('new_account_monitor_interval_minutes', 30))
+            sleep_seconds = interval_minutes * 60
+            try:
+                if not self.session:
+                    await asyncio.sleep(sleep_seconds)
+                    continue
+                if not self._cfg_bool('new_account_monitor_enable', False):
+                    await asyncio.sleep(sleep_seconds)
+                    continue
+                target_qq = self._cfg_str('new_account_monitor_target_qq', '').strip()
+                if not target_qq:
+                    await asyncio.sleep(sleep_seconds)
+                    continue
+
+                try:
+                    count = self._cfg_int('new_account_monitor_count', 10)
+                    players = await self._get_recent_players(count)
+                except Exception as e:
+                    logger.error(f"新账号监控: 查询失败: {e}")
+                    await asyncio.sleep(sleep_seconds)
+                    continue
+
+                if not players:
+                    await asyncio.sleep(sleep_seconds)
+                    continue
+
+                new_players = []
+                if _first_run:
+                    # 首次运行直接使用查询结果，方便调试
+                    new_players = players
+                    _first_run = False
+                else:
+                    # 过滤出新的账号（ID大于上次记录的最大ID）
+                    for p in players:
+                        pid = p.get('id')
+                        if pid and int(pid) > self._new_account_last_max_id:
+                            new_players.append(p)
+
+                if not new_players:
+                    await asyncio.sleep(sleep_seconds)
+                    continue
+
+                # 更新最大ID
+                for p in new_players:
+                    pid = p.get('id')
+                    if pid:
+                        self._new_account_last_max_id = max(self._new_account_last_max_id, int(pid))
+
+                # 保存新的最大ID
+                try:
+                    root = os.getcwd()
+                    sid_path = os.path.join(root, 'data', 'tmp_last_max_id.txt')
+                    os.makedirs(os.path.dirname(sid_path), exist_ok=True)
+                    with open(sid_path, 'w') as f:
+                        f.write(str(self._new_account_last_max_id))
+                except Exception:
+                    pass
+
+                # 构建通知消息
+                prefix = "🔧 [调试] " if _first_run else ""
+                message = f"{prefix}🆕 TMP 新注册账号通知 ({len(new_players)}个)\n"
+                message += "=" * 30 + "\n"
+                for p in new_players[:count]:
+                    pid = p.get('id', '')
+                    name = p.get('name', '未知')
+                    join_date = p.get('joinDate', '') or p.get('created_at', '') or p.get('registrationDate', '')
+                    if join_date:
+                        try:
+                            clean_str = str(join_date).replace('T', ' ').split('.')[0].replace('Z', '')
+                            dt = datetime.strptime(clean_str, '%Y-%m-%d %H:%M:%S') + timedelta(hours=8)
+                            join_date = dt.strftime('%Y-%m-%d %H:%M:%S')
+                        except Exception:
+                            pass
+                    steam_id = p.get('steamID64') or p.get('steamid64') or p.get('steamID', '')
+                    vtc = p.get('vtc') or {}
+                    vtc_name = ''
+                    if isinstance(vtc, dict):
+                        vtc_name = vtc.get('name', '')
+                    message += f"\n🆔 {pid}"
+                    if name:
+                        message += f" | {name}"
+                    if steam_id:
+                        message += f"\n   SteamID: {steam_id}"
+                    if vtc_name:
+                        message += f"\n   车队: {vtc_name}"
+                    if join_date:
+                        message += f"\n   注册: {join_date}"
+
+                # 尝试发送私聊消息
+                try:
+                    await self.context.send_message(target_qq, message)
+                    logger.info(f"新账号监控: 已发送 {len(new_players)} 条新注册通知到 QQ {target_qq}")
+                except Exception as e:
+                    logger.error(f"新账号监控: 发送失败: {e}")
+
+            except Exception as e:
+                logger.error(f"新账号监控: 循环异常: {e}")
+
+            await asyncio.sleep(sleep_seconds)
+
+    async def _get_recent_players(self, count: int = 10) -> List[Dict[str, Any]]:
+        """获取TMP最近注册的玩家列表。
+        使用 da.vtcm.link API 获取最新注册的账号。
+        """
+        if not self.session:
+            return []
+        try:
+            url = f"https://da.vtcm.link/player/newest?size={count}"
+            logger.info(f"新账号监控: 请求 {url}")
+            async with self.session.get(url, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    items = data.get('data') or data.get('response') or []
+                    if isinstance(items, list):
+                        return items
+        except Exception as e:
+            logger.error(f"新账号监控: API请求异常: {e}")
+            # 回退：使用官方 API 的最新注册玩家
+            try:
+                url2 = f"https://api.truckersmp.com/v2/player/recent"
+                async with self.session.get(url2, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp2:
+                    if resp2.status == 200:
+                        data2 = await resp2.json()
+                        items2 = data2.get('response', [])
+                        if isinstance(items2, list):
+                            return items2[:count]
+            except Exception:
+                pass
+        return []
 
     def _start_file_list_task(self) -> None:
         """启动文件清单定时任务"""
@@ -4881,9 +5037,9 @@ class TmpBotPlugin(Star):
             if role:
                 entry += f"\n   职位: {role}"
             if join_date:
-                entry += f"\n   加入: {join_date}"
+                entry += f"\n   加入时间: {join_date}"
             if leave_date:
-                entry += f"\n   离开: {leave_date}"
+                entry += f"\n   离开时间: {leave_date}"
             lines.append(entry)
 
         message = "\n".join(lines)
