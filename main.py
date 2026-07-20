@@ -3927,7 +3927,7 @@ class TmpBotPlugin(Star):
         if self._bind_tmp_id(user_id, tmp_id, player_name):
             
             message = f"绑定成功！\n"
-            message += f"已将您的账号与TMP玩家 {player_name} (ID: {tmp_id}) 绑定\n"         
+            message += f"已将您的账号与TMP玩家 {player_name} (ID: {tmp_id}) 绑定"         
             yield event.plain_result(message)
         else:
             yield event.plain_result("绑定失败，请稍后重试")
