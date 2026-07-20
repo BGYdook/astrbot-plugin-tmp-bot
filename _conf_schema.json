@@ -56,7 +56,7 @@
   },
   "vtcm_feature_enable": {
     "type": "bool",
-    "default": true,
+    "default": false,
     "title": "启用车队平台功能",
     "description": "开启后，将启用活动、信息、修改密码等车队平台专属功能。"
   },
