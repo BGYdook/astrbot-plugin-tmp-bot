@@ -414,35 +414,35 @@ class TmpBotPlugin(Star):
 
                 # 尝试发送私聊消息
                 try:
-                    # 获取平台适配器并直接调用发私信
-                    from astrbot.api.all import Context
                     sent = False
-                    if hasattr(self.context, 'platform') and self.context.platform:
+                    # 尝试直接用纯 QQ 号作为 session（某些平台支持不加 MessageType）
+                    if not sent:
                         try:
-                            await self.context.platform.send_private_msg(target_qq, message)
+                            await self.context.send_message(target_qq, message)
                             sent = True
-                        except Exception as plat_err:
-                            logger.info(f"新账号监控: platform.send_private_msg 失败: {plat_err}")
+                            logger.info(f"新账号监控: send_message(纯QQ号) 成功")
+                        except Exception as e:
+                            logger.debug(f"新账号监控: send_message(纯QQ号) 失败: {e}")
+                    # 尝试 MessageType=person
+                    if not sent:
+                        try:
+                            await self.context.send_message(f"aiocqhttp:person:{target_qq}", message)
+                            sent = True
+                            logger.info("新账号监控: session aiocqhttp:person 成功")
+                        except Exception as e:
+                            logger.debug(f"新账号监控: aiocqhttp:person 失败: {e}")
+                    # 遍历适配器，通过 call_api 调用 OneBot 标准的 send_private_msg
                     if not sent and hasattr(self.context, 'adapters'):
                         adapters_dict = self.context.adapters or {}
                         for adapter_name, adapter in adapters_dict.items():
-                            try:
-                                if hasattr(adapter, 'send_private_msg'):
-                                    await adapter.send_private_msg(target_qq, message)
+                            if hasattr(adapter, 'call_api'):
+                                try:
+                                    resp = await adapter.call_api('send_private_msg', user_id=int(target_qq), message=message)
                                     sent = True
+                                    logger.info(f"新账号监控: adapter.call_api(send_private_msg) 成功")
                                     break
-                            except Exception:
-                                continue
-                    if not sent:
-                        # 尝试不同的 session 格式
-                        for fmt in (f"aiocqhttp:{target_qq}", f"aiocqhttp:Friend:{target_qq}", f"aiocqhttp:friend:{target_qq}"):
-                            try:
-                                await self.context.send_message(fmt, message)
-                                sent = True
-                                logger.info(f"新账号监控: session格式 {fmt} 发送成功")
-                                break
-                            except Exception as e:
-                                logger.info(f"新账号监控: session格式 {fmt} 失败: {e}")
+                                except Exception as e:
+                                    logger.debug(f"新账号监控: adapter.call_api(send_private_msg) 失败: {e}")
                     if sent:
                         logger.info(f"新账号监控: 已发送 {len(new_players)} 条新注册通知到 QQ {target_qq}")
                     else:
@@ -2115,23 +2115,7 @@ class TmpBotPlugin(Star):
         except Exception as e:
             logger.error(f"VTC历史: evmapi.tianyi.world 异常: {e}")
 
-        # 4) 官方 TruckersMP API - 仅当前 VTC
-        try:
-            url = f"https://api.truckersmp.com/v2/player/{tmp_id}"
-            logger.info(f"VTC历史: 回退 官方 API -> {url}")
-            async with self.session.get(url, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    if data.get('error') is False and data.get('response'):
-                        vtc = data['response'].get('vtc')
-                        if isinstance(vtc, dict) and vtc.get('id'):
-                            result = [_build_item(name=vtc.get('name', ''), tag=vtc.get('tag', ''),
-                                                  role=vtc.get('role', ''))]
-                            logger.info(f"VTC历史: 官方 API 返回当前 VTC")
-                            return result
-        except Exception as e:
-            logger.error(f"VTC历史: 官方 API 异常: {e}")
-
+        # 不使用官方 API 回退 - 官方 API 只返回当前 VTC，不是历史记录
         return []
 
     async def _get_vtc_member_role(self, tmp_id: str, vtc_info: Optional[Dict] = None) -> Optional[str]:
