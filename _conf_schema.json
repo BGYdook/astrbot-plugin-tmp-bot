@@ -77,29 +77,5 @@
     "default": false,
     "title": "启用加减积分功能",
     "description": "开启后，将启用加积分和减积分功能。"
-  },
-  "new_account_monitor_enable": {
-    "type": "bool",
-    "default": false,
-    "title": "启用新注册账号监控",
-    "description": "开启后，每30分钟自动查询TMP最近新注册的账号并通知指定用户。"
-  },
-  "new_account_monitor_target_qq": {
-    "type": "string",
-    "default": "",
-    "title": "新账号通知目标QQ号",
-    "description": "新注册账号通知将发送到此QQ号的私聊中。"
-  },
-  "new_account_monitor_interval_minutes": {
-    "type": "int",
-    "default": 30,
-    "title": "监控检查间隔（分钟）",
-    "description": "每间隔多长时间查询一次新注册账号，单位分钟。建议不小于5分钟。"
-  },
-  "new_account_monitor_count": {
-    "type": "int",
-    "default": 10,
-    "title": "每次通知的账号数量",
-    "description": "每次查询并显示最近注册的账号数量，默认10个。"
   }
 }
