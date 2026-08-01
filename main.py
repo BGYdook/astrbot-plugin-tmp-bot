@@ -4116,7 +4116,7 @@ class TmpBotPlugin(Star):
     L.circleMarker(latlng, { color:'#2f2f2f', weight:2, fillColor:(p.tmpId === '{{ me_id }}' ? '#57bd00' : '#3ca7ff'), fillOpacity:1, radius:(p.tmpId === '{{ me_id }}' ? 6 : 5) }).addTo(map);
   }
   var centerLL = map.unproject(c.calc(centerX, centerY+80), c.maxZoom);
-  map.setView(centerLL, 9);
+  map.setView(centerLL, 8);
   setTimeout(function(){}, 800); // 轻微延时确保瓦片加载
 </script>
 """
