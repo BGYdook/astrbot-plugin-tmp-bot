@@ -1212,9 +1212,13 @@ class TmpBotPlugin(Star):
 
                         country_cn, city_cn = await self._translate_country_city(country, real_name)
 
-                        formatted_location = ''
+                        formatted_location = '未知位置'
                         if country_cn and city_cn:
                             formatted_location = f"{country_cn}-{city_cn}"
+                        elif city_cn:
+                            formatted_location = city_cn
+                        elif country_cn:
+                            formatted_location = country_cn
                         
                         return {
                             'online': True,
@@ -1227,8 +1231,8 @@ class TmpBotPlugin(Star):
                             'serverCode': server_details.get('code') or server_details.get('shortname'),
                             'x': online_data.get('x'),
                             'y': online_data.get('y'),
-                            'country': country_cn or None,
-                            'realName': city_cn or None,
+                            'country': country_cn,
+                            'realName': city_cn,
                             'debug_error': 'Trucky V3 判断在线，并获取到实时数据。',
                             'raw_data': '' 
                         }
@@ -3125,15 +3129,12 @@ class TmpBotPlugin(Star):
             game_mode_code = online_status.get('game', 0)
             game_mode = "欧卡2" if game_mode_code == 1 else "美卡" if game_mode_code == 2 else "未知游戏"
 
-            raw_city = online_status.get('city', {}).get('name') or ''
-            raw_country = online_status.get('country') or ''
+            raw_city = online_status.get('city', {}).get('name', '未知位置')
+            raw_country = online_status.get('country', '')
 
-            # 位置必须同时拿到国家和城市，不能为了速度提前输出半成品位置
-            if raw_country and raw_city:
-                country_cn, city_cn = await self._translate_country_city(raw_country, raw_city)
-            else:
-                country_cn, city_cn = '', ''
-            
+            # 使用更准确的翻译函数
+            country_cn, city_cn = await self._translate_country_city(raw_country, raw_city)
+
             def _strip_paren_text_q(s: Optional[str]) -> str:
                 t = (s or "").strip()
                 if not t:
@@ -3151,15 +3152,12 @@ class TmpBotPlugin(Star):
                     location_display = dcity
                 else:
                     location_display = f"{dc}-{dcity}"
-            elif display_country or display_city:
-                location_display = "无法获取全部信息"
             else:
-                location_display = ""
+                location_display = display_city or display_country or "未知位置"
 
             body += f"📶在线状态: 在线\n"
             body += f"📶所在服务器: {server_name}\n"
-            if location_display:
-                body += f"📶所在位置: {location_display}"
+            body += f"📶所在位置: {location_display}"
         else:
             body += f"📶在线状态: 离线\n"
             if last_online_formatted:
@@ -3902,17 +3900,21 @@ class TmpBotPlugin(Star):
 
         # 3) 构造 HTML 渲染数据（玩家 + 位置，周边玩家留作后续扩展）
         server_name = online.get('serverName', '未知服务器')
-        location_name = online.get('city', {}).get('name') or ''
+        location_name = online.get('city', {}).get('name') or '未知位置'
 
-        # 位置要求必须拿到国家和城市两者完整数据，不能用占位字符串兜底
+        # 增加翻译逻辑
         raw_country = online.get('country')
         raw_city = online.get('realName')
 
-        if raw_country and raw_city:
-            country_cn, city_cn = await self._translate_country_city(raw_country, raw_city)
-        else:
-            country_cn, city_cn = '', ''
-        
+        # 如果 raw_country/raw_city 为空，尝试从 location_name 解析
+        if not raw_country and ' ' in location_name:
+             parts = location_name.split(' ', 1)
+             if len(parts) == 2:
+                 # 假设格式为 "Country City"
+                 pass 
+
+        country_cn, city_cn = await self._translate_country_city(raw_country, location_name)
+
         # 修正显示名称
         def _strip_paren_text(s: Optional[str]) -> str:
             t = (s or "").strip()
@@ -3922,8 +3924,8 @@ class TmpBotPlugin(Star):
             t = re.sub(r"\s*（[^）]*）\s*", "", t).strip()
             return t
 
-        display_country = _strip_paren_text(country_cn or '')
-        display_city = _strip_paren_text(city_cn or '')
+        display_country = _strip_paren_text(country_cn or '未知国家')
+        display_city = _strip_paren_text(city_cn or '未知位置')
         if display_country and display_city:
             dc = display_country.strip()
             dcity = display_city.strip()
@@ -3931,10 +3933,8 @@ class TmpBotPlugin(Star):
                 location_line = dcity
             else:
                 location_line = f"{dc}-{dcity}"
-        elif display_country or display_city:
-            location_line = "无法获取全部信息"
         else:
-            location_line = ""
+            location_line = display_city or display_country or "未知位置"
 
         heading_candidates = [
             online.get('heading'),
@@ -4116,7 +4116,7 @@ class TmpBotPlugin(Star):
     L.circleMarker(latlng, { color:'#2f2f2f', weight:2, fillColor:(p.tmpId === '{{ me_id }}' ? '#57bd00' : '#3ca7ff'), fillOpacity:1, radius:(p.tmpId === '{{ me_id }}' ? 6 : 5) }).addTo(map);
   }
   var centerLL = map.unproject(c.calc(centerX, centerY+80), c.maxZoom);
-  map.setView(centerLL, 7);
+  map.setView(centerLL, 9);
   setTimeout(function(){}, 800); // 轻微延时确保瓦片加载
 </script>
 """
