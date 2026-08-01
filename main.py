@@ -8,6 +8,7 @@ astrbot-plugin-tmp-bot
 
 import re
 import asyncio
+import math
 import aiohttp
 import json
 import os
@@ -134,6 +135,16 @@ def _format_timestamp_to_readable(timestamp_str: Optional[str]) -> str:
     except Exception:
         # 兼容性回退
         return timestamp_str.split('T')[0] if 'T' in timestamp_str else timestamp_str
+
+
+def _is_unknown_display_value(value: Optional[str]) -> bool:
+    """判断展示值是否应当被忽略。"""
+    if value is None:
+        return True
+    if not isinstance(value, str):
+        return False
+    s = value.strip()
+    return s == "" or s.lower() in {"未知", "unknown", "null", "none"}
 # -----------------------------
 
 def _format_timestamp_to_beijing(timestamp_str: Optional[str]) -> str:
@@ -159,6 +170,44 @@ def _format_timestamp_to_beijing(timestamp_str: Optional[str]) -> str:
             return dt_bj.strftime('%Y-%m-%d %H:%M:%S')
         except Exception:
             return s
+
+def _normalize_heading_to_direction(heading: Any) -> Optional[str]:
+    """把角度值转换为方向字符串，如 0°≈北、90°≈东，并附带箭头符号。"""
+    if heading is None:
+        return None
+    try:
+        if isinstance(heading, dict):
+            for key in ('heading', 'angle', 'yaw', 'rotation', 'bearing', 'direction'):
+                if key in heading:
+                    heading = heading.get(key)
+                    break
+            else:
+                return None
+        if isinstance(heading, str):
+            heading = heading.strip()
+            if not heading:
+                return None
+            heading = float(heading)
+        angle = float(heading)
+        if math.isnan(angle) or math.isinf(angle):
+            return None
+        normalized = ((angle % 360) + 360) % 360
+        directions = [
+            ("↑", "北"),
+            ("↗", "东北"),
+            ("→", "东"),
+            ("↘", "东南"),
+            ("↓", "南"),
+            ("↙", "西南"),
+            ("←", "西"),
+            ("↖", "西北"),
+        ]
+        idx = int((normalized + 22.5) % 360 / 45)
+        arrow, text = directions[idx]
+        return f"{arrow} {text}"
+    except Exception:
+        return None
+
 
 def _cleanup_cn_location_text(text: str) -> str:
     s = str(text or "").strip()
@@ -1163,13 +1212,9 @@ class TmpBotPlugin(Star):
 
                         country_cn, city_cn = await self._translate_country_city(country, real_name)
 
-                        formatted_location = '未知位置'
+                        formatted_location = ''
                         if country_cn and city_cn:
                             formatted_location = f"{country_cn}-{city_cn}"
-                        elif city_cn:
-                            formatted_location = city_cn
-                        elif country_cn:
-                            formatted_location = country_cn
                         
                         return {
                             'online': True,
@@ -1182,8 +1227,8 @@ class TmpBotPlugin(Star):
                             'serverCode': server_details.get('code') or server_details.get('shortname'),
                             'x': online_data.get('x'),
                             'y': online_data.get('y'),
-                            'country': country_cn,
-                            'realName': city_cn,
+                            'country': country_cn or None,
+                            'realName': city_cn or None,
                             'debug_error': 'Trucky V3 判断在线，并获取到实时数据。',
                             'raw_data': '' 
                         }
@@ -3079,12 +3124,15 @@ class TmpBotPlugin(Star):
             server_name = online_status.get('serverName', '未知服务器')
             game_mode_code = online_status.get('game', 0)
             game_mode = "欧卡2" if game_mode_code == 1 else "美卡" if game_mode_code == 2 else "未知游戏"
-            
-            raw_city = online_status.get('city', {}).get('name', '未知位置')
-            raw_country = online_status.get('country', '')
-            
-            # 使用更准确的翻译函数
-            country_cn, city_cn = await self._translate_country_city(raw_country, raw_city)
+
+            raw_city = online_status.get('city', {}).get('name') or ''
+            raw_country = online_status.get('country') or ''
+
+            # 位置必须同时拿到国家和城市，不能为了速度提前输出半成品位置
+            if raw_country and raw_city:
+                country_cn, city_cn = await self._translate_country_city(raw_country, raw_city)
+            else:
+                country_cn, city_cn = '', ''
             
             def _strip_paren_text_q(s: Optional[str]) -> str:
                 t = (s or "").strip()
@@ -3103,15 +3151,19 @@ class TmpBotPlugin(Star):
                     location_display = dcity
                 else:
                     location_display = f"{dc}-{dcity}"
+            elif display_country or display_city:
+                location_display = "无法获取全部信息"
             else:
-                location_display = display_city or display_country or "未知位置"
+                location_display = ""
 
             body += f"📶在线状态: 在线\n"
             body += f"📶所在服务器: {server_name}\n"
-            body += f"📶所在位置: {location_display}\n"
+            if location_display:
+                body += f"📶所在位置: {location_display}"
         else:
             body += f"📶在线状态: 离线\n"
-            body += f"📶上次在线: {last_online_formatted}"
+            if last_online_formatted:
+                body += f"📶上次在线: {last_online_formatted}"
         
         # 头像（强制按组件发送）
         show_avatar_cfg = self._cfg_bool('query_show_avatar_enable', True)
@@ -3355,7 +3407,9 @@ class TmpBotPlugin(Star):
 
         player_name = player_info.get('name', '未知')
         last_online_raw = stats_info.get('last_online') or player_info.get('lastOnline')
-        last_online_formatted = _format_timestamp_to_readable(last_online_raw) if last_online_raw else '未知'
+        last_online_formatted = _format_timestamp_to_readable(last_online_raw) if last_online_raw else None
+        if _is_unknown_display_value(last_online_formatted):
+            last_online_formatted = None
 
         try:
             server_ids = await self._resolve_server_ids(server_key)
@@ -3507,7 +3561,7 @@ class TmpBotPlugin(Star):
       <div class="sub">{% if start_time %}开始: {{ start_time }}{% endif %}{% if end_time %} · 结束: {{ end_time }}{% endif %}</div>
     </div>
     <div class="right">
-      <div>上次在线: {{ last_online }}</div>
+      {% if last_online %}<div>上次在线: {{ last_online }}</div>{% endif %}
     </div>
   </div>
 </div>
@@ -3655,7 +3709,7 @@ class TmpBotPlugin(Star):
             'distance_km': distance_km,
             'start_time': start_time,
             'end_time': end_time,
-            'last_online': last_online_formatted,
+            'last_online': last_online_formatted if not _is_unknown_display_value(last_online_formatted) else None,
             'map_type': map_type,
             'server_label': server_label,
             'tile_url_ets': tile_url_ets,
@@ -3675,7 +3729,8 @@ class TmpBotPlugin(Star):
         message += f"点位数: {len(points)}"
         if distance_km is not None:
             message += f" | 里程: {distance_km:.2f} km"
-        message += f"\n上次在线: {last_online_formatted}"
+        if last_online_formatted:
+            message += f"\n上次在线: {last_online_formatted}"
         yield event.plain_result(message)
 
     async def tmpbind(self, event: AstrMessageEvent):
@@ -3838,7 +3893,7 @@ class TmpBotPlugin(Star):
                 'y': fullmap_player.get('Y'),
                 'country': None,
                 'realName': None,
-                'city': {'name': '未知位置'}
+                'city': {'name': ''}
             }
         if fullmap_player:
             online['x'] = fullmap_player.get('X')
@@ -3847,20 +3902,16 @@ class TmpBotPlugin(Star):
 
         # 3) 构造 HTML 渲染数据（玩家 + 位置，周边玩家留作后续扩展）
         server_name = online.get('serverName', '未知服务器')
-        location_name = online.get('city', {}).get('name') or '未知位置'
-        
-        # 增加翻译逻辑
+        location_name = online.get('city', {}).get('name') or ''
+
+        # 位置要求必须拿到国家和城市两者完整数据，不能用占位字符串兜底
         raw_country = online.get('country')
         raw_city = online.get('realName')
-        
-        # 如果 raw_country/raw_city 为空，尝试从 location_name 解析
-        if not raw_country and ' ' in location_name:
-             parts = location_name.split(' ', 1)
-             if len(parts) == 2:
-                 # 假设格式为 "Country City"
-                 pass 
 
-        country_cn, city_cn = await self._translate_country_city(raw_country, location_name)
+        if raw_country and raw_city:
+            country_cn, city_cn = await self._translate_country_city(raw_country, raw_city)
+        else:
+            country_cn, city_cn = '', ''
         
         # 修正显示名称
         def _strip_paren_text(s: Optional[str]) -> str:
@@ -3871,8 +3922,8 @@ class TmpBotPlugin(Star):
             t = re.sub(r"\s*（[^）]*）\s*", "", t).strip()
             return t
 
-        display_country = _strip_paren_text(country_cn or '未知国家')
-        display_city = _strip_paren_text(city_cn or '未知位置')
+        display_country = _strip_paren_text(country_cn or '')
+        display_city = _strip_paren_text(city_cn or '')
         if display_country and display_city:
             dc = display_country.strip()
             dcity = display_city.strip()
@@ -3880,9 +3931,31 @@ class TmpBotPlugin(Star):
                 location_line = dcity
             else:
                 location_line = f"{dc}-{dcity}"
+        elif display_country or display_city:
+            location_line = "无法获取全部信息"
         else:
-            location_line = display_city or display_country or "未知位置"
-        
+            location_line = ""
+
+        heading_candidates = [
+            online.get('heading'),
+            online.get('direction'),
+            online.get('yaw'),
+            online.get('rotation'),
+            online.get('bearing'),
+            fullmap_player.get('Heading') if isinstance(fullmap_player, dict) else None,
+            fullmap_player.get('heading') if isinstance(fullmap_player, dict) else None,
+            fullmap_player.get('yaw') if isinstance(fullmap_player, dict) else None,
+            fullmap_player.get('rotation') if isinstance(fullmap_player, dict) else None,
+            fullmap_player.get('bearing') if isinstance(fullmap_player, dict) else None,
+        ]
+        direction_text = None
+        for candidate in heading_candidates:
+            direction_text = _normalize_heading_to_direction(candidate)
+            if direction_text:
+                break
+        if direction_text:
+            direction_text = f"正在向{direction_text}行驶"
+
         player_name = player_info.get('name') or '未知'
 
         avatar_url = self._normalize_avatar_url(player_info.get('avatar'))
@@ -3984,7 +4057,8 @@ class TmpBotPlugin(Star):
       <div class=\"sub\">{{ server_name }} 游戏中</div>
     </div>
     <div class=\"right\">
-      <div>{{ location_line }}</div>
+      {% if location_line %}<div>{{ location_line }}</div>{% endif %}
+      {% if direction_text %}<div>{{ direction_text }}</div>{% endif %}
     </div>
   </div>
 </div>
@@ -4060,6 +4134,7 @@ class TmpBotPlugin(Star):
                 'max_y': max_y,
                 'avatar': avatar_url or '',
                 'location_line': location_line,
+                'direction_text': direction_text,
                 'server_id': int(online.get('serverId') or 0),
                 'center_x': float(cx),
                 'center_y': float(cy),
@@ -4075,7 +4150,11 @@ class TmpBotPlugin(Star):
             pass
 
         # 最终回退文本
-        msg = f"玩家实时定位\n玩家名称: {player_name}\nTMP编号: {tmp_id}\n服务器: {server_name}\n位置: {location_line}"
+        msg = f"玩家实时定位\n玩家名称: {player_name}\nTMP编号: {tmp_id}\n服务器: {server_name}"
+        if location_line:
+            msg += f"\n位置: {location_line}"
+        if direction_text:
+            msg += f"\n状态: {direction_text}"
         yield event.plain_result(msg)
     # --- 定位命令结束 ---
     
