@@ -3,7 +3,7 @@
 
 """
 astrbot-plugin-tmp-bot
-欧卡2TMP查询插件 (版本 1.8.2)
+欧卡2TMP查询插件 (版本 1.8.3)
 """
 
 import re
@@ -258,7 +258,7 @@ class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
 
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.8.2", "https://github.com/BGYdook/astrbot-plugin-tmp-bot")
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.8.3", "https://github.com/BGYdook/astrbot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context, config=None):  # 接收 context 和 config
         super().__init__(context)              # 将 context 传给父类
@@ -2131,7 +2131,7 @@ class TmpBotPlugin(Star):
             async for r in self.tmprank_today(event):
                 yield r
             return
-        if re.match(r'^足迹(\s+\S+)?(\s+\d+)?\s*$', msg) or (msg.startswith("足迹") and has_at):
+        if re.match(r'^足迹(?:\s*\S+)?(?:\s*\d+)?\s*$', msg) or (msg.startswith("足迹") and has_at):
             async for r in self.tmptoday_footprint(event):
                 yield r
             return
@@ -2139,7 +2139,7 @@ class TmpBotPlugin(Star):
             async for r in self.tmpserver(event):
                 yield r
             return
-        if re.match(r'^路况(\s+\S+)?\s*$', msg):
+        if re.match(r'^路况(?:\s*\S+)?\s*$', msg):
             async for r in self.tmptraffic(event):
                 yield r
             return
@@ -3348,15 +3348,27 @@ class TmpBotPlugin(Star):
             except Exception:
                 target_user_id = None
 
-        tokens = message_str.split()
+        if message_str.startswith("足迹"):
+            rest = message_str[2:].strip()
+            if rest:
+                tokens = re.split(r"\s+", rest)
+            else:
+                tokens = []
+        else:
+            tokens = message_str.split()
+
         server_token = None
         input_id = None
-        if len(tokens) > 1:
-            for t in tokens[1:]:
-                if t.isdigit():
-                    input_id = t
-                else:
-                    server_token = t
+        if tokens:
+            first = tokens[0]
+            if first.isdigit():
+                input_id = first
+            else:
+                server_token = first
+                for t in tokens[1:]:
+                    if t.isdigit():
+                        input_id = t
+                        break
         if not server_token:
             yield event.plain_result("用法: 足迹 [服务器简称] [ID]或 足迹 [服务器简称]，例如: 足迹 s1 123 或足迹 s1")
             return
@@ -4783,7 +4795,7 @@ class TmpBotPlugin(Star):
 
     async def tmphelp(self, event: AstrMessageEvent):
         """[命令: 菜单] 显示本插件的命令使用说明。"""
-        help_text = """TMP查询姬指令菜单
+        main_help = """TMP查询姬指令菜单
 
 可用命令:
 1. 绑定 [TMP ID]
@@ -4798,36 +4810,45 @@ class TmpBotPlugin(Star):
 10. 历史车队 [TMP ID]
 使用提示: 绑定后可直接发送 查询/定位/足迹/历史车队 [服务器简称]
 """
-        yield event.plain_result(help_text)
-        
+
         # 检查车队平台功能是否启用
         vtcm_feature_enable = self._cfg_bool('vtcm_feature_enable', True)
-        if not vtcm_feature_enable:
-            return
-        
-        # 检查群白名单
-        vtcm_whitelist_groups = self._cfg_str('vtcm_whitelist_groups', '').strip()
-        if vtcm_whitelist_groups:
-            try:
-                group_id = str(event.get_group_id()) if hasattr(event, 'get_group_id') else ''
-                if not group_id:
-                    group_id = str(event.group_id) if hasattr(event, 'group_id') and event.group_id else ''
-                if group_id:
-                    # 分割并去除空格
-                    whitelist_groups = [g.strip() for g in vtcm_whitelist_groups.split(',')]
-                    if group_id not in whitelist_groups:
-                        return
-            except:
-                return
-        
-        vtcm_help_text = """车队平台专属菜单
+        vtcm_help = None
+        if vtcm_feature_enable:
+            # 检查群白名单
+            vtcm_whitelist_groups = self._cfg_str('vtcm_whitelist_groups', '').strip()
+            if vtcm_whitelist_groups:
+                try:
+                    group_id = str(event.get_group_id()) if hasattr(event, 'get_group_id') else ''
+                    if not group_id:
+                        group_id = str(event.group_id) if hasattr(event, 'group_id') and event.group_id else ''
+                    if group_id:
+                        whitelist_groups = [g.strip() for g in vtcm_whitelist_groups.split(',')]
+                        if group_id not in whitelist_groups:
+                            vtcm_help = None
+                        else:
+                            vtcm_help = """车队平台专属菜单
 
 1. 活动
 2. 今日活动
 3. 信息 [tmpId/qq](车队平台信息)
 4. 修改密码 [uid] [新密码](车队平台账号)
 """
-        yield event.plain_result(vtcm_help_text)
+                except Exception:
+                    vtcm_help = None
+            else:
+                vtcm_help = """车队平台专属菜单
+
+1. 活动
+2. 今日活动
+3. 信息 [tmpId/qq](车队平台信息)
+4. 修改密码 [uid] [新密码](车队平台账号)
+"""
+
+        if vtcm_help:
+            yield event.plain_result(f"{main_help}\n{vtcm_help}")
+        else:
+            yield event.plain_result(main_help)
     
     async def tmp_member_help(self, event: AstrMessageEvent):
         """[命令: 成员管理] 显示车队成员管理功能菜单。"""
