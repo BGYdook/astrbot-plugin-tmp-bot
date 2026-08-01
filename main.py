@@ -1059,65 +1059,65 @@ class TmpBotPlugin(Star):
             return []
             
     async def _get_player_stats(self, tmp_id: str) -> Dict[str, Any]:
-        """通过 da.vtcm.link API 获取玩家的总里程、今日里程和头像。
-        字段调整：历史里程使用 mileage，今日里程使用 todayMileage。
-        输出调整：将从 API 获取的数值除以 1000（米→公里），保留两位小数。
-        不再兼容旧字段 totalDistance/todayDistance，并对数值进行稳健转换。
+        """通过 VTCM 里程 API 获取玩家的总里程、今日里程和头像。
+        兼容 da.vtcm.link 与 SevenTMP 的 tmpevm.seventmp.cn 备用源。
         """
-        if not self.session: 
+        if not self.session:
             return {'total_km': 0, 'daily_km': 0, 'avatar_url': '', 'debug_error': 'HTTP会话不可用。'}
 
-        vtcm_stats_url = f"https://da.vtcm.link/player/info?tmpId={tmp_id}"
-        logger.info(f"尝试 VTCM 里程 API: {vtcm_stats_url}")
-        
-        try:
-            # 指定 ssl=False（仅此请求）避免特定环境下证书或 TLS 握手导致的 ClientError，同时允许重定向
-            async with self.session.get(
-                vtcm_stats_url,
-                timeout=self._cfg_int('api_timeout_seconds', 10),
-                ssl=False,
-                allow_redirects=True
-            ) as response:
-                if response.status == 200:
+        def _to_km_2f(val, default=0.0):
+            try:
+                if val is None:
+                    return default
+                if isinstance(val, (int, float)):
+                    return round(float(val) / 1000.0, 2)
+                s = str(val).strip()
+                if s == "":
+                    return default
+                return round(float(s) / 1000.0, 2)
+            except Exception:
+                return default
+
+        def _to_int_rank(val):
+            try:
+                if val is None:
+                    return None
+                if isinstance(val, int):
+                    return val
+                if isinstance(val, float):
+                    return int(val)
+                s = str(val).strip()
+                if s == '':
+                    return None
+                return int(float(s))
+            except Exception:
+                return None
+
+        for vtcm_base in ("https://da.vtcm.link", "https://tmpevm.seventmp.cn"):
+            vtcm_stats_url = f"{vtcm_base}/player/info?tmpId={tmp_id}"
+            logger.info(f"尝试 VTCM 里程 API: {vtcm_stats_url}")
+            try:
+                async with self.session.get(
+                    vtcm_stats_url,
+                    timeout=self._cfg_int('api_timeout_seconds', 10),
+                    ssl=False,
+                    allow_redirects=True
+                ) as response:
+                    if response.status != 200:
+                        logger.info(f"VTCM 里程 API 返回非 200 状态: status={response.status}")
+                        continue
+
                     data = await response.json()
-                    response_data = data.get('data', {}) 
+                    response_data = data.get('data', {})
                     logger.info(f"VTCM 里程响应: status=200, code={data.get('code')}, has_data={bool(response_data)}")
-                    
-                    # 使用新字段：mileage / todayMileage（单位：米），转换为公里并保留两位小数
-                    def _to_km_2f(val, default=0.0):
-                        try:
-                            if val is None:
-                                return default
-                            if isinstance(val, (int, float)):
-                                return round(float(val) / 1000.0, 2)
-                            s = str(val).strip()
-                            if s == "":
-                                return default
-                            return round(float(s) / 1000.0, 2)
-                        except Exception:
-                            return default
 
                     total_raw = response_data.get('mileage')
                     daily_raw = response_data.get('todayMileage')
-
                     total_km = _to_km_2f(total_raw, 0.0)
                     daily_km = _to_km_2f(daily_raw, 0.0)
                     avatar_url = response_data.get('avatarUrl', '')
                     vtc_role = response_data.get('vtcRole') or response_data.get('vtc_role')
-                    def _to_int_rank(val):
-                        try:
-                            if val is None:
-                                return None
-                            if isinstance(val, int):
-                                return val
-                            if isinstance(val, float):
-                                return int(val)
-                            s = str(val).strip()
-                            if s == "":
-                                return None
-                            return int(float(s))
-                        except Exception:
-                            return None
+
                     total_rank_raw = (
                         response_data.get('mileageRank')
                         or response_data.get('totalMileageRank')
@@ -1132,7 +1132,6 @@ class TmpBotPlugin(Star):
                     )
                     total_rank = _to_int_rank(total_rank_raw)
                     daily_rank = _to_int_rank(daily_rank_raw)
-                    # 尝试从 VTCM 响应中获取上次在线时间（兼容多个可能的字段名）
                     last_online = (
                         response_data.get('lastOnline')
                         or response_data.get('lastOnlineTime')
@@ -1140,8 +1139,11 @@ class TmpBotPlugin(Star):
                         or response_data.get('lastLogin')
                         or None
                     )
-                    logger.info(f"VTCM 里程解析: total_km={total_km:.2f}, today_km={daily_km:.2f}, total_rank={total_rank}, daily_rank={daily_rank}, avatar={avatar_url}")
-                    
+                    logger.info(
+                        f"VTCM 里程解析: total_km={total_km:.2f}, today_km={daily_km:.2f}, "
+                        f"total_rank={total_rank}, daily_rank={daily_rank}, avatar={avatar_url}"
+                    )
+
                     if data.get('code') != 200 or not response_data:
                         logger.info(f"VTCM 里程数据校验失败: code={data.get('code')}, has_data={bool(response_data)}")
                         raise ApiResponseException(f"VTCM 里程 API 返回非成功代码或空数据: {data.get('msg', 'N/A')}")
@@ -1154,24 +1156,25 @@ class TmpBotPlugin(Star):
                         'vtcRole': vtc_role,
                         'total_rank': total_rank,
                         'daily_rank': daily_rank,
-                        'debug_error': 'VTCM 里程数据获取成功。'
+                        'debug_error': 'VTCM 里程数据获取成功。',
+                        'debug_source': vtcm_stats_url,
                     }
-                else:
-                    logger.info(f"VTCM 里程 API 返回非 200 状态: status={response.status}")
-                    return {'total_km': 0, 'daily_km': 0, 'avatar_url': '', 'debug_error': f'VTCM 里程 API 返回状态码: {response.status}'}
+            except aiohttp.ClientError as e:
+                logger.warning(f"VTCM 里程 API 网络异常({vtcm_stats_url}): {e}")
+            except Exception as e:
+                logger.warning(f"VTCM 里程 API 失败({vtcm_stats_url}): {e}")
 
-        except aiohttp.ClientError as e:
-            logger.error(f"VTCM 里程 API 网络异常: {e.__class__.__name__}: {str(e)}")
-            return {
-                'total_km': 0, 
-                'daily_km': 0, 
-                'avatar_url': '', 
-                'debug_error': f'VTCM 里程 API 请求失败（网络错误: {e.__class__.__name__}: {str(e)}）。'
-            }
-        except Exception as e:
-            logger.error(f"VTCM 里程 API 异常: {e.__class__.__name__}")
-            return {'total_km': 0, 'daily_km': 0, 'avatar_url': '', 'debug_error': f'VTCM 里程 API 异常: {e.__class__.__name__}'}
-
+        logger.warning(f"VTCM 里程 API 全部失败: tmpId={tmp_id}")
+        return {
+            'total_km': 0,
+            'daily_km': 0,
+            'avatar_url': '',
+            'vtcRole': None,
+            'total_rank': None,
+            'daily_rank': None,
+            'debug_source': None,
+            'debug_error': '所有 VTCM 里程 API 备用源均失败。',
+        }
 
 
     async def _get_online_status(self, tmp_id: str) -> Dict:
@@ -1686,7 +1689,7 @@ class TmpBotPlugin(Star):
     async def _get_vtc_history(self, tmp_id: str) -> List[Dict[str, Any]]:
         """查询玩家的历史VTC（车队）记录。
         主接口: TruckyApp v2/truckersmp/player（含 vtc + vtcHistory）
-        备用: da.vtcm.link, evmapi.114512.xyz
+        备用: da.vtcm.link, evmapi.114512.xyz, tmpevm.seventmp.cn
         最后回退: TruckersMP 官方 API
         """
         if not self.session:
@@ -1763,6 +1766,20 @@ class TmpBotPlugin(Star):
                         return items
         except Exception as e:
             logger.error(f"VTC历史: evmapi.114512.xyz 异常: {e}")
+
+        # 4) tmpevm.seventmp.cn
+        try:
+            url = f"https://tmpevm.seventmp.cn/vtc/history?tmpId={tmp_id}"
+            logger.info(f"VTC历史: tmpevm.seventmp.cn -> {url}")
+            async with self.session.get(url, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    items = data.get('data') or data.get('response') or []
+                    if isinstance(items, list) and items:
+                        logger.info(f"VTC历史: tmpevm.seventmp.cn 获取到 {len(items)} 条记录")
+                        return items
+        except Exception as e:
+            logger.error(f"VTC历史: tmpevm.seventmp.cn 异常: {e}")
 
         # 不使用官方 API 回退 - 官方 API 只返回当前 VTC，不是历史记录
         return []
@@ -1853,97 +1870,102 @@ class TmpBotPlugin(Star):
 
         # 3) 如果有 vtc_id，直接用 vtcId 查询成员角色列表
         if vtc_id:
-            try:
-                url_vid = f"https://da.vtcm.link/vtc/memberAll/role?vtcId={vtc_id}"
-                logger.info(f"VTC 角色查询: 使用 vtcId 查询 {url_vid}")
-                async with self.session.get(url_vid, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        members = data.get('data') or data.get('response') or []
-                        role = _find_role_in_members(members)
-                        if role:
-                            logger.info(f"VTC 角色: 通过 vtcId={vtc_id} 找到角色 {role}")
-                            return role
-                    else:
-                        logger.info(f"VTC 角色查询(vtcId) 返回状态: {resp.status}")
-            except Exception as e:
-                logger.info(f"VTC 角色查询(vtcId) 异常: {e}")
-
-        # 4) 回退：部分接口支持用 tmpId 直接查询
-        try:
-            url_tmp = f"https://da.vtcm.link/vtc/memberAll/role?tmpId={tmp_id}"
-            logger.info(f"VTC 角色查询: 回退尝试 tmpId 查询 {url_tmp}")
-            async with self.session.get(url_tmp, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    members = data.get('data') or data.get('response') or []
-                    role = _find_role_in_members(members)
-                    if role:
-                        logger.info(f"VTC 角色: 通过 tmpId 回退查询到角色 {role}")
-                        return role
-                else:
-                    logger.info(f"VTC 角色查询(tmpId) 返回状态: {resp.status}")
-        except Exception as e:
-            logger.info(f"VTC 角色查询(tmpId) 异常: {e}")
-
-        # 5) 若没有 vtc_id 但有 vtc_name，则先搜索 vtcId 再查询
-        if not vtc_id and vtc_name:
-            try:
-                from urllib.parse import quote_plus
-                qname = quote_plus(str(vtc_name))
-                search_url = f"https://da.vtcm.link/vtc/search?name={qname}"
-                logger.info(f"VTC 车队搜索: {search_url}")
-                async with self.session.get(search_url, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        items = data.get('data') or data.get('response') or []
-                        if isinstance(items, list) and items:
-                            # 取第一个匹配项的 id
-                            it = items[0]
-                            found_id = it.get('id') or it.get('vtcId') or it.get('vtc_id')
-                            if found_id:
-                                vtc_id = found_id
-                                logger.info(f"VTC 搜索结果: name={vtc_name} -> vtcId={vtc_id}")
-            except Exception as e:
-                logger.info(f"VTC 车队搜索异常: {e}")
-
-            # 如果通过搜索得到 vtc_id，再次用 vtcId 查询成员
-            if vtc_id:
+            for base in ("https://da.vtcm.link", "https://tmpevm.seventmp.cn"):
                 try:
-                    url_vid2 = f"https://da.vtcm.link/vtc/memberAll/role?vtcId={vtc_id}"
-                    logger.info(f"VTC 角色查询: 通过搜索得到 vtcId 后查询 {url_vid2}")
-                    async with self.session.get(url_vid2, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
+                    url_vid = f"{base}/vtc/memberAll/role?vtcId={vtc_id}"
+                    logger.info(f"VTC 角色查询: 使用 vtcId 查询 {url_vid}")
+                    async with self.session.get(url_vid, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
                         if resp.status == 200:
                             data = await resp.json()
                             members = data.get('data') or data.get('response') or []
                             role = _find_role_in_members(members)
                             if role:
-                                logger.info(f"VTC 角色: 通过 vtcId={vtc_id}（搜索后）找到角色 {role}")
+                                logger.info(f"VTC 角色: 通过 vtcId={vtc_id} 找到角色 {role}")
                                 return role
                         else:
-                            logger.info(f"VTC 角色查询(搜索后 vtcId) 返回状态: {resp.status}")
+                            logger.info(f"VTC 角色查询(vtcId) 返回状态: {resp.status}")
                 except Exception as e:
-                    logger.info(f"VTC 角色查询(搜索后 vtcId) 异常: {e}")
+                    logger.info(f"VTC 角色查询(vtcId) 异常: {e}")
 
-        # 6) 最后回退：尝试用 vtcName 参数直接查询 memberAll/role（部分实现支持）
-        if vtc_name:
+        # 4) 回退：部分接口支持用 tmpId 直接查询
+        for base in ("https://da.vtcm.link", "https://tmpevm.seventmp.cn"):
             try:
-                from urllib.parse import quote_plus
-                qname = quote_plus(str(vtc_name))
-                url_name = f"https://da.vtcm.link/vtc/memberAll/role?vtcName={qname}"
-                logger.info(f"VTC 最后回退: 通过 vtcName 查询 {url_name}")
-                async with self.session.get(url_name, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
+                url_tmp = f"{base}/vtc/memberAll/role?tmpId={tmp_id}"
+                logger.info(f"VTC 角色查询: 回退尝试 tmpId 查询 {url_tmp}")
+                async with self.session.get(url_tmp, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
                     if resp.status == 200:
                         data = await resp.json()
                         members = data.get('data') or data.get('response') or []
                         role = _find_role_in_members(members)
                         if role:
-                            logger.info(f"VTC 角色: 通过 vtcName 找到角色 {role}")
+                            logger.info(f"VTC 角色: 通过 tmpId 回退查询到角色 {role}")
                             return role
                     else:
-                        logger.info(f"VTC 角色查询(vtcName) 返回状态: {resp.status}")
+                        logger.info(f"VTC 角色查询(tmpId) 返回状态: {resp.status}")
             except Exception as e:
-                logger.info(f"VTC 角色查询(vtcName) 异常: {e}")
+                logger.info(f"VTC 角色查询(tmpId) 异常: {e}")
+
+        # 5) 若没有 vtc_id 但有 vtc_name，则先搜索 vtcId 再查询
+        if not vtc_id and vtc_name:
+            for base in ("https://da.vtcm.link", "https://tmpevm.seventmp.cn"):
+                try:
+                    from urllib.parse import quote_plus
+                    qname = quote_plus(str(vtc_name))
+                    search_url = f"{base}/vtc/search?name={qname}"
+                    logger.info(f"VTC 车队搜索: {search_url}")
+                    async with self.session.get(search_url, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            items = data.get('data') or data.get('response') or []
+                            if isinstance(items, list) and items:
+                                it = items[0]
+                                found_id = it.get('id') or it.get('vtcId') or it.get('vtc_id')
+                                if found_id:
+                                    vtc_id = found_id
+                                    logger.info(f"VTC 搜索结果: name={vtc_name} -> vtcId={vtc_id}")
+                                    break
+                except Exception as e:
+                    logger.info(f"VTC 车队搜索异常: {e}")
+
+            # 如果通过搜索得到 vtc_id，再次用 vtcId 查询成员
+            if vtc_id:
+                for base in ("https://da.vtcm.link", "https://tmpevm.seventmp.cn"):
+                    try:
+                        url_vid2 = f"{base}/vtc/memberAll/role?vtcId={vtc_id}"
+                        logger.info(f"VTC 角色查询: 通过搜索得到 vtcId 后查询 {url_vid2}")
+                        async with self.session.get(url_vid2, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
+                            if resp.status == 200:
+                                data = await resp.json()
+                                members = data.get('data') or data.get('response') or []
+                                role = _find_role_in_members(members)
+                                if role:
+                                    logger.info(f"VTC 角色: 通过 vtcId={vtc_id}（搜索后）找到角色 {role}")
+                                    return role
+                            else:
+                                logger.info(f"VTC 角色查询(搜索后 vtcId) 返回状态: {resp.status}")
+                    except Exception as e:
+                        logger.info(f"VTC 角色查询(搜索后 vtcId) 异常: {e}")
+
+        # 6) 最后回退：尝试用 vtcName 参数直接查询 memberAll/role（部分实现支持）
+        if vtc_name:
+            for base in ("https://da.vtcm.link", "https://tmpevm.seventmp.cn"):
+                try:
+                    from urllib.parse import quote_plus
+                    qname = quote_plus(str(vtc_name))
+                    url_name = f"{base}/vtc/memberAll/role?vtcName={qname}"
+                    logger.info(f"VTC 最后回退: 通过 vtcName 查询 {url_name}")
+                    async with self.session.get(url_name, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            members = data.get('data') or data.get('response') or []
+                            role = _find_role_in_members(members)
+                            if role:
+                                logger.info(f"VTC 角色: 通过 vtcName 找到角色 {role}")
+                                return role
+                        else:
+                            logger.info(f"VTC 角色查询(vtcName) 返回状态: {resp.status}")
+                except Exception as e:
+                    logger.info(f"VTC 角色查询(vtcName) 异常: {e}")
 
         logger.info(f"VTC 角色: 未能找到玩家 {tmp_id} 的车队角色信息")
         return None
@@ -3569,7 +3591,7 @@ class TmpBotPlugin(Star):
   var cfg = {
     ets: {
       tileUrl: '{{ tile_url_ets }}',
-      fallbackUrl: 'https://ets2.online/map/ets2map_157/{z}/{x}/{y}.png',
+      fallbackUrl: 'https://map.seventmp.cn/ets/{z}/{x}/{y}.png',
       multipliers: { x: 70272, y: 76157 },
       breakpoints: { uk: { x: -31056.8, y: -5832.867 } },
       bounds: { x:131072, y:131072 },
@@ -3967,15 +3989,21 @@ class TmpBotPlugin(Star):
             cy = float(online.get('y') or 0)
             ax, ay = cx - 4000, cy + 2500
             bx, by = cx + 4000, cy - 2500
-            area_url = f"https://da.vtcm.link/map/playerList?aAxisX={ax}&aAxisY={ay}&bAxisX={bx}&bAxisY={by}&serverId={server_id}"
-            logger.info(f"定位: 使用底图查询周边玩家 serverId={server_id} center=({cx},{cy}) url={area_url}")
             area_players = []
             if self.session and server_id:
-                async with self.session.get(area_url, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
-                    if resp.status == 200:
-                        j = await resp.json()
-                        area_players = j.get('data') or []
-                        logger.info(f"定位: 周边玩家数量={len(area_players)}")
+                for api_base in ("https://da.vtcm.link", "https://tmpevm.seventmp.cn"):
+                    area_url = f"{api_base}/map/playerList?aAxisX={ax}&aAxisY={ay}&bAxisX={bx}&bAxisY={by}&serverId={server_id}"
+                    logger.info(f"定位: 使用底图查询周边玩家 serverId={server_id} center=({cx},{cy}) url={area_url}")
+                    try:
+                        async with self.session.get(area_url, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
+                            if resp.status == 200:
+                                j = await resp.json()
+                                area_players = j.get('data') or []
+                                logger.info(f"定位: 周边玩家数量={len(area_players)}")
+                                break
+                            logger.info(f"定位: 底图查询返回状态 {resp.status}，尝试备用源")
+                    except Exception as e:
+                        logger.info(f"定位: 底图查询异常: {e}")
             if not area_players and self._fullmap_cache:
                 data = self._fullmap_cache or {}
                 payload = data.get('Data') or data.get('data') or data.get('players')
@@ -4018,7 +4046,7 @@ class TmpBotPlugin(Star):
             area_players.append({'tmpId': str(tmp_id), 'axisX': cx, 'axisY': cy})
 
             map_type = 'promods' if int(server_id or 0) in [50, 51] else 'ets'
-            tile_url_ets = "https://ets2.online/map/ets2map_157/{z}/{x}/{y}.png"
+            tile_url_ets = "https://map.seventmp.cn/ets/{z}/{x}/{y}.png"
             tile_url_promods = "https://ets2.online/map/ets2mappromods_156/{z}/{x}/{y}.png"
             fullmap_ets = self._get_fullmap_tile_url("ets") if self._fullmap_cache else None
             fullmap_promods = self._get_fullmap_tile_url("promods") if self._fullmap_cache else None
@@ -4068,7 +4096,7 @@ class TmpBotPlugin(Star):
   var mapType = promodsIds.indexOf(serverId) !== -1 ? 'promods' : 'ets';
   var cfg = {
     ets: {
-      tileUrl: 'https://ets-map.oss-cn-beijing.aliyuncs.com/ets2/05102019/{z}/{x}/{y}.png',
+      tileUrl: 'https://map.seventmp.cn/ets/{z}/{x}/{y}.png',
       fallbackUrl: 'https://ets2.online/map/ets2map_157/{z}/{x}/{y}.png',
       multipliers: { x: 70272, y: 76157 },
       breakpoints: { uk: { x: -31056.8, y: -5832.867 } },
