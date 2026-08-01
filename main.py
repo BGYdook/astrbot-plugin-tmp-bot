@@ -293,11 +293,11 @@ class TmpBotPlugin(Star):
         self._fullmap_task = asyncio.create_task(self._fullmap_loop())
 
     async def _fullmap_loop(self) -> None:
-        await asyncio.sleep(self._get_fullmap_interval())
-        while True:
-            await self._fetch_fullmap()
+        try:
             await asyncio.sleep(self._get_fullmap_interval())
-                       
+            while True:
+                await self._fetch_fullmap()
+                await asyncio.sleep(self._get_fullmap_interval())
         except Exception as e:
             logger.error(f"全局发送文件清单消息失败: {e}")
 
