@@ -1637,7 +1637,7 @@ class TmpBotPlugin(Star):
     async def _get_vtc_history(self, tmp_id: str) -> List[Dict[str, Any]]:
         """查询玩家的历史VTC（车队）记录。
         主接口: TruckyApp v2/truckersmp/player（含 vtc + vtcHistory）
-        备用: da.vtcm.link, evmapi.tianyi.world
+        备用: da.vtcm.link, evmapi.114512.xyz
         最后回退: TruckersMP 官方 API
         """
         if not self.session:
@@ -1701,19 +1701,19 @@ class TmpBotPlugin(Star):
         except Exception as e:
             logger.error(f"VTC历史: da.vtcm.link 异常: {e}")
 
-        # 3) evmapi.tianyi.world
+        # 3) evmapi.114512.xyz
         try:
-            url = f"https://evmapi.tianyi.world/vtc/history?tmpId={tmp_id}"
-            logger.info(f"VTC历史: evmapi.tianyi.world -> {url}")
+            url = f"https://evmapi.114512.xyz/vtc/history?tmpId={tmp_id}"
+            logger.info(f"VTC历史: evmapi.114512.xyz -> {url}")
             async with self.session.get(url, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     items = data.get('data') or data.get('response') or []
                     if isinstance(items, list) and items:
-                        logger.info(f"VTC历史: evmapi.tianyi.world 获取到 {len(items)} 条记录")
+                        logger.info(f"VTC历史: evmapi.114512.xyz 获取到 {len(items)} 条记录")
                         return items
         except Exception as e:
-            logger.error(f"VTC历史: evmapi.tianyi.world 异常: {e}")
+            logger.error(f"VTC历史: evmapi.114512.xyz 异常: {e}")
 
         # 不使用官方 API 回退 - 官方 API 只返回当前 VTC，不是历史记录
         return []
@@ -4800,7 +4800,7 @@ class TmpBotPlugin(Star):
             if state:
                 params['state'] = state
             
-            url = "https://open.vtcm.link/events"
+            url = "https://open.cndsvtc.cn/events"
             logger.info(f"活动列表API请求: {url}, 参数: {params}")
             
             async with self.session.get(url, params=params, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
@@ -4847,7 +4847,7 @@ class TmpBotPlugin(Star):
             if qq:
                 params['qq'] = qq
             
-            url = "https://open.vtcm.link/members/get"
+            url = "https://open.cndsvtc.cn/members/get"
             logger.info(f"成员信息API请求: {url}, 参数: {params}")
             
             async with self.session.get(url, params=params, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
@@ -4883,7 +4883,7 @@ class TmpBotPlugin(Star):
                 logger.error("VTCM API Token未配置")
                 return {"error": True, "msg": "VTCM API Token未配置"}
             
-            url = f"https://open.vtcm.link/members/{uid}/password?token={token}"
+            url = f"https://open.cndsvtc.cn/members/{uid}/password?token={token}"
             logger.info(f"修改密码API请求: {url}")
             async with self.session.post(url, json={"password": password}, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
                 logger.info(f"修改密码API响应状态: {resp.status}")
@@ -4932,7 +4932,7 @@ class TmpBotPlugin(Star):
                 "state": 1
             }
             
-            url = f"https://open.vtcm.link/members/save?token={token}"
+            url = f"https://open.cndsvtc.cn/members/save?token={token}"
             logger.info(f"添加成员API请求: {url}, 数据: {request_data}")
             async with self.session.post(url, json=request_data, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
                 logger.info(f"添加成员API响应状态: {resp.status}")
@@ -4989,7 +4989,7 @@ class TmpBotPlugin(Star):
             # 构建请求数据（使用uid数组格式）
             request_data = [int(uid)]
             
-            url = f"https://open.vtcm.link/members/remove?token={token}"
+            url = f"https://open.cndsvtc.cn/members/remove?token={token}"
             logger.info(f"删除成员API请求: {url}, 数据: {request_data}")
             async with self.session.post(url, json=request_data, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
                 logger.info(f"删除成员API响应状态: {resp.status}")
@@ -5032,7 +5032,7 @@ class TmpBotPlugin(Star):
                 "reason": reason
             }
             
-            url = f"https://open.vtcm.link/members/point/change?token={token}"
+            url = f"https://open.cndsvtc.cn/members/point/change?token={token}"
             logger.info(f"修改积分API请求: {url}, 数据: {request_data}")
             async with self.session.post(url, json=request_data, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
                 logger.info(f"修改积分API响应状态: {resp.status}")

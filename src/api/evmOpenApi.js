@@ -1,5 +1,5 @@
 const BASE_API = 'https://da.vtcm.link'
-const OPEN_BASE_API = 'https://open.vtcm.link'
+const OPEN_BASE_API = 'https://open.cndsvtc.cn'
 
 module.exports = {
   /**
