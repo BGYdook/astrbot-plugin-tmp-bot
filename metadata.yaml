@@ -6,6 +6,9 @@ author: BGYdook,晚安（Goodnight_An）
 homepage: https://github.com/BGYdook/astrbot-plugin-tmp-bot
 repo: https://github.com/BGYdook/astrbot-plugin-tmp-bot
 license: MIT
+support_platforms:
+  - aiocqhttp
+astrbot_version: ">=4.5"
 
 # 插件功能特性
 features:
