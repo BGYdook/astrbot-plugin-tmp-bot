@@ -3,7 +3,7 @@
 
 """
 astrbot-plugin-tmp-bot
-欧卡2TMP查询插件 (版本 1.8.3)
+欧卡2TMP查询插件 (版本 1.8.4)
 """
 
 import re
@@ -258,7 +258,7 @@ class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
 
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.8.3", "https://github.com/BGYdook/astrbot-plugin-tmp-bot")
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.8.4", "https://github.com/BGYdook/astrbot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context, config=None):  # 接收 context 和 config
         super().__init__(context)              # 将 context 传给父类
@@ -4603,28 +4603,41 @@ class TmpBotPlugin(Star):
                     if not isinstance(servers, list):
                         yield event.plain_result("查询服务器失败，请稍后重试")
                         return
-                    message = ""
+                    # 先收集每个服务器的文本块，避免循环内以条件追加换行导致出现多余空行
+                    blocks = []
                     for server in servers:
-                        if message:
-                            message += "\n\n"
                         is_online = server.get('isOnline')
                         if is_online is None:
                             is_online = server.get('online')
                         online_flag = int(is_online) == 1 if isinstance(is_online, (int, float, str)) else bool(is_online)
+
+                        # 兼容性：优先使用 serverName，再 fallback 到 name
                         name = server.get('serverName') or server.get('name') or '未知服务器'
+                        # 忽略特定服务器（保持与 src/command/tmpServer.js 一致的精确匹配行为）
+                        try:
+                            name_trim = name.strip() if isinstance(name, str) else str(name)
+                        except Exception:
+                            name_trim = str(name)
+                        ignore_servers = ['Simulation', '[US] Simulation', '[US] Arcade']
+                        if name_trim in ignore_servers:
+                            continue
+
                         status = "🟢" if online_flag else "⚫"
-                        message += f"服务器: {status}{name}"
+                        block = f"服务器: {status}{name}"
+
                         players = server.get('playerCount')
                         if players is None:
                             players = server.get('players', 0)
                         max_players = server.get('maxPlayer')
                         if max_players is None:
                             max_players = server.get('maxplayers', 0)
-                        message += f"\n玩家人数: {players}/{max_players}"
+                        block += f"\n玩家人数: {players}/{max_players}"
+
                         queue_flag = server.get('queue', 0)
                         queue_count = server.get('queueCount', queue_flag)
                         if queue_flag:
-                            message += f" (队列: {queue_count})"
+                            block += f" (队列: {queue_count})"
+
                         characteristic_list = []
                         afk_enable = server.get('afkEnable')
                         if afk_enable is None:
@@ -4642,6 +4655,7 @@ class TmpBotPlugin(Star):
                             can_afk = afk_enable.strip().lower() in ("1", "true", "yes", "y")
                         if not can_afk:
                             characteristic_list.append("⏱挂机")
+
                         collisions_enable = server.get('collisionsEnable')
                         if collisions_enable is None:
                             collisions_enable = server.get('collisions')
@@ -4651,8 +4665,13 @@ class TmpBotPlugin(Star):
                         elif isinstance(collisions_enable, (int, float)):
                             if int(collisions_enable) == 1:
                                 characteristic_list.append("💥碰撞")
+
                         if characteristic_list:
-                            message += "\n服务器特性: " + " ".join(characteristic_list)
+                            block += "\n服务器特性: " + " ".join(characteristic_list)
+
+                        blocks.append(block)
+
+                    message = "\n\n".join(blocks)
                     yield event.plain_result(message or "暂无在线服务器")
                 else:
                     yield event.plain_result(f"查询服务器状态失败，API返回错误状态码: {response.status}")

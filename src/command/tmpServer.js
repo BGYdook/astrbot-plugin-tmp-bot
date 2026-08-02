@@ -10,16 +10,21 @@ module.exports = async (ctx) => {
 
   // 构建消息
   let message = ''
+  // 收集每个服务器的显示块，最后再用双换行拼接，避免多余空行
+  let blocks = []
   for (let server of serverData.data) {
-    // 如果前面有内容，换行
-    if (message) {
-      message += '\n\n'
+    // 忽略特定服务器（例如: Simulation, [US] Simulation, [US] Arcade）
+    const serverName = server.serverName ? server.serverName.trim() : ''
+    const ignoreServers = ['Simulation', '[US] Simulation', '[US] Arcade']
+    if (ignoreServers.includes(serverName)) {
+      continue
     }
 
-    message += '服务器: ' + ( server.isOnline === 1 ? '🟢' : '⚫' ) + server.serverName
-    message += `\n玩家人数: ${server.playerCount}/${server.maxPlayer}`
+    let block = ''
+    block += '服务器: ' + ( server.isOnline === 1 ? '🟢' : '⚫' ) + server.serverName
+    block += `\n玩家人数: ${server.playerCount}/${server.maxPlayer}`
     if (server.queue) {
-      message += ` (队列: ${server.queueCount})`
+      block += ` (队列: ${server.queueCount})`
     }
     // 服务器特性
     let characteristicList = []
@@ -30,8 +35,13 @@ module.exports = async (ctx) => {
       characteristicList.push('💥碰撞')
     }
     if (characteristicList && characteristicList.length > 0) {
-      message += '\n服务器特性: ' + characteristicList.join(' ')
+      block += '\n服务器特性: ' + characteristicList.join(' ')
     }
+
+    blocks.push(block)
   }
+
+  message = blocks.join('\n\n')
+
   return message
 }
