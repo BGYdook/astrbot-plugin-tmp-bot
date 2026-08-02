@@ -16,6 +16,13 @@ module.exports = async (ctx) => {
       message += '\n\n'
     }
 
+    // 忽略特定服务器（例如: Simulation, [US] Simulation, [US] Arcade）
+    const serverName = server.serverName ? server.serverName.trim() : ''
+    const ignoreServers = ['Simulation', '[US] Simulation', '[US] Arcade']
+    if (ignoreServers.includes(serverName)) {
+      continue
+    }
+
     message += '服务器: ' + ( server.isOnline === 1 ? '🟢' : '⚫' ) + server.serverName
     message += `\n玩家人数: ${server.playerCount}/${server.maxPlayer}`
     if (server.queue) {
