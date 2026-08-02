@@ -4611,7 +4611,16 @@ class TmpBotPlugin(Star):
                         if is_online is None:
                             is_online = server.get('online')
                         online_flag = int(is_online) == 1 if isinstance(is_online, (int, float, str)) else bool(is_online)
+                        # 兼容性：优先使用 serverName，再 fallback 到 name
                         name = server.get('serverName') or server.get('name') or '未知服务器'
+                        # 忽略特定服务器（保持与 src/command/tmpServer.js 一致的精确匹配行为）
+                        try:
+                            name_trim = name.strip() if isinstance(name, str) else str(name)
+                        except Exception:
+                            name_trim = str(name)
+                        ignore_servers = ['Simulation', '[US] Simulation', '[US] Arcade']
+                        if name_trim in ignore_servers:
+                            continue
                         status = "🟢" if online_flag else "⚫"
                         message += f"服务器: {status}{name}"
                         players = server.get('playerCount')
