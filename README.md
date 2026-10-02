@@ -1,5 +1,5 @@
  # astrbot-plugin-tmp-bot
-[![npm](https://img.shields.io/badge/npm-v1.8.4-blue)](https://github.com/BGYdook/astrbot-plugin-tmp-bot)
+[![npm](https://img.shields.io/badge/npm-v1.8.5-blue)](https://github.com/BGYdook/astrbot-plugin-tmp-bot)
 
 ![:astrbot_plugin_tmp_bot](https://count.getloli.com/@:astrbot_plugin_tmp-bot?theme=minecraft)
 
@@ -44,6 +44,9 @@ https://truckersmp.com/developers/api
 ### 非常感谢[晚安](https://github.com/nulijiazaizhong)和[鲸鱼](https://github.com/jingyu8127)提供的帮助
 
 ## 历史更新
+
+## 版本v1.8.5
+- 更换 备用 API 源与备用地图瓦片源为公开服务
 
 ## 版本v1.8.4
 - 修改`服务器`命令只输出欧卡服务器

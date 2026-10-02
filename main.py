@@ -3,7 +3,7 @@
 
 """
 astrbot-plugin-tmp-bot
-欧卡2TMP查询插件 (版本 1.8.4)
+欧卡2TMP查询插件 (版本 1.8.5)
 """
 
 import re
@@ -258,7 +258,7 @@ class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
 
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.8.4", "https://github.com/BGYdook/astrbot-plugin-tmp-bot")
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.8.5", "https://github.com/BGYdook/astrbot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context, config=None):  # 接收 context 和 config
         super().__init__(context)              # 将 context 传给父类
@@ -1060,7 +1060,7 @@ class TmpBotPlugin(Star):
             
     async def _get_player_stats(self, tmp_id: str) -> Dict[str, Any]:
         """通过 VTCM 里程 API 获取玩家的总里程、今日里程和头像。
-        兼容 da.vtcm.link 与 SevenTMP 的 tmpevm.seventmp.cn 备用源。
+        兼容 da.vtcm.link 与 evmapi.cxnnn.cn 备用源。
         """
         if not self.session:
             return {'total_km': 0, 'daily_km': 0, 'avatar_url': '', 'debug_error': 'HTTP会话不可用。'}
@@ -1093,7 +1093,7 @@ class TmpBotPlugin(Star):
             except Exception:
                 return None
 
-        for vtcm_base in ("https://da.vtcm.link", "https://tmpevm.seventmp.cn"):
+        for vtcm_base in ("https://da.vtcm.link", "https://evmapi.cxnnn.cn"):
             vtcm_stats_url = f"{vtcm_base}/player/info?tmpId={tmp_id}"
             logger.info(f"尝试 VTCM 里程 API: {vtcm_stats_url}")
             try:
@@ -1689,7 +1689,7 @@ class TmpBotPlugin(Star):
     async def _get_vtc_history(self, tmp_id: str) -> List[Dict[str, Any]]:
         """查询玩家的历史VTC（车队）记录。
         主接口: TruckyApp v2/truckersmp/player（含 vtc + vtcHistory）
-        备用: da.vtcm.link, evmapi.114512.xyz, tmpevm.seventmp.cn
+        备用: da.vtcm.link, evmapi.114512.xyz, evmapi.cxnnn.cn
         最后回退: TruckersMP 官方 API
         """
         if not self.session:
@@ -1767,19 +1767,19 @@ class TmpBotPlugin(Star):
         except Exception as e:
             logger.error(f"VTC历史: evmapi.114512.xyz 异常: {e}")
 
-        # 4) tmpevm.seventmp.cn
+        # 4) evmapi.cxnnn.cn
         try:
-            url = f"https://tmpevm.seventmp.cn/vtc/history?tmpId={tmp_id}"
-            logger.info(f"VTC历史: tmpevm.seventmp.cn -> {url}")
+            url = f"https://evmapi.cxnnn.cn/vtc/history?tmpId={tmp_id}"
+            logger.info(f"VTC历史: evmapi.cxnnn.cn -> {url}")
             async with self.session.get(url, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     items = data.get('data') or data.get('response') or []
                     if isinstance(items, list) and items:
-                        logger.info(f"VTC历史: tmpevm.seventmp.cn 获取到 {len(items)} 条记录")
+                        logger.info(f"VTC历史: evmapi.cxnnn.cn 获取到 {len(items)} 条记录")
                         return items
         except Exception as e:
-            logger.error(f"VTC历史: tmpevm.seventmp.cn 异常: {e}")
+            logger.error(f"VTC历史: evmapi.cxnnn.cn 异常: {e}")
 
         # 不使用官方 API 回退 - 官方 API 只返回当前 VTC，不是历史记录
         return []
@@ -1870,7 +1870,7 @@ class TmpBotPlugin(Star):
 
         # 3) 如果有 vtc_id，直接用 vtcId 查询成员角色列表
         if vtc_id:
-            for base in ("https://da.vtcm.link", "https://tmpevm.seventmp.cn"):
+            for base in ("https://da.vtcm.link", "https://evmapi.cxnnn.cn"):
                 try:
                     url_vid = f"{base}/vtc/memberAll/role?vtcId={vtc_id}"
                     logger.info(f"VTC 角色查询: 使用 vtcId 查询 {url_vid}")
@@ -1888,7 +1888,7 @@ class TmpBotPlugin(Star):
                     logger.info(f"VTC 角色查询(vtcId) 异常: {e}")
 
         # 4) 回退：部分接口支持用 tmpId 直接查询
-        for base in ("https://da.vtcm.link", "https://tmpevm.seventmp.cn"):
+        for base in ("https://da.vtcm.link", "https://evmapi.cxnnn.cn"):
             try:
                 url_tmp = f"{base}/vtc/memberAll/role?tmpId={tmp_id}"
                 logger.info(f"VTC 角色查询: 回退尝试 tmpId 查询 {url_tmp}")
@@ -1907,7 +1907,7 @@ class TmpBotPlugin(Star):
 
         # 5) 若没有 vtc_id 但有 vtc_name，则先搜索 vtcId 再查询
         if not vtc_id and vtc_name:
-            for base in ("https://da.vtcm.link", "https://tmpevm.seventmp.cn"):
+            for base in ("https://da.vtcm.link", "https://evmapi.cxnnn.cn"):
                 try:
                     from urllib.parse import quote_plus
                     qname = quote_plus(str(vtc_name))
@@ -1929,7 +1929,7 @@ class TmpBotPlugin(Star):
 
             # 如果通过搜索得到 vtc_id，再次用 vtcId 查询成员
             if vtc_id:
-                for base in ("https://da.vtcm.link", "https://tmpevm.seventmp.cn"):
+                for base in ("https://da.vtcm.link", "https://evmapi.cxnnn.cn"):
                     try:
                         url_vid2 = f"{base}/vtc/memberAll/role?vtcId={vtc_id}"
                         logger.info(f"VTC 角色查询: 通过搜索得到 vtcId 后查询 {url_vid2}")
@@ -1948,7 +1948,7 @@ class TmpBotPlugin(Star):
 
         # 6) 最后回退：尝试用 vtcName 参数直接查询 memberAll/role（部分实现支持）
         if vtc_name:
-            for base in ("https://da.vtcm.link", "https://tmpevm.seventmp.cn"):
+            for base in ("https://da.vtcm.link", "https://evmapi.cxnnn.cn"):
                 try:
                     from urllib.parse import quote_plus
                     qname = quote_plus(str(vtc_name))
@@ -3603,7 +3603,7 @@ class TmpBotPlugin(Star):
   var cfg = {
     ets: {
       tileUrl: '{{ tile_url_ets }}',
-      fallbackUrl: 'https://map.seventmp.cn/ets/{z}/{x}/{y}.png',
+      fallbackUrl: 'https://ets_tiles.cnly.top/20260903/tmp-ets-yellow/Tiles/{z}/{x}/{y}.png',
       multipliers: { x: 70272, y: 76157 },
       breakpoints: { uk: { x: -31056.8, y: -5832.867 } },
       bounds: { x:131072, y:131072 },
@@ -4003,7 +4003,7 @@ class TmpBotPlugin(Star):
             bx, by = cx + 4000, cy - 2500
             area_players = []
             if self.session and server_id:
-                for api_base in ("https://da.vtcm.link", "https://tmpevm.seventmp.cn"):
+                for api_base in ("https://da.vtcm.link", "https://evmapi.cxnnn.cn"):
                     area_url = f"{api_base}/map/playerList?aAxisX={ax}&aAxisY={ay}&bAxisX={bx}&bAxisY={by}&serverId={server_id}"
                     logger.info(f"定位: 使用底图查询周边玩家 serverId={server_id} center=({cx},{cy}) url={area_url}")
                     try:
@@ -4058,7 +4058,7 @@ class TmpBotPlugin(Star):
             area_players.append({'tmpId': str(tmp_id), 'axisX': cx, 'axisY': cy})
 
             map_type = 'promods' if int(server_id or 0) in [50, 51] else 'ets'
-            tile_url_ets = "https://map.seventmp.cn/ets/{z}/{x}/{y}.png"
+            tile_url_ets = "https://ets_tiles.cnly.top/20260903/tmp-ets-yellow/Tiles/{z}/{x}/{y}.png"
             tile_url_promods = "https://ets2.online/map/ets2mappromods_156/{z}/{x}/{y}.png"
             fullmap_ets = self._get_fullmap_tile_url("ets") if self._fullmap_cache else None
             fullmap_promods = self._get_fullmap_tile_url("promods") if self._fullmap_cache else None
@@ -4108,7 +4108,7 @@ class TmpBotPlugin(Star):
   var mapType = promodsIds.indexOf(serverId) !== -1 ? 'promods' : 'ets';
   var cfg = {
     ets: {
-      tileUrl: 'https://map.seventmp.cn/ets/{z}/{x}/{y}.png',
+      tileUrl: 'https://ets_tiles.cnly.top/20260903/tmp-ets-yellow/Tiles/{z}/{x}/{y}.png',
       fallbackUrl: 'https://ets2.online/map/ets2map_157/{z}/{x}/{y}.png',
       multipliers: { x: 70272, y: 76157 },
       breakpoints: { uk: { x: -31056.8, y: -5832.867 } },
