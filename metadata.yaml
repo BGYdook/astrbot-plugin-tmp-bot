@@ -22,6 +22,7 @@ features:
   - VTCM平台活动列表查询
   - VTCM平台成员信息查询
   - VTCM平台密码修改
+  - 支持自定义 API 源与地图瓦片源
 
 # 支持的命令列表
 commands:

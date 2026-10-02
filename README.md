@@ -40,6 +40,17 @@ API 文档与数据来源：https://s.apifox.cn/38508a88-5ff4-4b29-b724-41f9d3d3
 
 https://truckersmp.com/developers/api
 
+### 自定义数据源（可选）
+如果你有自己的 VTCM 数据源或地图瓦片服务，可以在插件配置里填写，减轻公共接口压力：
+
+| 配置项 | 说明 |
+|--------|------|
+| `额外的 API 源` | 多个用逗号分隔，可省略 `https://`。**填写的源会排在内置源前面优先使用**，全部失败后自动降级到内置源（`da.vtcm.link` / `evmapi.cxnnn.cn`）。留空则只用内置源。 |
+| `自定义 ETS2 地图瓦片地址` | 形如 `https://example.com/ets/{z}/{x}/{y}.png`，必须带 `{z}`/`{x}`/`{y}` 占位符。留空用内置源。 |
+| `自定义 ProMods 地图瓦片地址` | 同上，用于 ProMods 地图。 |
+
+> 填写的 API 源需要兼容 `da.vtcm.link` 的接口路径（`/player/info`、`/vtc/history`、`/vtc/memberAll/role`、`/statistics/mileageRankingList`、`/dlc/list`、`/map/playerList`）。
+
 ## 合作伙伴
 ### 非常感谢[晚安](https://github.com/nulijiazaizhong)和[鲸鱼](https://github.com/jingyu8127)提供的帮助
 
@@ -47,6 +58,10 @@ https://truckersmp.com/developers/api
 
 ## 版本v1.8.5
 - 更换 备用 API 源与备用地图瓦片源为公开服务
+- 新增 配置项「额外的 API 源」，可填写自己的 VTCM 数据源并优先使用
+- 新增 配置项「自定义 ETS2 / ProMods 地图瓦片地址」
+- 优化 排行榜、DLC 列表接口支持多源自动降级
+- 修复 定位地图模板忽略了代码传入的瓦片地址变量
 
 ## 版本v1.8.4
 - 修改`服务器`命令只输出欧卡服务器
