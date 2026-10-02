@@ -35,6 +35,24 @@
     "title": "API 请求超时秒数",
     "description": "TruckersMP/Trucky/VTCM 接口的请求超时时间。"
   },
+  "extra_api_bases": {
+    "type": "string",
+    "default": "",
+    "title": "额外的 API 源（可选）",
+    "description": "填写自己的 VTCM 数据源地址，多个用逗号分隔，可省略 https:// 前缀。填写的源会排在内置源前面优先使用，全部失败后自动降级到内置源（da.vtcm.link / evmapi.cxnnn.cn）。留空则只用内置源。"
+  },
+  "extra_tile_ets_url": {
+    "type": "string",
+    "default": "",
+    "title": "自定义 ETS2 地图瓦片地址（可选）",
+    "description": "形如 https://example.com/ets/{z}/{x}/{y}.png，必须带 {z}/{x}/{y} 三个占位符。留空则使用内置瓦片源。"
+  },
+  "extra_tile_promods_url": {
+    "type": "string",
+    "default": "",
+    "title": "自定义 ProMods 地图瓦片地址（可选）",
+    "description": "形如 https://example.com/promods/{z}/{x}/{y}.png，必须带 {z}/{x}/{y} 三个占位符。留空则使用内置瓦片源。"
+  },
   "enable_bind_feature": {
     "type": "bool",
     "default": true,

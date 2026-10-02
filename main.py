@@ -81,6 +81,9 @@ except ImportError:
         def info(msg):
             print("[INFO]", msg)
         @staticmethod
+        def warning(msg):
+            print("[WARN]", msg)
+        @staticmethod
         def error(msg, exc_info=False):
             print("[ERROR]", msg)
             if exc_info:
@@ -317,6 +320,62 @@ class TmpBotPlugin(Star):
             return default
         return str(v)
 
+    # --- 自定义数据源 ---
+    # 内置 API 源（按优先级排列）。用户可在插件配置里用 extra_api_bases 追加自己的源，
+    # 追加的源会排在列表最前（优先尝试），内置源自动降级为兜底。
+    DEFAULT_API_BASES = ("https://da.vtcm.link", "https://evmapi.cxnnn.cn")
+    # VTC 历史接口的内置源（比通用列表多一个 evmapi.114512.xyz）
+    VTC_HISTORY_API_BASES = ("https://da.vtcm.link", "https://evmapi.114512.xyz", "https://evmapi.cxnnn.cn")
+
+    @staticmethod
+    def _merge_api_bases(raw, defaults) -> List[str]:
+        """把用户填写的额外 API 源拼到内置源前面。
+
+        支持逗号 / 空格 / 换行分隔，允许省略 `https://` 前缀；
+        不含域名的条目会被忽略并打日志，重复项自动去重。
+        """
+        merged: List[str] = []
+        for chunk in re.split(r"[,\s]+", str(raw or "")):
+            item = chunk.strip().rstrip("/")
+            if not item:
+                continue
+            if not item.lower().startswith(("http://", "https://")):
+                item = "https://" + item
+            host = item.split("://", 1)[-1].split("/", 1)[0]
+            if "." not in host:
+                logger.warning(f"忽略无效的 API 源（缺少域名）: {chunk.strip()}")
+                continue
+            if item not in merged:
+                merged.append(item)
+        for d in defaults or ():
+            d = str(d).rstrip("/")
+            if d and d not in merged:
+                merged.append(d)
+        return merged
+
+    def _api_bases(self, defaults=None) -> List[str]:
+        """当前生效的 API 源列表：用户自定义的排在最前，内置源兜底。"""
+        return self._merge_api_bases(
+            self._cfg_str('extra_api_bases', ''),
+            self.DEFAULT_API_BASES if defaults is None else defaults,
+        )
+
+    def _tile_url(self, layer: str, default: str) -> str:
+        """地图瓦片地址：用户自定义的优先，否则用传入的默认值。
+
+        自定义地址必须带 `{z}` / `{x}` / `{y}` 占位符，否则忽略并回退默认值。
+        """
+        raw = self._cfg_str(f'extra_tile_{layer}_url', '').strip()
+        if not raw:
+            return default
+        if not raw.lower().startswith(("http://", "https://")):
+            raw = "https://" + raw
+        missing = [k for k in ("{z}", "{x}", "{y}") if k not in raw]
+        if missing:
+            logger.warning(f"忽略无效的 {layer} 瓦片地址（缺少 {'/'.join(missing)} 占位符）: {raw}")
+            return default
+        return raw
+
     async def initialize(self):
         # 统一 User-Agent，并更新版本号
         timeout_sec = self._cfg_int('api_timeout_seconds', 10)
@@ -329,6 +388,7 @@ class TmpBotPlugin(Star):
             trust_env=True
         )
         logger.info(f"TMP Bot 插件HTTP会话已创建，超时 {timeout_sec}s")
+        logger.info(f"TMP Bot 插件 API 源（按优先级）: {' -> '.join(self._api_bases())}")
         self._fullmap_task = None
 
 
@@ -1060,7 +1120,7 @@ class TmpBotPlugin(Star):
             
     async def _get_player_stats(self, tmp_id: str) -> Dict[str, Any]:
         """通过 VTCM 里程 API 获取玩家的总里程、今日里程和头像。
-        兼容 da.vtcm.link 与 evmapi.cxnnn.cn 备用源。
+        API 源取自 `_api_bases()`（用户自定义源优先，内置源兜底）。
         """
         if not self.session:
             return {'total_km': 0, 'daily_km': 0, 'avatar_url': '', 'debug_error': 'HTTP会话不可用。'}
@@ -1093,7 +1153,7 @@ class TmpBotPlugin(Star):
             except Exception:
                 return None
 
-        for vtcm_base in ("https://da.vtcm.link", "https://evmapi.cxnnn.cn"):
+        for vtcm_base in self._api_bases():
             vtcm_stats_url = f"{vtcm_base}/player/info?tmpId={tmp_id}"
             logger.info(f"尝试 VTCM 里程 API: {vtcm_stats_url}")
             try:
@@ -1276,69 +1336,92 @@ class TmpBotPlugin(Star):
         return None
     
     async def _get_rank_list(self, ranking_type: str = "total", limit: int = 10) -> Optional[List[Dict]]:
-        """获取 TruckersMP 里程排行榜列表 (使用 da.vtcm.link API)。
+        """获取 TruckersMP 里程排行榜列表 (使用第三方 VTCM API)。
 
         ranking_type:
             - "total": 总里程排行
             - "today": 今日里程排行
+
+        API 源取自 `_api_bases()`（用户自定义源优先，内置源兜底）。
         """
         if not self.session:
             raise NetworkException("插件未初始化，HTTP会话不可用")
 
         # 第三方接口使用数字枚举：1=总里程，2=今日里程
         type_code = 2 if str(ranking_type).lower() in ["today", "daily", "2"] else 1
-        url = f"https://da.vtcm.link/statistics/mileageRankingList?rankingType={type_code}&rankingCount={limit}"
-        logger.info(f"尝试 API (排行榜): type={ranking_type}({type_code}), url={url}")
 
-        try:
-            async with self.session.get(url, timeout=10) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    response_data = data.get('data', [])
+        last_error: Optional[Exception] = None
+        for base in self._api_bases():
+            url = f"{base}/statistics/mileageRankingList?rankingType={type_code}&rankingCount={limit}"
+            logger.info(f"尝试 API (排行榜): type={ranking_type}({type_code}), url={url}")
+            try:
+                async with self.session.get(url, timeout=10) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        response_data = data.get('data', [])
 
-                    if isinstance(response_data, list):
-                        return response_data
-                    else:
+                        if isinstance(response_data, list):
+                            return response_data
                         raise ApiResponseException("排行榜 API 数据结构异常")
 
-                elif response.status == 404:
-                    return []
-                else:
-                    raise ApiResponseException(f"排行榜 API 返回错误状态码: {response.status}")
-        except aiohttp.ClientError as e:
-            logger.error(f"排行榜 API 网络请求失败 (aiohttp.ClientError): {e}")
-            raise NetworkException("排行榜 API 网络请求失败")
-        except asyncio.TimeoutError:
-            logger.error("请求排行榜 API 超时")
-            raise NetworkException("请求排行榜 API 超时")
-        except Exception as e:
-            logger.error(f"查询排行榜时发生未知错误: {e}", exc_info=True)
-            raise NetworkException("查询排行榜失败")
+                    elif response.status == 404:
+                        return []
+                    else:
+                        logger.info(f"排行榜 API 源 {base} 返回状态码 {response.status}，尝试下一个源")
+                        last_error = ApiResponseException(f"排行榜 API 返回错误状态码: {response.status}")
+            except aiohttp.ClientError as e:
+                logger.error(f"排行榜 API 网络请求失败 ({base}, aiohttp.ClientError): {e}")
+                last_error = NetworkException("排行榜 API 网络请求失败")
+            except asyncio.TimeoutError:
+                logger.error(f"请求排行榜 API 超时 ({base})")
+                last_error = NetworkException("请求排行榜 API 超时")
+            except ApiResponseException as e:
+                last_error = e
+            except Exception as e:
+                logger.error(f"查询排行榜时发生未知错误 ({base}): {e}", exc_info=True)
+                last_error = NetworkException("查询排行榜失败")
+
+        if isinstance(last_error, NetworkException):
+            raise last_error
+        if isinstance(last_error, ApiResponseException):
+            raise last_error
+        raise NetworkException("排行榜 API 网络请求失败")
 
     async def _get_dlc_market_list(self, dlc_type: int = 1) -> List[Dict]:
         if not self.session:
             raise NetworkException("插件未初始化，HTTP会话不可用")
-        url = f"https://da.vtcm.link/dlc/list?type={dlc_type}"
-        logger.info(f"DLC列表: 请求 URL={url}")
-        try:
-            async with self.session.get(url, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
-                logger.info(f"DLC列表: 响应 status={resp.status}, content-type={resp.headers.get('Content-Type')}")
-                if resp.status == 200:
-                    data = await resp.json()
-                    items = data.get('data') or []
-                    logger.info(f"DLC列表: 解析到 items_count={len(items) if isinstance(items, list) else 0}")
-                    return items if isinstance(items, list) else []
-                else:
-                    raise ApiResponseException(f"DLC列表 API 返回错误状态码: {resp.status}")
-        except aiohttp.ClientError as e:
-            logger.error(f"DLC列表 API 网络请求失败 (aiohttp.ClientError): {e}")
-            raise NetworkException("DLC列表 API 网络请求失败")
-        except asyncio.TimeoutError:
-            logger.error("请求 DLC列表 API 超时")
-            raise NetworkException("请求 DLC列表 API 超时")
-        except Exception as e:
-            logger.error(f"查询 DLC列表 时发生未知错误: {e}", exc_info=True)
-            raise NetworkException("查询 DLC列表 失败")
+
+        last_error: Optional[Exception] = None
+        for base in self._api_bases():
+            url = f"{base}/dlc/list?type={dlc_type}"
+            logger.info(f"DLC列表: 请求 URL={url}")
+            try:
+                async with self.session.get(url, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
+                    logger.info(f"DLC列表: 响应 status={resp.status}, content-type={resp.headers.get('Content-Type')}")
+                    if resp.status == 200:
+                        data = await resp.json()
+                        items = data.get('data') or []
+                        logger.info(f"DLC列表: 解析到 items_count={len(items) if isinstance(items, list) else 0}")
+                        return items if isinstance(items, list) else []
+                    logger.info(f"DLC列表: 源 {base} 返回状态码 {resp.status}，尝试下一个源")
+                    last_error = ApiResponseException(f"DLC列表 API 返回错误状态码: {resp.status}")
+            except aiohttp.ClientError as e:
+                logger.error(f"DLC列表 API 网络请求失败 ({base}, aiohttp.ClientError): {e}")
+                last_error = NetworkException("DLC列表 API 网络请求失败")
+            except asyncio.TimeoutError:
+                logger.error(f"请求 DLC列表 API 超时 ({base})")
+                last_error = NetworkException("请求 DLC列表 API 超时")
+            except ApiResponseException as e:
+                last_error = e
+            except Exception as e:
+                logger.error(f"查询 DLC列表 时发生未知错误 ({base}): {e}", exc_info=True)
+                last_error = NetworkException("查询 DLC列表 失败")
+
+        if isinstance(last_error, NetworkException):
+            raise last_error
+        if isinstance(last_error, ApiResponseException):
+            raise last_error
+        raise NetworkException("查询 DLC列表 失败")
 
     async def _get_traffic_top(self, server_key: str) -> List[Dict]:
         if not self.session:
@@ -1689,7 +1772,7 @@ class TmpBotPlugin(Star):
     async def _get_vtc_history(self, tmp_id: str) -> List[Dict[str, Any]]:
         """查询玩家的历史VTC（车队）记录。
         主接口: TruckyApp v2/truckersmp/player（含 vtc + vtcHistory）
-        备用: da.vtcm.link, evmapi.114512.xyz, evmapi.cxnnn.cn
+        备用: 用户自定义源 + 内置源 da.vtcm.link / evmapi.114512.xyz / evmapi.cxnnn.cn
         最后回退: TruckersMP 官方 API
         """
         if not self.session:
@@ -1739,47 +1822,20 @@ class TmpBotPlugin(Star):
         except Exception as e:
             logger.error(f"VTC历史: TruckyApp 请求异常: {e}")
 
-        # 2) da.vtcm.link
-        try:
-            url = f"https://da.vtcm.link/vtc/history?tmpId={tmp_id}"
-            logger.info(f"VTC历史: da.vtcm.link -> {url}")
-            async with self.session.get(url, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    items = data.get('data') or data.get('response') or []
-                    if isinstance(items, list) and items:
-                        logger.info(f"VTC历史: da.vtcm.link 获取到 {len(items)} 条记录")
-                        return items
-        except Exception as e:
-            logger.error(f"VTC历史: da.vtcm.link 异常: {e}")
-
-        # 3) evmapi.114512.xyz
-        try:
-            url = f"https://evmapi.114512.xyz/vtc/history?tmpId={tmp_id}"
-            logger.info(f"VTC历史: evmapi.114512.xyz -> {url}")
-            async with self.session.get(url, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    items = data.get('data') or data.get('response') or []
-                    if isinstance(items, list) and items:
-                        logger.info(f"VTC历史: evmapi.114512.xyz 获取到 {len(items)} 条记录")
-                        return items
-        except Exception as e:
-            logger.error(f"VTC历史: evmapi.114512.xyz 异常: {e}")
-
-        # 4) evmapi.cxnnn.cn
-        try:
-            url = f"https://evmapi.cxnnn.cn/vtc/history?tmpId={tmp_id}"
-            logger.info(f"VTC历史: evmapi.cxnnn.cn -> {url}")
-            async with self.session.get(url, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    items = data.get('data') or data.get('response') or []
-                    if isinstance(items, list) and items:
-                        logger.info(f"VTC历史: evmapi.cxnnn.cn 获取到 {len(items)} 条记录")
-                        return items
-        except Exception as e:
-            logger.error(f"VTC历史: evmapi.cxnnn.cn 异常: {e}")
+        # 2) 第三方 VTCM 源（用户自定义源优先，其后为内置源）
+        for base in self._api_bases(self.VTC_HISTORY_API_BASES):
+            try:
+                url = f"{base}/vtc/history?tmpId={tmp_id}"
+                logger.info(f"VTC历史: {base} -> {url}")
+                async with self.session.get(url, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        items = data.get('data') or data.get('response') or []
+                        if isinstance(items, list) and items:
+                            logger.info(f"VTC历史: {base} 获取到 {len(items)} 条记录")
+                            return items
+            except Exception as e:
+                logger.error(f"VTC历史: {base} 异常: {e}")
 
         # 不使用官方 API 回退 - 官方 API 只返回当前 VTC，不是历史记录
         return []
@@ -1788,7 +1844,8 @@ class TmpBotPlugin(Star):
         """查询玩家在车队内的角色。
         优先策略：
         1) 尝试使用官方 TruckersMP VTC 角色查询 API: https://api.truckersmp.com/v2/vtc/{vtc_id}/role/{role_id}
-        2) 若官方API失败，回退到 da.vtcm.link 的 vtc/memberAll/role 接口
+        2) 若官方API失败，回退到第三方 VTCM 源的 vtc/memberAll/role 接口
+           （源列表取自 `_api_bases()`：用户自定义源优先，内置源兜底）
         3) 若传入 vtc_info 且包含 vtcId，则直接用 vtcId 查询成员列表并匹配 tmpId
         4) 若未传入或未包含 vtcId，则尝试从 TruckersMP player 接口获取 vtc.id
         5) 若仍无 vtcId，尝试直接用 memberAll/role?tmpId=tmp_id 回退查询（部分接口支持）
@@ -1870,7 +1927,7 @@ class TmpBotPlugin(Star):
 
         # 3) 如果有 vtc_id，直接用 vtcId 查询成员角色列表
         if vtc_id:
-            for base in ("https://da.vtcm.link", "https://evmapi.cxnnn.cn"):
+            for base in self._api_bases():
                 try:
                     url_vid = f"{base}/vtc/memberAll/role?vtcId={vtc_id}"
                     logger.info(f"VTC 角色查询: 使用 vtcId 查询 {url_vid}")
@@ -1888,7 +1945,7 @@ class TmpBotPlugin(Star):
                     logger.info(f"VTC 角色查询(vtcId) 异常: {e}")
 
         # 4) 回退：部分接口支持用 tmpId 直接查询
-        for base in ("https://da.vtcm.link", "https://evmapi.cxnnn.cn"):
+        for base in self._api_bases():
             try:
                 url_tmp = f"{base}/vtc/memberAll/role?tmpId={tmp_id}"
                 logger.info(f"VTC 角色查询: 回退尝试 tmpId 查询 {url_tmp}")
@@ -1907,7 +1964,7 @@ class TmpBotPlugin(Star):
 
         # 5) 若没有 vtc_id 但有 vtc_name，则先搜索 vtcId 再查询
         if not vtc_id and vtc_name:
-            for base in ("https://da.vtcm.link", "https://evmapi.cxnnn.cn"):
+            for base in self._api_bases():
                 try:
                     from urllib.parse import quote_plus
                     qname = quote_plus(str(vtc_name))
@@ -1929,7 +1986,7 @@ class TmpBotPlugin(Star):
 
             # 如果通过搜索得到 vtc_id，再次用 vtcId 查询成员
             if vtc_id:
-                for base in ("https://da.vtcm.link", "https://evmapi.cxnnn.cn"):
+                for base in self._api_bases():
                     try:
                         url_vid2 = f"{base}/vtc/memberAll/role?vtcId={vtc_id}"
                         logger.info(f"VTC 角色查询: 通过搜索得到 vtcId 后查询 {url_vid2}")
@@ -1948,7 +2005,7 @@ class TmpBotPlugin(Star):
 
         # 6) 最后回退：尝试用 vtcName 参数直接查询 memberAll/role（部分实现支持）
         if vtc_name:
-            for base in ("https://da.vtcm.link", "https://evmapi.cxnnn.cn"):
+            for base in self._api_bases():
                 try:
                     from urllib.parse import quote_plus
                     qname = quote_plus(str(vtc_name))
@@ -3567,6 +3624,9 @@ class TmpBotPlugin(Star):
             tile_url_ets = fullmap_ets
         if fullmap_promods:
             tile_url_promods = fullmap_promods
+        # 用户在配置里填了自定义瓦片源时，优先级最高
+        tile_url_ets = self._tile_url('ets', tile_url_ets)
+        tile_url_promods = self._tile_url('promods', tile_url_promods)
 
         map_tmpl = """
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
@@ -3994,7 +4054,7 @@ class TmpBotPlugin(Star):
 
         avatar_url = self._normalize_avatar_url(player_info.get('avatar'))
 
-        # 4) 周边玩家查询并绘制简易地图（基于 da.vtcm.link）
+        # 4) 周边玩家查询并绘制简易地图（第三方 VTCM 源，见 _api_bases()）
         try:
             server_id = online.get('serverId')
             cx = float(online.get('x') or 0)
@@ -4003,7 +4063,7 @@ class TmpBotPlugin(Star):
             bx, by = cx + 4000, cy - 2500
             area_players = []
             if self.session and server_id:
-                for api_base in ("https://da.vtcm.link", "https://evmapi.cxnnn.cn"):
+                for api_base in self._api_bases():
                     area_url = f"{api_base}/map/playerList?aAxisX={ax}&aAxisY={ay}&bAxisX={bx}&bAxisY={by}&serverId={server_id}"
                     logger.info(f"定位: 使用底图查询周边玩家 serverId={server_id} center=({cx},{cy}) url={area_url}")
                     try:
@@ -4058,20 +4118,13 @@ class TmpBotPlugin(Star):
             area_players.append({'tmpId': str(tmp_id), 'axisX': cx, 'axisY': cy})
 
             map_type = 'promods' if int(server_id or 0) in [50, 51] else 'ets'
-            tile_url_ets = "https://ets_tiles.cnly.top/20260903/tmp-ets-yellow/Tiles/{z}/{x}/{y}.png"
-            tile_url_promods = "https://ets2.online/map/ets2mappromods_156/{z}/{x}/{y}.png"
-            fullmap_ets = self._get_fullmap_tile_url("ets") if self._fullmap_cache else None
-            fullmap_promods = self._get_fullmap_tile_url("promods") if self._fullmap_cache else None
-            if fullmap_ets:
-                tile_url_ets = fullmap_ets
-            if fullmap_promods:
-                tile_url_promods = fullmap_promods
-            logger.info(f"定位: tile_ets={'fullmap' if fullmap_ets else 'ets2.online'}")
-            logger.info(f"定位: tile_promods={'fullmap' if fullmap_promods else 'ets2.online'}")
-            if map_type == 'ets' and not tile_url_ets:
-                raise RuntimeError("fullmap 缓存未包含 ETS 瓦片地址")
-            if map_type == 'promods' and not tile_url_promods:
-                raise RuntimeError("fullmap 缓存未包含 ProMods 瓦片地址")
+            # 瓦片源：用户在配置里填了自定义源就用它，否则用内置默认源
+            tile_url_ets = self._tile_url(
+                'ets', "https://ets_tiles.cnly.top/20260903/tmp-ets-yellow/Tiles/{z}/{x}/{y}.png")
+            tile_url_promods = self._tile_url(
+                'promods', "https://ets-map.oss-cn-beijing.aliyuncs.com/promods/05102019/{z}/{x}/{y}.png")
+            logger.info(f"定位: tile_ets={tile_url_ets}")
+            logger.info(f"定位: tile_promods={tile_url_promods}")
 
             map_tmpl = """
 <link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css\">
@@ -4108,7 +4161,7 @@ class TmpBotPlugin(Star):
   var mapType = promodsIds.indexOf(serverId) !== -1 ? 'promods' : 'ets';
   var cfg = {
     ets: {
-      tileUrl: 'https://ets_tiles.cnly.top/20260903/tmp-ets-yellow/Tiles/{z}/{x}/{y}.png',
+      tileUrl: '{{ tile_url_ets }}',
       fallbackUrl: 'https://ets2.online/map/ets2map_157/{z}/{x}/{y}.png',
       multipliers: { x: 70272, y: 76157 },
       breakpoints: { uk: { x: -31056.8, y: -5832.867 } },
@@ -4119,7 +4172,7 @@ class TmpBotPlugin(Star):
       }
     },
     promods: {
-      tileUrl: 'https://ets-map.oss-cn-beijing.aliyuncs.com/promods/05102019/{z}/{x}/{y}.png',
+      tileUrl: '{{ tile_url_promods }}',
       fallbackUrl: 'https://ets2.online/map/ets2mappromods_156/{z}/{x}/{y}.png',
       multipliers: { x: 51953, y: 76024 },
       breakpoints: { uk: { x: -31056.8, y: -5832.867 } },
