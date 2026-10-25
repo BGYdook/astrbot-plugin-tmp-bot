@@ -1,5 +1,5 @@
  # astrbot-plugin-tmp-bot
-[![npm](https://img.shields.io/badge/npm-v1.8.5-blue)](https://github.com/BGYdook/astrbot-plugin-tmp-bot)
+[![npm](https://img.shields.io/badge/npm-v1.8.6-blue)](https://github.com/BGYdook/astrbot-plugin-tmp-bot)
 
 ![:astrbot_plugin_tmp_bot](https://count.getloli.com/@:astrbot_plugin_tmp-bot?theme=minecraft)
 
@@ -22,17 +22,6 @@
 | 总里程排行 | 总里程排行榜（自 2025-08-23 20:00 起统计） | 总里程排行 |
 | 今日里程排行 | 今日里程排行榜（每日 0 点重置） | 今日里程排行 |
 | 足迹 | 今日足迹（每日 0 点重置） | 足迹 |
-### 车队专属功能(需配置Token)
-| 指令 | 功能 | 示例 |
-|------|------|------|
-| 活动 | 查询车队未来五次活动 | 活动 |
-| 今日活动 | 查询今天车队的活动 | 今日活动 |
-| 信息 | 查询在车队内信息 | 信息 123 |
-| 修改密码 | 修改车队平台登录密码 | 修改密码 UID 新密码|
-| 新添成员 | 车队平台添加新成员 | 新添成员 [tmpId] [车队编号] [QQ号] |
-| 删除成员 | 删除车队平台成员 | 删除成员 [tmpId] |
-| 加积分 | 加车队平台成员积分 | 加积分 [tmpId] [积分值] |
-| 减积分 | 减车队平台成员积分 | 减积分 [tmpId] [积分值] |
 ### 接口与数据
 API 文档与数据来源：https://s.apifox.cn/38508a88-5ff4-4b29-b724-41f9d3d3336a
 
@@ -45,16 +34,21 @@ https://truckersmp.com/developers/api
 
 | 配置项 | 说明 |
 |--------|------|
-| `额外的 API 源` | 多个用逗号分隔，可省略 `https://`。**填写的源会排在内置源前面优先使用**，全部失败后自动降级到内置源（`da.vtcm.link` / `evmapi.cxnnn.cn`）。留空则只用内置源。 |
+| `额外的 API 源` | 多个用逗号分隔，可省略 `https://`。**填写的源会排在内置源前面优先使用**，全部失败后自动降级到内置源（`evmapi.cxnnn.cn` / `evmapi.114512.xyz`）。留空则只用内置源。 |
 | `自定义 ETS2 地图瓦片地址` | 形如 `https://example.com/ets/{z}/{x}/{y}.png`，必须带 `{z}`/`{x}`/`{y}` 占位符。留空用内置源。 |
 | `自定义 ProMods 地图瓦片地址` | 同上，用于 ProMods 地图。 |
 
-> 填写的 API 源需要兼容 `da.vtcm.link` 的接口路径（`/player/info`、`/vtc/history`、`/vtc/memberAll/role`、`/statistics/mileageRankingList`、`/dlc/list`、`/map/playerList`）。
+> 填写的 API 源需要兼容内置源的接口路径（`/player/info`、`/vtc/history`、`/vtc/memberAll/role`、`/statistics/mileageRankingList`、`/dlc/list`、`/map/playerList`）。
 
 ## 合作伙伴
 ### 非常感谢[晚安](https://github.com/nulijiazaizhong)和[鲸鱼](https://github.com/jingyu8127)提供的帮助
 
 ## 历史更新
+
+## 版本v1.8.6
+- 修复 `足迹`,`DLC`,`排行榜`的功能
+- 优化 `排行榜`输出的图片
+- 移除 已无法使用的旧api
 
 ## 版本v1.8.5
 - 更换 备用 API 源与备用地图瓦片源为公开服务
