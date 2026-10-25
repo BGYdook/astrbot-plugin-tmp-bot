@@ -3,7 +3,7 @@
 
 """
 astrbot-plugin-tmp-bot
-欧卡2TMP查询插件 (版本 1.8.5)
+欧卡2TMP查询插件 (版本 1.8.6)
 """
 
 import re
@@ -111,6 +111,431 @@ USER_GROUP_MAP = {
     'Game Moderator': '游戏管理员'
 }
 PROMODS_SERVER_IDS = {50, 51}
+
+RANK_IMAGE_TEMPLATE = """
+<style>
+  html, body {
+    width: 760px;
+    margin: 0;
+    padding: 0;
+    background: #070b12;
+  }
+  * { box-sizing: border-box; }
+  .board {
+    --accent: #55e0b0;
+    --accent-soft: rgba(85, 224, 176, .16);
+    --accent-line: rgba(85, 224, 176, .42);
+    position: relative;
+    width: 760px;
+    overflow: hidden;
+    padding: 28px 28px 24px;
+    color: #f7f9fc;
+    font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif;
+    background:
+      radial-gradient(circle at 90% 4%, rgba(65, 171, 255, .18), transparent 28%),
+      radial-gradient(circle at 5% 48%, rgba(85, 224, 176, .12), transparent 30%),
+      linear-gradient(150deg, #0d1523 0%, #09101b 48%, #070b12 100%);
+  }
+  .board.today {
+    --accent: #ffbd63;
+    --accent-soft: rgba(255, 189, 99, .16);
+    --accent-line: rgba(255, 189, 99, .42);
+  }
+  .board::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: .34;
+    background-image:
+      linear-gradient(rgba(255,255,255,.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.025) 1px, transparent 1px);
+    background-size: 38px 38px;
+    mask-image: linear-gradient(to bottom, black, transparent 78%);
+  }
+  .road-mark {
+    position: absolute;
+    right: -88px;
+    top: 105px;
+    width: 260px;
+    height: 420px;
+    border: 1px solid rgba(255,255,255,.07);
+    border-radius: 50%;
+    transform: rotate(24deg);
+  }
+  .road-mark::before,
+  .road-mark::after {
+    content: "";
+    position: absolute;
+    inset: 26px;
+    border: 1px dashed rgba(255,255,255,.09);
+    border-radius: 50%;
+  }
+  .road-mark::after { inset: 70px; }
+  .hero {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 22px;
+    padding-bottom: 22px;
+    border-bottom: 1px solid rgba(255,255,255,.1);
+  }
+  .brand { display: flex; align-items: center; gap: 15px; min-width: 0; }
+  .brand-mark {
+    width: 54px;
+    height: 54px;
+    flex: 0 0 54px;
+    display: grid;
+    place-items: center;
+    border-radius: 17px;
+    color: #07121a;
+    font-size: 16px;
+    font-weight: 900;
+    letter-spacing: .5px;
+    background: linear-gradient(145deg, var(--accent), #e9fff8);
+    box-shadow: 0 10px 30px var(--accent-soft);
+  }
+  .eyebrow {
+    margin-bottom: 5px;
+    color: var(--accent);
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 2.6px;
+    text-transform: uppercase;
+  }
+  h1 {
+    margin: 0;
+    font-size: 30px;
+    line-height: 1.15;
+    font-weight: 800;
+    letter-spacing: -.8px;
+  }
+  .hero-meta {
+    flex: 0 0 auto;
+    text-align: right;
+    padding-top: 3px;
+  }
+  .hero-meta strong {
+    display: block;
+    color: #fff;
+    font-family: "Cascadia Mono", Consolas, monospace;
+    font-size: 23px;
+    line-height: 1;
+    letter-spacing: -.5px;
+  }
+  .hero-meta span {
+    display: block;
+    margin-top: 6px;
+    color: #8190a5;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1.8px;
+  }
+  .section-label {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin: 18px 2px 10px;
+    color: #8592a5;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 2.2px;
+  }
+  .section-label::after {
+    content: "";
+    height: 1px;
+    flex: 1;
+    background: linear-gradient(90deg, rgba(255,255,255,.13), transparent);
+  }
+  .champion,
+  .runner-card,
+  .row,
+  .me-card {
+    position: relative;
+    z-index: 1;
+    overflow: hidden;
+    border: 1px solid rgba(255,255,255,.09);
+    background: rgba(18, 28, 43, .88);
+    box-shadow: 0 12px 34px rgba(0,0,0,.19);
+  }
+  .champion {
+    display: grid;
+    grid-template-columns: 76px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 17px;
+    padding: 19px 21px;
+    border-radius: 18px;
+    border-color: rgba(246, 196, 83, .42);
+    background:
+      linear-gradient(110deg, rgba(246,196,83,.17), rgba(246,196,83,.035) 46%, rgba(18,28,43,.92)),
+      rgba(18,28,43,.95);
+  }
+  .champion::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    background: linear-gradient(#ffe49b, #f0a72f);
+    box-shadow: 0 0 22px rgba(246,196,83,.7);
+  }
+  .champion::after {
+    content: "01";
+    position: absolute;
+    right: 14px;
+    bottom: -18px;
+    color: rgba(255,255,255,.035);
+    font-family: "Cascadia Mono", Consolas, monospace;
+    font-size: 92px;
+    font-weight: 900;
+    letter-spacing: -8px;
+  }
+  .medal {
+    width: 60px;
+    height: 60px;
+    display: grid;
+    place-items: center;
+    border-radius: 18px;
+    border: 1px solid rgba(255,255,255,.16);
+    background: rgba(255,255,255,.08);
+    font-family: "Cascadia Mono", Consolas, monospace;
+    font-size: 24px;
+    font-weight: 900;
+  }
+  .champion .medal {
+    color: #191204;
+    border: 0;
+    background: linear-gradient(145deg, #ffe7a2, #e7a531);
+    box-shadow: 0 9px 24px rgba(240,167,47,.27);
+  }
+  .player { min-width: 0; }
+  .player-name {
+    overflow: hidden;
+    color: #f8fafc;
+    font-size: 18px;
+    font-weight: 800;
+    line-height: 1.25;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .player-id {
+    margin-top: 4px;
+    color: #8190a5;
+    font-family: "Cascadia Mono", Consolas, monospace;
+    font-size: 10px;
+    letter-spacing: .7px;
+  }
+  .mileage {
+    position: relative;
+    z-index: 1;
+    text-align: right;
+    white-space: nowrap;
+  }
+  .mileage strong {
+    display: block;
+    font-family: "Cascadia Mono", Consolas, monospace;
+    font-size: 22px;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+  .mileage span {
+    display: block;
+    margin-top: 5px;
+    color: #8290a3;
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 1.6px;
+  }
+  .runner-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-top: 10px;
+  }
+  .runner-card {
+    display: grid;
+    grid-template-columns: 48px minmax(0, 1fr);
+    align-items: center;
+    gap: 12px;
+    padding: 14px;
+    border-radius: 15px;
+  }
+  .runner-card.silver { border-color: rgba(194,207,222,.28); }
+  .runner-card.bronze { border-color: rgba(226,153,91,.28); }
+  .runner-card .medal { width: 44px; height: 44px; border-radius: 14px; font-size: 17px; }
+  .runner-card.silver .medal { color: #17212d; background: linear-gradient(145deg, #edf3f9, #aab9ca); }
+  .runner-card.bronze .medal { color: #24150a; background: linear-gradient(145deg, #f3bd8c, #c9783d); }
+  .runner-card .player-name { font-size: 14px; }
+  .runner-card .mileage { grid-column: 2; text-align: left; margin-top: -4px; }
+  .runner-card .mileage strong { color: #dce5f0; font-size: 15px; }
+  .runner-card .mileage span { display: none; }
+  .rows { display: grid; gap: 7px; }
+  .row {
+    display: grid;
+    grid-template-columns: 40px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    padding: 11px 14px;
+    border-radius: 12px;
+    background: rgba(17, 27, 41, .74);
+  }
+  .row-rank {
+    color: #8c9aae;
+    font-family: "Cascadia Mono", Consolas, monospace;
+    font-size: 13px;
+    font-weight: 800;
+  }
+  .row .player-name { font-size: 14px; font-weight: 700; }
+  .row .player-id { margin-top: 2px; }
+  .row .mileage strong { font-size: 14px; }
+  .me-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 16px;
+    margin-top: 18px;
+    padding: 15px 17px;
+    border-radius: 16px;
+    border-color: var(--accent-line);
+    background:
+      linear-gradient(105deg, var(--accent-soft), rgba(16,26,40,.88) 72%),
+      rgba(16,26,40,.95);
+    box-shadow: inset 0 0 0 1px var(--accent-soft);
+  }
+  .me-label {
+    margin-bottom: 6px;
+    color: var(--accent);
+    font-size: 9px;
+    font-weight: 900;
+    letter-spacing: 2.2px;
+  }
+  .me-name { font-size: 15px; font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .me-sub { margin-top: 5px; color: #8d9aad; font-size: 11px; }
+  .me-values { text-align: right; white-space: nowrap; }
+  .me-values strong {
+    display: block;
+    color: var(--accent);
+    font-family: "Cascadia Mono", Consolas, monospace;
+    font-size: 19px;
+  }
+  .me-values span {
+    display: block;
+    margin-top: 4px;
+    color: #c3cedd;
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .footer {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 15px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(255,255,255,.08);
+    color: #59677a;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 1.1px;
+  }
+  .footer b { color: var(--accent); font-weight: 800; }
+</style>
+<div class="board {{ 'today' if is_today else 'total' }}">
+  <div class="road-mark"></div>
+  <header class="hero">
+    <div class="brand">
+      <div class="brand-mark">TMP</div>
+      <div>
+        <div class="eyebrow">TRUCKERSMP · ETS2</div>
+        <h1>{{ title }}</h1>
+      </div>
+    </div>
+    <div class="hero-meta">
+      <strong>TOP 10</strong>
+      <span>{{ subtitle }}</span>
+    </div>
+  </header>
+
+  {% if items|length > 0 %}
+  <div class="section-label">CHAMPION</div>
+  <div class="champion">
+    <div class="medal">01</div>
+    <div class="player">
+      <div class="player-name">{{ items[0].name }}</div>
+      <div class="player-id">TMP ID · {{ items[0].tmp_id }}</div>
+    </div>
+    <div class="mileage">
+      <strong>{{ items[0].km_text }}</strong>
+      <span>KILOMETERS</span>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if items|length > 1 %}
+  <div class="runner-grid">
+    <div class="runner-card silver">
+      <div class="medal">02</div>
+      <div>
+        <div class="player-name">{{ items[1].name }}</div>
+        <div class="player-id">TMP ID · {{ items[1].tmp_id }}</div>
+      </div>
+      <div class="mileage"><strong>{{ items[1].km_text }}</strong><span>KM</span></div>
+    </div>
+    {% if items|length > 2 %}
+    <div class="runner-card bronze">
+      <div class="medal">03</div>
+      <div>
+        <div class="player-name">{{ items[2].name }}</div>
+        <div class="player-id">TMP ID · {{ items[2].tmp_id }}</div>
+      </div>
+      <div class="mileage"><strong>{{ items[2].km_text }}</strong><span>KM</span></div>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% set remaining = items|length - 3 %}
+  {% if remaining > 0 %}
+  <div class="section-label">LEADERBOARD · 04–{{ items|length }}</div>
+  <div class="rows">
+    {% for it in items if it.rank > 3 %}
+    <div class="row">
+      <div class="row-rank">{{ '%02d' % it.rank }}</div>
+      <div>
+        <div class="player-name">{{ it.name }}</div>
+        <div class="player-id">TMP ID · {{ it.tmp_id }}</div>
+      </div>
+      <div class="mileage"><strong>{{ it.km_text }}</strong><span>KM</span></div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if me %}
+  <div class="me-card">
+    <div>
+      <div class="me-label">MY POSITION</div>
+      <div class="me-name">{{ me.name }}</div>
+      <div class="me-sub">TMP ID · {{ me.tmp_id }}{% if me.vtc_role %} · {{ me.vtc_role }}{% endif %}</div>
+    </div>
+    <div class="me-values">
+      <strong>{{ me.km_text }} KM</strong>
+      <span>{% if me.rank is not none %}RANK #{{ me.rank }}{% else %}{{ scope }}{% endif %}</span>
+    </div>
+  </div>
+  {% endif %}
+
+  <footer class="footer">
+    <span><b>LIVE DATA</b> · TRUCKERSMP MILEAGE</span>
+    <span>{{ scope }} · TOP 10</span>
+  </footer>
+</div>
+"""
 
 def _translate_user_groups(groups: List[Any]) -> List[str]:
     translated: List[str] = []
@@ -385,7 +810,7 @@ class TmpBotPlugin(Star):
         # 使用 IPv4 优先的连接器，并允许读取环境代理设置（与浏览器/系统行为更一致）
         connector = aiohttp.TCPConnector(family=socket.AF_INET)
         self.session = aiohttp.ClientSession(
-            headers={'User-Agent': 'astrBot-TMP-Plugin/1.3.59'}, 
+            headers={'User-Agent': 'astrBot-TMP-Plugin/1.8.6'}, 
             timeout=aiohttp.ClientTimeout(total=timeout_sec),
             connector=connector,
             trust_env=True
@@ -3761,13 +4186,17 @@ class TmpBotPlugin(Star):
                         "tmp_id": me_tmp_id,
                         "rank": me_total_rank,
                         "km": float(me_total_km),
+                        "km_text": km_str.removesuffix(".00"),
                         "vtc_role": (str(me_vtc_role).strip() if me_vtc_role else ""),
                     }
             except Exception:
                 pass
         
         for idx, player in enumerate(rank_list):
-            rank = player.get('ranking', idx + 1)
+            try:
+                rank = int(player.get('ranking', idx + 1))
+            except (TypeError, ValueError):
+                rank = idx + 1
             raw_name = (
                 player.get('tmpName')
                 or player.get('name')
@@ -3794,50 +4223,24 @@ class TmpBotPlugin(Star):
                 'rank': rank,
                 'name': name,
                 'km': distance_km,
+                'km_text': distance_str,
                 'tmp_id': tmp_id,
             })
 
         message += "=" * 35 + "\n"
 
-        rank_tmpl = """
-<style>
-  html, body { margin:0; padding:0; background:#222d33; width:auto; }
-  * { box-sizing: border-box; }
-  .wrap { width:600px; margin:0 auto; padding:14px; background:#222d33; color:#fff; font-family:system-ui,Segoe UI,Helvetica,Arial,sans-serif; }
-  .header { font-size:20px; font-weight:600; margin:0 0 8px 0; text-align:center; }
-  .me { background:#1f2a31; border:1px solid rgba(255,255,255,0.10); border-radius:8px; padding:10px 12px; margin:0 0 10px 0; }
-  .me .t1 { font-size:14px; font-weight:700; margin:0 0 4px 0; }
-  .me .t2 { font-size:13px; opacity:0.92; }
-  .list { margin:0; padding:0; }
-  .item { display:flex; align-items:center; background:#24313a; margin:0 0 8px 0; padding:8px 12px; border-radius:6px; border:1px solid rgba(255,255,255,0.08); }
-  .item.top3 { background:linear-gradient(135deg,rgba(255,215,0,0.18),rgba(255,215,0,0.06)); border-color:rgba(255,215,0,0.35); }
-  .rank { width:40px; font-size:15px; font-weight:bold; text-align:center; }
-  .name { flex:1; padding:0 10px; min-width:0; font-size:14px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .km { min-width:90px; font-size:14px; font-weight:700; text-align:right; white-space:nowrap; }
-</style>
-<div class="wrap">
-  <div class="header">{{ title }}</div>
-  {% if me %}
-  <div class="me">
-    <div class="t1">🙋 个人信息：{{ me.name }} (ID:{{ me.tmp_id }})</div>
-    <div class="t2">里程：{{ '%.2f' % me.km }} km{% if me.rank is not none %} | 排名：No.{{ me.rank }}{% endif %}{% if me.vtc_role %} | 车队职位：{{ me.vtc_role }}{% endif %}</div>
-  </div>
-  {% endif %}
-  <div class="list">
-    {% for it in items %}
-    <div class="item{% if it.rank <= 3 %} top3{% endif %}">
-      <div class="rank">#{{ it.rank }}</div>
-      <div class="name">{{ it.name }} (ID:{{ it.tmp_id }})</div>
-      <div class="km">{{ it.km }} km</div>
-    </div>
-    {% endfor %}
-  </div>
-</div>
-"""
+        rank_tmpl = RANK_IMAGE_TEMPLATE
 
         try:
-            options = { 'type': 'jpeg', 'quality': 92, 'full_page': True, 'omit_background': False }
-            url = await self.html_render(rank_tmpl, { 'title': '- 总行驶里程排行榜 -', 'items': items, 'me': me_data }, options=options)
+            options = { 'type': 'jpeg', 'quality': 96, 'full_page': True, 'omit_background': False }
+            url = await self.html_render(rank_tmpl, {
+                'title': '总里程排行榜',
+                'subtitle': 'ALL-TIME MILEAGE',
+                'scope': '累计里程',
+                'is_today': False,
+                'items': items,
+                'me': me_data,
+            }, options=options)
             if isinstance(url, str) and url:
                 yield event.chain_result([Image.fromURL(url)])
                 return
@@ -3918,13 +4321,17 @@ class TmpBotPlugin(Star):
                         "tmp_id": me_tmp_id,
                         "rank": me_daily_rank,
                         "km": float(me_daily_km),
+                        "km_text": km_str.removesuffix(".00"),
                         "vtc_role": (str(me_vtc_role).strip() if me_vtc_role else ""),
                     }
             except Exception:
                 pass
         
         for idx, player in enumerate(rank_list):
-            rank = player.get('ranking', idx + 1)
+            try:
+                rank = int(player.get('ranking', idx + 1))
+            except (TypeError, ValueError):
+                rank = idx + 1
             raw_name = (
                 player.get('tmpName')
                 or player.get('name')
@@ -3951,50 +4358,24 @@ class TmpBotPlugin(Star):
                 'rank': rank,
                 'name': name,
                 'km': distance_km,
+                'km_text': distance_str,
                 'tmp_id': tmp_id,
             })
 
         message += "=" * 35 + "\n"
 
-        rank_tmpl = """
-<style>
-  html, body { margin:0; padding:0; background:#222d33; width:auto; }
-  * { box-sizing: border-box; }
-  .wrap { width:600px; margin:0 auto; padding:14px; background:#222d33; color:#fff; font-family:system-ui,Segoe UI,Helvetica,Arial,sans-serif; }
-  .header { font-size:20px; font-weight:600; margin:0 0 8px 0; text-align:center; }
-  .me { background:#1f2a31; border:1px solid rgba(255,255,255,0.10); border-radius:8px; padding:10px 12px; margin:0 0 10px 0; }
-  .me .t1 { font-size:14px; font-weight:700; margin:0 0 4px 0; }
-  .me .t2 { font-size:13px; opacity:0.92; }
-  .list { margin:0; padding:0; }
-  .item { display:flex; align-items:center; background:#24313a; margin:0 0 8px 0; padding:8px 12px; border-radius:6px; border:1px solid rgba(255,255,255,0.08); }
-  .item.top3 { background:linear-gradient(135deg,rgba(255,215,0,0.18),rgba(255,215,0,0.06)); border-color:rgba(255,215,0,0.35); }
-  .rank { width:40px; font-size:15px; font-weight:bold; text-align:center; }
-  .name { flex:1; padding:0 10px; min-width:0; font-size:14px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .km { min-width:90px; font-size:14px; font-weight:700; text-align:right; white-space:nowrap; }
-</style>
-<div class="wrap">
-  <div class="header">{{ title }}</div>
-  {% if me %}
-  <div class="me">
-    <div class="t1">🙋 个人信息：{{ me.name }} (ID:{{ me.tmp_id }})</div>
-    <div class="t2">里程：{{ '%.2f' % me.km }} km{% if me.rank is not none %} | 排名：No.{{ me.rank }}{% endif %}{% if me.vtc_role %} | 车队职位：{{ me.vtc_role }}{% endif %}</div>
-  </div>
-  {% endif %}
-  <div class="list">
-    {% for it in items %}
-    <div class="item{% if it.rank <= 3 %} top3{% endif %}">
-      <div class="rank">#{{ it.rank }}</div>
-      <div class="name">{{ it.name }} (ID:{{ it.tmp_id }})</div>
-      <div class="km">{{ it.km }} km</div>
-    </div>
-    {% endfor %}
-  </div>
-</div>
-"""
+        rank_tmpl = RANK_IMAGE_TEMPLATE
 
         try:
-            options = { 'type': 'jpeg', 'quality': 92, 'full_page': True, 'omit_background': False }
-            url = await self.html_render(rank_tmpl, { 'title': '- 今日行驶里程排行榜 -', 'items': items, 'me': me_data }, options=options)
+            options = { 'type': 'jpeg', 'quality': 96, 'full_page': True, 'omit_background': False }
+            url = await self.html_render(rank_tmpl, {
+                'title': '今日里程排行榜',
+                'subtitle': 'TODAY · RESET 00:00',
+                'scope': '每日 0 点重置',
+                'is_today': True,
+                'items': items,
+                'me': me_data,
+            }, options=options)
             if isinstance(url, str) and url:
                 yield event.chain_result([Image.fromURL(url)])
                 return
