@@ -39,7 +39,7 @@
     "type": "string",
     "default": "",
     "title": "额外的 API 源（可选）",
-    "description": "填写自己的 VTCM 数据源地址，多个用逗号分隔，可省略 https:// 前缀。填写的源会排在内置源前面优先使用，全部失败后自动降级到内置源（da.vtcm.link / evmapi.cxnnn.cn）。留空则只用内置源。"
+    "description": "填写自己的 VTCM 数据源地址，多个用逗号分隔，可省略 https:// 前缀。填写的源会排在内置源前面优先使用，全部失败后自动降级到内置源（evmapi.cxnnn.cn / evmapi.114512.xyz）。留空则只用内置源。"
   },
   "extra_tile_ets_url": {
     "type": "string",
@@ -65,35 +65,5 @@
     "default": false,
     "title": "DLC列表使用图片输出",
     "description": "开启后，DLC列表将调用文本转图像服务以图片形式发送。"
-  },
-  "vtcm_api_token": {
-    "type": "string",
-    "default": "",
-    "title": "VTCM API Token",
-    "description": "车队平台API接口Token(Token获取QQ联系79887143)"
-  },
-  "vtcm_feature_enable": {
-    "type": "bool",
-    "default": false,
-    "title": "启用车队平台功能",
-    "description": "开启后，将启用活动、信息、修改密码等车队平台专属功能。"
-  },
-  "vtcm_whitelist_groups": {
-    "type": "string",
-    "default": "",
-    "title": "车队平台功能群白名单",
-    "description": "只允许在指定群聊中使用车队平台功能，多个群ID用逗号(,)分隔。留空则允许所有群聊使用。"
-  },
-  "vtcm_member_whitelist_users": {
-    "type": "string",
-    "default": "",
-    "title": "车队成员管理功能个人白名单",
-    "description": "只允许指定用户使用功能，多个用户用逗号(,)分隔。留空则允许所有用户使用。"
-  },
-  "vtcm_point_feature_enable": {
-    "type": "bool",
-    "default": false,
-    "title": "启用加减积分功能",
-    "description": "开启后，将启用加积分和减积分功能。"
   }
 }
