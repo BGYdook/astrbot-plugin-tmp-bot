@@ -8,6 +8,7 @@ repo: https://github.com/BGYdook/astrbot-plugin-tmp-bot
 license: MIT
 support_platforms:
   - aiocqhttp
+  - Discord
 astrbot_version: ">=4.5"
 
 # 插件功能特性
