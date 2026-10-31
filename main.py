@@ -2785,14 +2785,14 @@ class TmpBotPlugin(Star):
         for base in self._footprint_api_bases():
             url = f"{base}/map/playerHistory"
             try:
-                logger.info(f"足迹历史: 请求 {url} params={params}")
+                logger.debug(f"足迹历史: 请求 {url} params={params}")
                 async with self.session.get(url, params=params, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
                     if resp.status != 200:
-                        logger.info(f"足迹历史: 源 {base} 返回状态码 {resp.status}，尝试下一个源")
+                        logger.debug(f"足迹历史: 源 {base} 返回状态码 {resp.status}，尝试下一个源")
                         continue
                     data = await resp.json()
             except Exception as e:
-                logger.info(f"足迹历史: 源 {base} 请求异常: {e}")
+                logger.debug(f"足迹历史: 源 {base} 请求异常: {e}")
                 continue
             if isinstance(data, list):
                 if data:
@@ -2881,7 +2881,7 @@ class TmpBotPlugin(Star):
         last_error = None
         for url in urls:
             try:
-                logger.info(f"足迹接口: 请求 {url}")
+                logger.debug(f"足迹接口: 请求 {url}")
                 async with self.session.get(url, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
                     if resp.status == 200:
                         data = await resp.json()
@@ -4135,27 +4135,6 @@ class TmpBotPlugin(Star):
             except Exception:
                 target_user_id = None
 
-        if message_str.startswith("足迹"):
-            rest = message_str[2:].strip()
-            if rest:
-                tokens = re.split(r"\s+", rest)
-            else:
-                tokens = []
-        else:
-            tokens = message_str.split()
-
-        server_token = None
-        input_id = None
-        if tokens:
-            first = tokens[0]
-            if first.isdigit():
-                input_id = first
-            else:
-                server_token = first
-                for t in tokens[1:]:
-                    if t.isdigit():
-                        input_id = t
-                        break
         server_alias = {
             "s1": "sim1",
             "sim1": "sim1",
@@ -4173,6 +4152,27 @@ class TmpBotPlugin(Star):
             "arc1": "arc1",
         }
         all_server_keys = ["sim1", "sim2", "arc1", "eupromods1"]
+        server_token = None
+        input_id = None
+        if not _server_override:
+            rest = message_str[2:].strip() if message_str.startswith("足迹") else message_str.strip()
+            compact = re.sub(r"\s+", "", rest)
+            if compact.isdigit():
+                input_id = compact
+            elif compact:
+                for alias in sorted(server_alias.keys(), key=len, reverse=True):
+                    if not compact.lower().startswith(alias):
+                        continue
+                    suffix = compact[len(alias):]
+                    if suffix == "" or suffix.isdigit():
+                        server_token = alias
+                        input_id = suffix or None
+                        break
+                if server_token is None:
+                    tokens = rest.split()
+                    if tokens:
+                        server_token = tokens[0]
+                        input_id = next((token for token in tokens[1:] if token.isdigit()), None)
         if _server_override:
             server_key = str(_server_override).strip().lower()
             if server_key not in all_server_keys:
@@ -4227,11 +4227,11 @@ class TmpBotPlugin(Star):
             player_info, stats_info, online_status = _identity_override
         else:
             try:
-                player_info, stats_info, online_status = await asyncio.gather(
+                player_info, stats_info = await asyncio.gather(
                     self._get_player_info(tmp_id),
                     self._get_player_stats(tmp_id),
-                    self._get_online_status(tmp_id)
                 )
+                online_status = {}
             except PlayerNotFoundException as e:
                 yield event.plain_result(str(e))
                 return
@@ -4274,14 +4274,12 @@ class TmpBotPlugin(Star):
             last_online_formatted = None
 
         try:
-            resolved_server_ids = await self._resolve_server_ids(server_key)
             server_ids = []
             if server_key == 'eupromods1':
                 server_ids.extend(str(sid) for sid in sorted(PROMODS_SERVER_IDS))
             mapped_id = server_id_map.get(server_key)
             if mapped_id is not None:
                 server_ids.append(str(mapped_id))
-            server_ids.extend(resolved_server_ids)
             seen = set()
             uniq = []
             for sid in server_ids:
@@ -4338,7 +4336,7 @@ class TmpBotPlugin(Star):
             if history_points:
                 points = self._normalize_history_points(history_points)
                 meta = {'source': 'playerHistory', 'startTime': range_start, 'endTime': range_end}
-            else:
+            elif not _silent_empty:
                 logger.info("足迹历史为空，开始回退足迹接口")
                 footprint_resp = await self._get_footprint_data(server_key, tmp_id, server_ids)
                 points, meta = self._extract_footprint_points(footprint_resp.get('data'), server_key, server_ids)
@@ -4350,6 +4348,10 @@ class TmpBotPlugin(Star):
                         continue
                     fallback_points.append({'axisX': x, 'axisY': y, 'serverId': 0, 'heading': 0, 'ts': 0})
                 points = fallback_points
+            else:
+                # 全服务器批量查询时只使用历史接口，避免为空服务器发起整组备用请求。
+                points = []
+                meta = {}
         except ApiResponseException:
             logger.info(f"{server_label} 暂无今日足迹数据")
             if not _silent_empty:
