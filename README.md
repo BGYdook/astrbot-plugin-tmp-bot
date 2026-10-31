@@ -1,5 +1,5 @@
  # astrbot-plugin-tmp-bot
-[![npm](https://img.shields.io/badge/npm-v1.8.6-blue)](https://github.com/BGYdook/astrbot-plugin-tmp-bot)
+[![npm](https://img.shields.io/badge/npm-v1.9.0-blue)](https://github.com/BGYdook/astrbot-plugin-tmp-bot)
 
 ![:astrbot_plugin_tmp_bot](https://count.getloli.com/@:astrbot_plugin_tmp-bot?theme=minecraft)
 
@@ -16,18 +16,24 @@
 | 查询 | 查询 TMP 玩家信息 | 查询 123 |
 | 定位 | 查询玩家位置信息 | 定位 123 |
 | 路况  | 查询服务器热门地点路况（支持服务器简称：s1、s2、p、a） | 路况 s1 |
-| 服务器 | 查询服务器信息列表 | 服务器 |
+| 服务器 | 查询 TruckersMP 欧卡服务器状态 | 服务器 |
+| 美卡服务器 | 查询 TruckersMP 美卡服务器状态 | 美卡服务器 |
+| 查违规 | 查询玩家公开的 TMP 违规/封禁记录 | 查违规 123 / 查违规（使用绑定 ID） |
+| 时间 | 查询 TruckersMP 当前游戏内时间 | 时间 |
+| 今日活动 | 查询 TruckersMP 今日活动 | 今日活动 |
+| 活动 | 按活动 ID 查询活动详情 | 活动 38603 |
+| vtc | 按 VTC ID 查询车队资料 | vtc 67596 |
 | 插件版本 | 查询插件/接口版本信息 | 插件版本 |
 | DLC列表 / 地图DLC | 列出地图相关 DLC（可图片输出） | DLC列表 / 地图DLC |
 | 总里程排行 | 总里程排行榜（自 2025-08-23 20:00 起统计） | 总里程排行 |
 | 今日里程排行 | 今日里程排行榜（每日 0 点重置） | 今日里程排行 |
-| 足迹 | 今日足迹（每日 0 点重置） | 足迹 |
+| 足迹 | 今日足迹（北京时间 0 点重置，多服务器路线合并为一张图，可指定 s1、s2、a、p） | 足迹 / 足迹 s1 |
 ### 接口与数据
 API 文档与数据来源：https://s.apifox.cn/38508a88-5ff4-4b29-b724-41f9d3d3336a
 
 和
 
-https://truckersmp.com/developers/api
+https://docs.truckersmp.com/web-api/
 
 ### 自定义数据源（可选）
 如果你有自己的 VTCM 数据源或地图瓦片服务，可以在插件配置里填写，减轻公共接口压力：
@@ -44,6 +50,22 @@ https://truckersmp.com/developers/api
 ### 非常感谢[晚安](https://github.com/nulijiazaizhong)和[鲸鱼](https://github.com/jingyu8127)提供的帮助
 
 ## 历史更新
+
+## 版本v1.9.0
+- 新增 自动检测 TMP 联机插件更新并检测到更新后自动推送到机器人所在的所有群
+- 优化 足迹地图图片的路线、信息布局和空数据展示
+- 新增 足迹默认查询全部服务器，支持通过 `s1`、`s2`、`a`、`p` 单独查询
+- 修复 足迹仅查询北京时间当天数据，移除最近 7 天自动回退
+- 新增 `美卡服务器` 命令，查询 TruckersMP 美卡服务器状态
+- 新增 `查违规` 功能
+- 优化 `查违规` 展示user全部违规记录
+- 新增 `时间` 功能显示当前游戏时间
+- 新增 `今日活动` 功能
+- 新增 `活动 [活动ID]` 功能，查询活动和参加情况
+- 新增 `vtc [VTCID]` 功能
+- 优化 足迹查询的正常候选请求日志降为 DEBUG，减少日志刷屏
+- 修复 足迹异常跳点会把地图缩放到整个欧洲的问题，改为聚焦点数最多的主路线
+- 优化 足迹默认将多个服务器路线合成为一张图片，ProMods 使用同图双地图面板
 
 ## 版本v1.8.6
 - 修复 `足迹`,`DLC`,`排行榜`的功能
@@ -64,7 +86,7 @@ https://truckersmp.com/developers/api
 - 新增 2个备用api(当首要api无法使用自动切换)
 - 新增 在定位时可以显示向什么方向行驶
 - 新增 未知的问题
-- 支持 路况/足迹功能可以不用空格使用(比如 足迹s1)
+- 支持 路况/足迹功能可以不用空格使用（如 `足迹s1`、`足迹s15504163`）
 - 更改 定位时底图太远的内容
 - 修复 当在线时返回的内容会多一行的问题
 

@@ -65,5 +65,35 @@
     "default": false,
     "title": "DLC列表使用图片输出",
     "description": "开启后，DLC列表将调用文本转图像服务以图片形式发送。"
+  },
+  "tmp_update_check_enable": {
+    "type": "bool",
+    "default": true,
+    "title": "自动检测联机插件更新",
+    "description": "定时查询 TruckersMP 官方版本接口，检测到联机插件版本或支持的游戏版本变化时，自动向机器人所在的群聊推送更新通知。"
+  },
+  "tmp_update_check_interval_minutes": {
+    "type": "int",
+    "default": 10,
+    "title": "更新检测间隔（分钟）",
+    "description": "自动检测联机插件版本的间隔，最小 5 分钟。"
+  },
+  "tmp_update_exclude_groups": {
+    "type": "string",
+    "default": "",
+    "title": "不接收更新通知的群号",
+    "description": "填写群号，多个用逗号、空格或换行分隔，这些群不会收到自动更新通知。留空表示推送到所有群；填写 * 可屏蔽全部群。"
+  },
+  "tmp_update_notify_first_run": {
+    "type": "bool",
+    "default": false,
+    "title": "首次检测时也推送通知（测试用）",
+    "description": "首次运行、还没有版本记录时，也立即推送一次当前版本通知，便于测试推送是否正常。"
+  },
+  "tmp_update_send_delay_seconds": {
+    "type": "int",
+    "default": 2,
+    "title": "群推送间隔（秒）",
+    "description": "依次向多个群发送更新通知时的间隔，避免发送过快触发风控，建议 1~5 秒。"
   }
 }
