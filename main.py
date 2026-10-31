@@ -1891,6 +1891,9 @@ class TmpBotPlugin(Star):
         "travemunde": "特拉弗明德",
         "zürich": "苏黎世",
         "zurich": "苏黎世",
+        "alpen road": "阿尔卑斯公路",
+        "channel tunnel": "英吉利海峡隧道",
+        "folkestone": "福克斯通",
     }
 
     def _load_location_maps(self) -> None:
@@ -2466,7 +2469,7 @@ class TmpBotPlugin(Star):
         logger.info(f"尝试 Trucky V3 API (地图实时状态): {trucky_url}")
         
         try:
-            async with self.session.get(trucky_url, timeout=5) as response:
+            async with self.session.get(trucky_url, timeout=8) as response:
                 
                 status = response.status
                 raw_data = await response.json()
@@ -2484,9 +2487,15 @@ class TmpBotPlugin(Star):
                         server_details = online_data.get('serverDetails', {})
                         server_name = server_details.get('name', f"未知服务器 ({online_data.get('server')})")
                         
-                        location_data = online_data.get('location', {})
-                        country = location_data.get('poi', {}).get('country')
-                        real_name = location_data.get('poi', {}).get('realName')
+                        location_data = online_data.get('location')
+                        if not isinstance(location_data, dict):
+                            location_data = {}
+                        poi = location_data.get('poi')
+                        if not isinstance(poi, dict):
+                            poi = {}
+                        country = poi.get('country')
+                        real_name = poi.get('realName')
+                        location_type = poi.get('type') or ''
 
                         if not country:
                             country = location_data.get('country')
@@ -2495,11 +2504,12 @@ class TmpBotPlugin(Star):
 
                         country_cn, city_cn = await self._translate_country_city(country, real_name)
 
+                        location_cn = city_cn or str(real_name or '').strip()
                         formatted_location = '未知位置'
-                        if country_cn and city_cn:
-                            formatted_location = f"{country_cn}-{city_cn}"
-                        elif city_cn:
-                            formatted_location = city_cn
+                        if country_cn and location_cn:
+                            formatted_location = f"{country_cn}-{location_cn}"
+                        elif location_cn:
+                            formatted_location = location_cn
                         elif country_cn:
                             formatted_location = country_cn
                         
@@ -2514,8 +2524,9 @@ class TmpBotPlugin(Star):
                             'serverCode': server_details.get('code') or server_details.get('shortname'),
                             'x': online_data.get('x'),
                             'y': online_data.get('y'),
-                            'country': country_cn,
-                            'realName': city_cn,
+                            'country': country_cn or str(country or '').strip(),
+                            'realName': location_cn,
+                            'locationType': location_type,
                             'debug_error': 'Trucky V3 判断在线，并获取到实时数据。',
                             'raw_data': '' 
                         }
@@ -4910,10 +4921,24 @@ class TmpBotPlugin(Star):
             if not fullmap_player:
                 yield event.plain_result("玩家未在线")
                 return
+            fullmap_server_id = fullmap_player.get('ServerId')
+            fullmap_server_names = {
+                2: 'Simulation 1',
+                41: 'Simulation 2',
+                7: 'Arcade',
+                50: 'ProMods',
+                51: 'ProMods Arcade',
+                15: '[US] Simulation',
+                38: '[US] Arcade',
+            }
             online = {
                 'online': True,
-                'serverName': '未知服务器',
-                'serverId': fullmap_player.get('ServerId'),
+                'serverName': fullmap_server_names.get(
+                    int(fullmap_server_id or 0),
+                    f'服务器 {fullmap_server_id or "未知"}',
+                ),
+                'game': 2 if int(fullmap_server_id or 0) in {9, 11, 38} else 1,
+                'serverId': fullmap_server_id,
                 'x': fullmap_player.get('X'),
                 'y': fullmap_player.get('Y'),
                 'country': None,
@@ -5053,9 +5078,9 @@ class TmpBotPlugin(Star):
             map_type = 'promods' if int(server_id or 0) in [50, 51] else 'ets'
             # 瓦片源：用户在配置里填了自定义源就用它，否则用内置默认源
             tile_url_ets = self._tile_url(
-                'ets', "https://ets-map.oss-cn-beijing.aliyuncs.com/ets2/05102019/{z}/{x}/{y}.png")
+                'ets', "https://ets_tiles.cnly.top/20260903/tmp-ets-yellow/Tiles/{z}/{x}/{y}.png")
             tile_url_promods = self._tile_url(
-                'promods', "https://ets-map.oss-cn-beijing.aliyuncs.com/promods/05102019/{z}/{x}/{y}.png")
+                'promods', "https://ets_tiles.cnly.top/20260903/tmp-promods-yellow/Tiles/{z}/{x}/{y}.png")
             logger.info(f"定位: tile_ets={tile_url_ets}")
             logger.info(f"定位: tile_promods={tile_url_promods}")
 
@@ -5184,7 +5209,7 @@ class TmpBotPlugin(Star):
   var cfg = {
     ets: {
       tileUrl: '{{ tile_url_ets }}',
-      fallbackUrl: 'https://ets2.online/map/ets2map_157/{z}/{x}/{y}.png',
+      fallbackUrl: 'https://ets2.online/map/ets2map_158/{z}/{x}/{y}.png',
       multipliers: { x: 70272, y: 76157 },
       breakpoints: { uk: { x: -31056.8, y: -5832.867 } },
       bounds: { x:131072, y:131072 },
@@ -5195,7 +5220,7 @@ class TmpBotPlugin(Star):
     },
     promods: {
       tileUrl: '{{ tile_url_promods }}',
-      fallbackUrl: 'https://ets2.online/map/ets2mappromods_156/{z}/{x}/{y}.png',
+      fallbackUrl: 'https://ets2.online/map/ets2mappromods_158/{z}/{x}/{y}.png',
       multipliers: { x: 51953, y: 76024 },
       breakpoints: { uk: { x: -31056.8, y: -5832.867 } },
       bounds: { x:131072, y:131072 },
