@@ -3,7 +3,7 @@
 
 """
 astrbot-plugin-tmp-bot
-欧卡2TMP查询插件 (版本 1.8.6)
+欧卡2TMP查询插件 (版本 1.9.0)
 """
 
 import re
@@ -19,7 +19,7 @@ import hashlib
 import random
 import time
 from typing import Optional, List, Dict, Tuple, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 # 引入 AstrBot 核心 API
 try:
@@ -111,6 +111,8 @@ USER_GROUP_MAP = {
     'Game Moderator': '游戏管理员'
 }
 PROMODS_SERVER_IDS = {50, 51}
+BEIJING_TZ = timezone(timedelta(hours=8))
+TMP_GAME_EPOCH = datetime(2015, 10, 25, 15, 48, 32)
 
 RANK_IMAGE_TEMPLATE = """
 <style>
@@ -594,7 +596,11 @@ def _format_timestamp_to_beijing(timestamp_str: Optional[str]) -> str:
             # ISO 8601 with timezone offset, e.g. 2025-12-01T07:55:00+00:00
             iso = s.replace('Z', '+00:00')
             dt = datetime.fromisoformat(iso)
-            dt_bj = dt + timedelta(hours=8)
+            dt_bj = (
+                dt.astimezone(BEIJING_TZ)
+                if dt.tzinfo is not None
+                else dt.replace(tzinfo=BEIJING_TZ)
+            )
             return dt_bj.strftime('%Y-%m-%d %H:%M:%S')
         except Exception:
             return s
@@ -686,7 +692,7 @@ class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
 
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.8.6", "https://github.com/BGYdook/astrbot-plugin-tmp-bot")
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.9.0", "https://github.com/BGYdook/astrbot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context, config=None):  # 接收 context 和 config
         super().__init__(context)              # 将 context 传给父类
@@ -717,6 +723,15 @@ class TmpBotPlugin(Star):
             self.bind_file = bind_path
         except Exception:
             self.bind_file = os.path.join(os.getcwd(), 'tmp_bindings.json')
+
+        self._tmp_update_state_file = os.path.join(
+            os.path.dirname(self.bind_file) or os.getcwd(),
+            'tmp_plugin_update_state.json',
+        )
+        self._tmp_update_state: Dict[str, Any] = {}
+        self._tmp_update_groups: Dict[str, Dict[str, str]] = {}
+        self._tmp_update_task: Optional[asyncio.Task] = None
+
         try:
             logger.info("TMP Bot 插件初始化开始")
             # 仅做轻量初始化，避免在导入阶段执行网络/阻塞操作
@@ -810,7 +825,7 @@ class TmpBotPlugin(Star):
         # 使用 IPv4 优先的连接器，并允许读取环境代理设置（与浏览器/系统行为更一致）
         connector = aiohttp.TCPConnector(family=socket.AF_INET)
         self.session = aiohttp.ClientSession(
-            headers={'User-Agent': 'astrBot-TMP-Plugin/1.8.6'}, 
+            headers={'User-Agent': 'astrBot-TMP-Plugin/1.9.0'}, 
             timeout=aiohttp.ClientTimeout(total=timeout_sec),
             connector=connector,
             trust_env=True
@@ -818,6 +833,8 @@ class TmpBotPlugin(Star):
         logger.info(f"TMP Bot 插件HTTP会话已创建，超时 {timeout_sec}s")
         logger.info(f"TMP Bot 插件 API 源（按优先级）: {' -> '.join(self._api_bases())}")
         self._fullmap_task = None
+        self._load_tmp_update_state()
+        self._start_tmp_update_task()
 
 
     def _get_fullmap_interval(self) -> int:
@@ -869,6 +886,541 @@ class TmpBotPlugin(Star):
                 logger.info(f"fullmap 拉取失败 status={resp.status}")
         except Exception as e:
             logger.error(f"fullmap 拉取异常: {e}")
+
+    TMP_VERSION_API = "https://api.truckersmp.com/v2/version"
+    TMP_UPDATE_MAX_NOTIFY_ATTEMPTS = 10
+
+    @staticmethod
+    def _as_config_bool(value: Any, default: bool) -> bool:
+        """更宽容地解析布尔配置（兼容 WebUI 传入的 "true"/"false" 字符串）。"""
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        if isinstance(value, str):
+            s = value.strip().lower()
+            if s in ("1", "true", "yes", "on", "是", "开启", "启用"):
+                return True
+            if s in ("0", "false", "no", "off", "否", "关闭", "禁用"):
+                return False
+        return default
+
+    def _tmp_update_enabled(self) -> bool:
+        return self._as_config_bool(self.config.get('tmp_update_check_enable', True), True)
+
+    def _tmp_update_notify_first_run(self) -> bool:
+        return self._as_config_bool(self.config.get('tmp_update_notify_first_run', False), False)
+
+    def _tmp_update_interval_seconds(self) -> int:
+        try:
+            minutes = int(self.config.get('tmp_update_check_interval_minutes', 30))
+        except Exception:
+            minutes = 30
+        if minutes < 5:
+            minutes = 5
+        return minutes * 60
+
+    def _tmp_update_send_delay(self) -> float:
+        try:
+            delay = float(self.config.get('tmp_update_send_delay_seconds', 2))
+        except Exception:
+            delay = 2.0
+        return min(max(delay, 0.0), 30.0)
+
+    def _parse_tmp_update_excludes(self) -> set:
+        """解析「不接收更新通知的群号」，支持中英文逗号、空格、换行分隔。"""
+        raw = self._cfg_str('tmp_update_exclude_groups', '')
+        raw = re.sub(r"#[^\n]*", "", raw)
+        excludes = set()
+        for chunk in re.split(r"[,，;；\s]+", raw):
+            item = chunk.strip()
+            if not item or item.startswith('#'):
+                continue
+            if item.startswith('群') and item[1:].isdigit():
+                item = item[1:]
+            excludes.add(item)
+        return excludes
+
+    @staticmethod
+    def _tmp_update_origin_group_id(origin: str) -> str:
+        try:
+            parts = str(origin).split(':')
+            if len(parts) >= 3:
+                return parts[2].split('_')[-1]
+        except Exception:
+            pass
+        return ''
+
+    @staticmethod
+    def _tmp_version_key(snapshot: Optional[Dict[str, Any]]) -> Tuple[str, str, str]:
+        if not isinstance(snapshot, dict):
+            return ("", "", "")
+        return (
+            str(snapshot.get('name') or ''),
+            str(snapshot.get('ets2') or ''),
+            str(snapshot.get('ats') or ''),
+        )
+
+    @staticmethod
+    def _tmp_major_minor(version: str) -> str:
+        """提取 1.61.3.18s 这类版本号的主次版本（1.61）。"""
+        m = re.match(r"^\s*(\d+)\.(\d+)", str(version or ""))
+        return f"{m.group(1)}.{m.group(2)}" if m else ""
+
+    @classmethod
+    def _format_tmp_update_message(cls, snapshot: Dict[str, Any]) -> str:
+        version = str(snapshot.get('name') or '未知')
+        official_raw = str(snapshot.get('official') or '').strip()
+        official = official_raw or '未知'
+        ets2 = str(snapshot.get('ets2') or '未知')
+        ats = str(snapshot.get('ats') or '未知')
+
+        if not official_raw or official_raw == '未知':
+            ets2_ok = '未知'
+            ats_ok = '未知'
+        else:
+            # 欧卡：官方 Steam 版本必须与 TMP 支持的版本完全一致
+            ets2_ok = '✅' if ets2 != '未知' and official_raw == ets2 else '❌'
+            # 美卡：接口没有单独提供美卡官方版本，按主次版本号（如 1.61）判断
+            official_mm = cls._tmp_major_minor(official_raw)
+            ats_mm = cls._tmp_major_minor(ats)
+            ats_ok = '✅' if ats != '未知' and official_mm and official_mm == ats_mm else '❌'
+
+        return (
+            "检测到联机插件有更新!\n"
+            f"联机插件版本: {version}\n"
+            f"支持欧卡版本: {ets2}\n"
+            f"支持美卡版本: {ats}\n"
+            "-----------------------------\n"
+            f"📊 官方Steam版本: {official}\n"
+            f"🎮 欧卡兼容: {ets2_ok}\n"
+            f"🎮 美卡兼容: {ats_ok}"
+        )
+
+    def _load_tmp_update_state(self) -> None:
+        self._tmp_update_state = {}
+        self._tmp_update_groups = {}
+        try:
+            if os.path.exists(self._tmp_update_state_file):
+                with open(self._tmp_update_state_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                if isinstance(data, dict):
+                    self._tmp_update_state = data
+        except Exception as e:
+            logger.error(f"读取联机插件更新状态失败: {e}")
+
+        groups = self._tmp_update_state.get('groups')
+        if isinstance(groups, dict):
+            for origin, info in groups.items():
+                if not isinstance(origin, str) or not isinstance(info, dict):
+                    continue
+                group_id = str(info.get('group_id') or self._tmp_update_origin_group_id(origin) or '')
+                if not group_id:
+                    continue
+                self._tmp_update_groups[origin] = {
+                    'platform_id': str(info.get('platform_id') or origin.split(':', 1)[0]),
+                    'group_id': group_id,
+                    'name': str(info.get('name') or ''),
+                }
+
+        last = self._tmp_update_state.get('last_snapshot')
+        if isinstance(last, dict) and last.get('name'):
+            logger.info(
+                "联机插件版本基线: "
+                f"{last.get('name')}（欧卡 {last.get('ets2') or '未知'} / 美卡 {last.get('ats') or '未知'}）"
+            )
+
+    def _save_tmp_update_state(self) -> None:
+        try:
+            self._tmp_update_state['schema'] = 1
+            self._tmp_update_state['groups'] = self._tmp_update_groups
+            directory = os.path.dirname(self._tmp_update_state_file)
+            if directory:
+                os.makedirs(directory, exist_ok=True)
+            tmp_path = self._tmp_update_state_file + '.tmp'
+            with open(tmp_path, 'w', encoding='utf-8') as f:
+                json.dump(self._tmp_update_state, f, ensure_ascii=False, indent=2)
+            os.replace(tmp_path, self._tmp_update_state_file)
+        except Exception as e:
+            logger.error(f"保存联机插件更新状态失败: {e}")
+
+    # --- 群聊记录与发现 ---
+
+    def _remember_tmp_update_group(self, event: Any) -> None:
+        """从收到的群消息中记录群会话，作为 OneBot 群列表接口不可用时的兜底。"""
+        try:
+            get_group_id = getattr(event, 'get_group_id', None)
+            group_id = get_group_id() if callable(get_group_id) else ''
+            if not group_id:
+                return
+            origin = str(getattr(event, 'unified_msg_origin', '') or '')
+            if not origin:
+                session = getattr(event, 'session', None)
+                if session is not None:
+                    origin = str(session)
+            if not origin:
+                return
+            platform_id = ''
+            get_platform_id = getattr(event, 'get_platform_id', None)
+            if callable(get_platform_id):
+                platform_id = str(get_platform_id() or '')
+            info = {
+                'platform_id': platform_id or origin.split(':', 1)[0],
+                'group_id': str(group_id),
+                'name': str((self._tmp_update_groups.get(origin) or {}).get('name') or ''),
+            }
+            self._tmp_update_groups[origin] = info
+        except Exception:
+            pass
+
+    async def _discover_tmp_update_groups(self) -> Dict[str, Dict[str, str]]:
+        """获取需要推送的群会话。
+
+        优先使用 aiocqhttp(OneBot) 的 get_group_list（能拿到机器人所在的全部群），
+        同时合并从历史消息中记录到的群；如果某个平台能成功拉到群列表，则以实时列表为准，
+        避免机器人退群后仍向旧群重试。
+        """
+        known: Dict[str, Dict[str, str]] = {}
+        for origin, info in self._tmp_update_groups.items():
+            if origin and info.get('group_id'):
+                known[origin] = dict(info)
+
+        live: Dict[str, Dict[str, str]] = {}
+        confirmed_platforms = set()
+        insts = []
+        try:
+            manager = getattr(self.context, 'platform_manager', None)
+            if manager is not None:
+                insts = manager.get_insts() or []
+        except Exception as e:
+            logger.warning(f"获取平台列表失败，将只使用已记录的群: {e}")
+
+        for platform in insts:
+            try:
+                meta = platform.meta()
+            except Exception:
+                continue
+            if getattr(meta, 'name', '') != 'aiocqhttp':
+                continue
+            platform_id = str(getattr(meta, 'id', '') or '')
+            if not platform_id:
+                continue
+            bot = getattr(platform, 'bot', None)
+            if bot is None or not hasattr(bot, 'call_action'):
+                continue
+            try:
+                group_list = await asyncio.wait_for(
+                    bot.call_action(action='get_group_list'), timeout=15
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.warning(f"获取群列表失败（平台 {platform_id}），将使用已记录的群: {e}")
+                continue
+            if not isinstance(group_list, list):
+                logger.warning(f"群列表接口返回格式异常（平台 {platform_id}），将使用已记录的群")
+                continue
+            confirmed_platforms.add(platform_id)
+            for item in group_list:
+                if not isinstance(item, dict):
+                    continue
+                group_id = item.get('group_id') or item.get('groupId')
+                if group_id is None:
+                    continue
+                group_id = str(group_id)
+                origin = f"{platform_id}:GroupMessage:{group_id}"
+                live[origin] = {
+                    'platform_id': platform_id,
+                    'group_id': group_id,
+                    'name': str(item.get('group_name') or item.get('groupName') or ''),
+                }
+
+        groups = {
+            origin: info
+            for origin, info in known.items()
+            if info.get('platform_id') not in confirmed_platforms
+        }
+        groups.update(live)
+        self._tmp_update_groups = dict(groups)
+        return groups
+
+    def _is_tmp_update_group_excluded(
+        self,
+        origin: str,
+        info: Dict[str, str],
+        excludes: set,
+    ) -> bool:
+        if not excludes:
+            return False
+        group_id = str(info.get('group_id') or '')
+        platform_id = str(info.get('platform_id') or '')
+        candidates = {origin, group_id}
+        if platform_id and group_id:
+            candidates.add(f"{platform_id}:GroupMessage:{group_id}")
+            candidates.add(f"{platform_id}:{group_id}")
+        if platform_id:
+            candidates.add(f"{platform_id}:*")
+        candidates.add('*')
+        return bool(candidates & excludes)
+
+    async def _fetch_tmp_plugin_version(self) -> Optional[Dict[str, Any]]:
+        if not self.session:
+            return None
+        timeout = self._cfg_int('api_timeout_seconds', 10)
+        try:
+            async with self.session.get(self.TMP_VERSION_API, timeout=timeout) as resp:
+                if resp.status != 200:
+                    logger.warning(f"检测联机插件版本失败: 错误代码 HTTP {resp.status}")
+                    return None
+                data = await resp.json(content_type=None)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.warning(f"检测联机插件版本请求异常: {e}")
+            return None
+
+        if not isinstance(data, dict):
+            logger.warning("检测联机插件版本失败: 接口返回格式异常")
+            return None
+        name = data.get('name') or data.get('version')
+        if not name:
+            logger.warning(f"检测联机插件版本失败: 缺少版本号，返回内容 {str(data)[:200]}")
+            return None
+        return {
+            'name': str(name),
+            'ets2': str(data.get('supported_game_version') or '未知'),
+            'ats': str(data.get('supported_ats_game_version') or '未知'),
+            'numeric': str(data.get('numeric') or ''),
+            'stage': str(data.get('stage') or ''),
+            'api_time': str(data.get('time') or ''),
+        }
+
+    async def _fetch_tmp_official_game_version(self) -> str:
+        """获取 Steam 官方游戏版本（欧卡）。
+
+        数据来自插件内置/自定义 API 源的 /other/tmpVersion 接口；
+        该值只用于展示「官方Steam版本」，不参与更新判断。
+        接口不可用时返回空字符串，通知里显示为「未知」。
+        """
+        if not self.session:
+            return ''
+        timeout = self._cfg_int('api_timeout_seconds', 10)
+        for base in self._api_bases():
+            url = f"{base}/other/tmpVersion"
+            try:
+                async with self.session.get(url, timeout=timeout) as resp:
+                    if resp.status != 200:
+                        continue
+                    payload = await resp.json(content_type=None)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                continue
+            if not isinstance(payload, dict):
+                continue
+            code = payload.get('code')
+            if code not in (None, 200, '200'):
+                continue
+            data = payload.get('data')
+            official = None
+            if isinstance(data, dict):
+                official = data.get('officialGameVersion')
+            if not official:
+                official = payload.get('officialGameVersion')
+            if official:
+                return str(official)
+        logger.warning("获取官方 Steam 版本失败，通知中将显示为未知")
+        return ''
+
+    def _start_tmp_update_task(self) -> None:
+        if not self._tmp_update_enabled():
+            logger.info("联机插件自动更新检测已关闭")
+            return
+        if self._tmp_update_task and not self._tmp_update_task.done():
+            return
+        self._tmp_update_task = asyncio.create_task(self._tmp_update_loop())
+        logger.info(
+            "联机插件自动更新检测已启动，"
+            f"检测间隔 {self._tmp_update_interval_seconds() // 60} 分钟"
+        )
+
+    async def _tmp_update_loop(self) -> None:
+        try:
+            await asyncio.sleep(min(30, self._tmp_update_interval_seconds()))
+            while True:
+                try:
+                    await self._check_tmp_plugin_update()
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    logger.error(f"联机插件自动更新检测异常: {e}", exc_info=True)
+                await asyncio.sleep(self._tmp_update_interval_seconds())
+        except asyncio.CancelledError:
+            logger.info("联机插件自动更新检测任务已停止")
+            raise
+
+    async def _check_tmp_plugin_update(self) -> None:
+        snapshot = await self._fetch_tmp_plugin_version()
+        if not snapshot:
+            return
+
+        prev = self._tmp_update_state.get('last_snapshot')
+        prev_key = self._tmp_version_key(prev)
+        new_key = self._tmp_version_key(snapshot)
+        now_ts = time.time()
+
+        pending = self._tmp_update_state.get('pending')
+        if not isinstance(pending, dict) or not isinstance(pending.get('snapshot'), dict):
+            pending = None
+
+        if not any(prev_key):
+            logger.info(
+                "已记录联机插件版本基线: "
+                f"{new_key[0]}（欧卡 {new_key[1]} / 美卡 {new_key[2]}）"
+            )
+            pending = (
+                {'snapshot': snapshot, 'notified': [], 'attempts': 0}
+                if self._tmp_update_notify_first_run()
+                else None
+            )
+            self._tmp_update_state['last_snapshot'] = snapshot
+            self._tmp_update_state['last_check_ts'] = now_ts
+            self._tmp_update_state['pending'] = pending
+            self._save_tmp_update_state()
+            if pending:
+                await self._broadcast_pending_tmp_update(pending)
+            return
+
+        if new_key != prev_key:
+            logger.info(
+                "检测到联机插件更新: "
+                f"{prev_key[0]} -> {new_key[0]}"
+                f"（欧卡 {prev_key[1]} -> {new_key[1]}，"
+                f"美卡 {prev_key[2]} -> {new_key[2]}）"
+            )
+            pending = {'snapshot': snapshot, 'notified': [], 'attempts': 0}
+            self._tmp_update_state['last_snapshot'] = snapshot
+        else:
+            logger.info(
+                "联机插件版本无变化: "
+                f"{new_key[0]}（欧卡 {new_key[1]} / 美卡 {new_key[2]}）"
+            )
+
+        self._tmp_update_state['last_check_ts'] = now_ts
+        self._tmp_update_state['pending'] = pending
+        self._save_tmp_update_state()
+
+        if pending:
+            await self._broadcast_pending_tmp_update(pending)
+
+    # --- 群推送 ---
+
+    async def _broadcast_pending_tmp_update(self, pending: Dict[str, Any]) -> None:
+        snapshot = pending.get('snapshot') or {}
+        notified = pending.get('notified')
+        if not isinstance(notified, list):
+            notified = []
+        notified_set = {str(x) for x in notified if x}
+        pending['notified'] = sorted(notified_set)
+
+        if not hasattr(self.context, 'send_message'):
+            logger.warning("当前 AstrBot 版本不允许主动发送消息，无法推送联机插件更新通知")
+            return
+
+        all_groups = await self._discover_tmp_update_groups()
+        excludes = self._parse_tmp_update_excludes()
+
+        targets: List[Tuple[str, Dict[str, str]]] = []
+        excluded_count = 0
+        skipped_count = 0
+        for origin, info in all_groups.items():
+            if self._is_tmp_update_group_excluded(origin, info, excludes):
+                excluded_count += 1
+                continue
+            if origin in notified_set:
+                skipped_count += 1
+                continue
+            targets.append((origin, info))
+
+        if not targets:
+            if not all_groups:
+                logger.warning("未发现可用群聊，联机插件更新通知将在下次检测时重试")
+                return
+            logger.info(
+                "联机插件更新通知无需发送："
+                f"已发送 {skipped_count} 个群，已排除 {excluded_count} 个群"
+            )
+            self._tmp_update_state['pending'] = None
+            self._save_tmp_update_state()
+            return
+
+        # 官方 Steam 版本只在真正推送时查询，避免每次检测都多请求一次
+        if not snapshot.get('official'):
+            official = await self._fetch_tmp_official_game_version()
+            if official:
+                snapshot['official'] = official
+                pending['snapshot'] = snapshot
+                self._save_tmp_update_state()
+
+        message = self._format_tmp_update_message(snapshot)
+        delay = self._tmp_update_send_delay()
+        sent = 0
+        failed: List[str] = []
+
+        logger.info(
+            "开始推送联机插件更新通知："
+            f"目标 {len(targets)} 个群，已排除 {excluded_count} 个群，"
+            f"版本 {snapshot.get('name') or '未知'}"
+        )
+
+        for index, (origin, info) in enumerate(targets):
+            label = info.get('name') or info.get('group_id') or origin
+            try:
+                ok = await asyncio.wait_for(
+                    self.context.send_message(
+                        origin,
+                        MessageEventResult().message(message),
+                    ),
+                    timeout=30,
+                )
+                if ok is False:
+                    raise RuntimeError("未找到匹配的平台适配器")
+                notified_set.add(origin)
+                pending['notified'] = sorted(notified_set)
+                self._save_tmp_update_state()
+                sent += 1
+                logger.info(f"已推送联机插件更新通知到群 {label}（{origin}）")
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                failed.append(origin)
+                logger.error(f"推送联机插件更新通知到群 {label}（{origin}）失败: {e}")
+
+            if delay > 0 and index < len(targets) - 1:
+                await asyncio.sleep(delay)
+
+        self._tmp_update_state['last_notify_ts'] = time.time()
+        if failed:
+            pending['attempts'] = int(pending.get('attempts') or 0) + 1
+            attempts = pending['attempts']
+            if attempts >= self.TMP_UPDATE_MAX_NOTIFY_ATTEMPTS:
+                logger.error(
+                    "联机插件更新通知连续发送失败 "
+                    f"{attempts} 次，放弃剩余 {len(failed)} 个群："
+                    + ", ".join(failed[:10])
+                )
+                self._tmp_update_state['pending'] = None
+            else:
+                self._tmp_update_state['pending'] = pending
+                logger.warning(
+                    "联机插件更新通知本轮发送完成："
+                    f"成功 {sent} 个，失败 {len(failed)} 个，"
+                    "失败的群将在下次检测时重试"
+                )
+        else:
+            self._tmp_update_state['pending'] = None
+            logger.info(f"联机插件更新通知已推送到 {sent} 个群")
+        self._save_tmp_update_state()
 
     def _get_fullmap_tile_url(self, map_type: str) -> Optional[str]:
         data = self._fullmap_cache or {}
@@ -1165,6 +1717,73 @@ class TmpBotPlugin(Star):
         "svalbard": "斯瓦尔巴群岛",
     }
 
+    LANGUAGE_MAP_EN_TO_CN = {
+        "english": "英语",
+        "chinese (simplified)": "简体中文",
+        "chinese (traditional)": "繁体中文",
+        "french": "法语",
+        "german": "德语",
+        "russian": "俄语",
+        "spanish": "西班牙语",
+        "portuguese": "葡萄牙语",
+        "italian": "意大利语",
+        "polish": "波兰语",
+        "czech": "捷克语",
+        "slovak": "斯洛伐克语",
+        "dutch": "荷兰语",
+        "danish": "丹麦语",
+        "swedish": "瑞典语",
+        "norwegian": "挪威语",
+        "finnish": "芬兰语",
+        "estonian": "爱沙尼亚语",
+        "latvian": "拉脱维亚语",
+        "lithuanian": "立陶宛语",
+        "romanian": "罗马尼亚语",
+        "bulgarian": "保加利亚语",
+        "greek": "希腊语",
+        "hungarian": "匈牙利语",
+        "turkish": "土耳其语",
+        "ukrainian": "乌克兰语",
+        "arabic": "阿拉伯语",
+        "japanese": "日语",
+        "korean": "韩语",
+    }
+
+    EVENT_TYPE_MAP_EN_TO_CN = {
+        "convoy": "车队巡游",
+        "truck_show_and_convoy": "卡车展与车队巡游",
+        "truckfest and convoy": "卡车展与车队巡游",
+        "truckfest": "卡车展",
+        "truck show": "卡车展",
+        "special event": "特别活动",
+    }
+
+    EVENT_LOCATION_MAP_EN_TO_CN = {
+        "other": "其他",
+        "city": "城市",
+        "hotel": "酒店",
+        "slots": "停车位",
+        "booked slots": "预订停车位",
+        "container port": "集装箱港口",
+        "any city in the play area": "游戏区域内任意城市",
+        "to be determined": "待定",
+    }
+
+    COMMON_TEXT_MAP_EN_TO_CN = {
+        "truck show and convoy": "卡车展与车队巡游",
+        "truckfest and convoy": "卡车展与车队巡游",
+        "any city in the play area": "游戏区域内任意城市",
+        "to be determined": "待定",
+        "booked slots": "预订停车位",
+        "container port": "集装箱港口",
+        "join our rules": "加入规则",
+        "join rules": "加入规则",
+        "how to contact us": "联系方式",
+        "truck show": "卡车展",
+        "truckfest": "卡车展",
+        "convoy": "车队巡游",
+    }
+
     CITY_MAP_EN_TO_CN = {
         "calais": "加来",
         "duisburg": "杜伊斯堡",
@@ -1196,6 +1815,48 @@ class TmpBotPlugin(Star):
         "longyearbyen": "朗伊尔城",
         "napoli": "那不勒斯",
         "sundsvall": "松兹瓦尔",
+        "frankfurt am main": "法兰克福",
+        "frankfurt": "法兰克福",
+        "bremen": "不来梅",
+        "hamburg": "汉堡",
+        "munich": "慕尼黑",
+        "nuremberg": "纽伦堡",
+        "hanover": "汉诺威",
+        "hannover": "汉诺威",
+        "rostock": "罗斯托克",
+        "athens": "雅典",
+        "kavala": "卡瓦拉",
+        "lamia": "拉米亚",
+        "aarhus": "奥胡斯",
+        "gävle": "耶夫勒",
+        "gavle": "耶夫勒",
+        "pärnu": "派尔努",
+        "parnu": "派尔努",
+        "vaasa": "瓦萨",
+        "poznań": "波兹南",
+        "poznan": "波兹南",
+        "salzburg": "萨尔茨堡",
+        "travemünde": "特拉弗明德",
+        "travemunde": "特拉弗明德",
+        "eindhoven": "埃因霍温",
+        "bern": "伯尔尼",
+        "innsbruck": "因斯布鲁克",
+        "klagenfurt am wörthersee": "克拉根福",
+        "klagenfurt": "克拉根福",
+        "liepāja": "利耶帕亚",
+        "liepaja": "利耶帕亚",
+        "narva": "纳尔瓦",
+        "rijeka": "里耶卡",
+        "szeged": "塞格德",
+        "tirana": "地拉那",
+        "istanbul": "伊斯坦布尔",
+        "i̇stanbul": "伊斯坦布尔",
+        "omaha": "奥马哈",
+        "nogales": "诺加莱斯",
+        "scottsbluff": "斯科茨布拉夫",
+        "show low": "肖洛",
+        "wenatchee": "韦纳奇",
+        "yakima": "亚基马",
     }
 
     LOCATION_FIX_MAP = {
@@ -1545,7 +2206,134 @@ class TmpBotPlugin(Star):
         except Exception as e:
             logger.error(f"获取玩家封禁失败: {e}", exc_info=False)
             return []
-            
+
+    async def _resolve_tmp_id_for_user_command(
+        self,
+        event: AstrMessageEvent,
+        command_name: str,
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """解析用户命令中的 TMP ID、Steam ID、绑定账号或被 @ 用户。"""
+        message_str = event.message_str.strip()
+        target_user_id = None
+        message_obj = getattr(event, "message_obj", None)
+        if message_obj is not None:
+            try:
+                chain = getattr(message_obj, "message", None) or []
+                for seg in chain:
+                    seg_type = getattr(seg, "type", None)
+                    if isinstance(seg, dict):
+                        seg_type = seg.get("type") or seg_type
+                    if isinstance(seg_type, str) and seg_type.lower() == "at":
+                        uid = (
+                            getattr(seg, "qq", None)
+                            or getattr(seg, "user_id", None)
+                            or getattr(seg, "id", None)
+                        )
+                        if isinstance(seg, dict):
+                            uid = seg.get("qq") or seg.get("user_id") or seg.get("id") or uid
+                        if uid:
+                            target_user_id = str(uid)
+                            break
+            except Exception:
+                target_user_id = None
+
+        match = re.search(rf"{re.escape(command_name)}\s*(\d+)?", message_str)
+        input_id = match.group(1) if match else None
+        if input_id:
+            if len(input_id) == 17 and input_id.startswith('7'):
+                try:
+                    return await self._get_tmp_id_from_steam_id(input_id), None
+                except SteamIdNotFoundException as exc:
+                    return None, str(exc)
+                except NetworkException as exc:
+                    return None, f"SteamID查询失败: {exc}\n请稍后重试或使用TMP ID查询"
+                except Exception as exc:
+                    logger.error(f"违规查询解析 SteamID 失败: {exc}")
+                    return None, "SteamID查询失败，请直接使用 TMP ID"
+            return input_id, None
+
+        bind_user_id = target_user_id or event.get_sender_id()
+        tmp_id = self._get_bound_tmp_id(bind_user_id)
+        if tmp_id:
+            return str(tmp_id), None
+        return None, f"请先绑定账号，或使用 {command_name} [TMP ID]"
+
+    async def _get_game_time(self) -> Dict[str, Any]:
+        if not self.session:
+            raise NetworkException("插件初始化中，请稍后重试")
+        url = "https://api.truckersmp.com/v2/game_time"
+        async with self.session.get(url, timeout=self._cfg_int('api_timeout_seconds', 10)) as response:
+            if response.status != 200:
+                raise ApiResponseException(f"API返回错误状态码: {response.status}")
+            data = await response.json()
+        if not isinstance(data, dict):
+            raise ApiResponseException("游戏时间 API 返回格式异常")
+        if data.get('error'):
+            raise ApiResponseException(str(data.get('error')))
+        payload = data.get('response') if isinstance(data.get('response'), dict) else data
+        game_time = payload.get('game_time')
+        if game_time is None:
+            raise ApiResponseException("游戏时间 API 未返回 game_time")
+        try:
+            game_minutes = float(game_time)
+        except (TypeError, ValueError):
+            raise ApiResponseException("游戏时间 API 返回值无效")
+        return {
+            'game_time': game_minutes,
+            'game_datetime': TMP_GAME_EPOCH + timedelta(minutes=game_minutes),
+        }
+
+    async def _get_tmp_api_json(self, path: str, resource_name: str) -> Any:
+        if not self.session:
+            raise NetworkException("插件初始化中，请稍后重试")
+        url = f"https://api.truckersmp.com/v2/{path.lstrip('/')}"
+        async with self.session.get(url, timeout=self._cfg_int('api_timeout_seconds', 10)) as response:
+            if response.status == 404:
+                raise ApiResponseException(f"{resource_name}不存在")
+            if response.status != 200:
+                raise ApiResponseException(f"API返回错误状态码: {response.status}")
+            data = await response.json()
+        if not isinstance(data, dict):
+            raise ApiResponseException(f"{resource_name} API 返回格式异常")
+        if data.get('error'):
+            detail = data.get('message') or data.get('error')
+            raise ApiResponseException(f"{resource_name}查询失败: {detail}")
+        return data
+
+    async def _get_today_events(self) -> List[Dict[str, Any]]:
+        data = await self._get_tmp_api_json('events', '活动')
+        response = data.get('response')
+        if not isinstance(response, dict):
+            raise ApiResponseException("活动 API 返回格式异常")
+        today_events = response.get('today') or []
+        if not isinstance(today_events, list):
+            return []
+        unique_events = []
+        seen_ids = set()
+        for event in today_events:
+            if not isinstance(event, dict):
+                continue
+            event_id = str(event.get('id') or '').strip()
+            if not event_id or event_id in seen_ids:
+                continue
+            seen_ids.add(event_id)
+            unique_events.append(event)
+        return unique_events
+
+    async def _get_event_detail(self, event_id: str) -> Dict[str, Any]:
+        data = await self._get_tmp_api_json(f"events/{event_id}", '活动')
+        response = data.get('response')
+        if not isinstance(response, dict):
+            raise ApiResponseException("活动 API 返回格式异常")
+        return response
+
+    async def _get_vtc_detail(self, vtc_id: str) -> Dict[str, Any]:
+        data = await self._get_tmp_api_json(f"vtc/{vtc_id}", 'VTC')
+        response = data.get('response')
+        if not isinstance(response, dict):
+            raise ApiResponseException("VTC API 返回格式异常")
+        return response
+
     async def _get_player_stats(self, tmp_id: str) -> Dict[str, Any]:
         """通过 VTCM 里程 API 获取玩家的总里程、今日里程和头像。
         API 源取自 `_api_bases()`（用户自定义源优先，内置源兜底）。
@@ -2046,12 +2834,17 @@ class TmpBotPlugin(Star):
             if update_time:
                 s = str(update_time).strip()
                 try:
-                    dt = datetime.strptime(s, '%Y-%m-%d %H:%M:%S')
-                    ts_val = int(dt.timestamp())
+                    if s.endswith('Z') or re.search(r'[+-]\d{2}:\d{2}$', s):
+                        dt = datetime.fromisoformat(s.replace('Z', '+00:00'))
+                    else:
+                        dt = datetime.strptime(s, '%Y-%m-%d %H:%M:%S').replace(tzinfo=BEIJING_TZ)
+                    ts_val = int(dt.astimezone(BEIJING_TZ).timestamp())
                 except Exception:
                     try:
                         dt = datetime.fromisoformat(s.replace('Z', '+00:00'))
-                        ts_val = int(dt.timestamp())
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=BEIJING_TZ)
+                        ts_val = int(dt.astimezone(BEIJING_TZ).timestamp())
                     except Exception:
                         ts_val = None
             server_id_val = 0
@@ -2510,9 +3303,10 @@ class TmpBotPlugin(Star):
         """只返回历史封禁次数和最新的封禁记录（按时间倒序）"""
         if not bans_info or not isinstance(bans_info, list):
             return 0, []
-        
-        sorted_bans = sorted(bans_info, key=lambda x: x.get('timeAdded', ''), reverse=True)
-        return len(bans_info), sorted_bans
+
+        valid_bans = [ban for ban in bans_info if isinstance(ban, dict)]
+        sorted_bans = sorted(valid_bans, key=lambda x: str(x.get('timeAdded') or ''), reverse=True)
+        return len(valid_bans), sorted_bans
 
     def _translate_ban_reason(self, reason: Optional[str]) -> str:
         """将封禁原因中的所有片段（§X.X - 英文）翻译为中文，保留后续说明/链接。
@@ -2597,6 +3391,8 @@ class TmpBotPlugin(Star):
                 if hasattr(kw_event, "message_str") or hasattr(kw_event, "message_obj"):
                     target_event = kw_event
 
+        self._remember_tmp_update_group(target_event)
+
         msg = (getattr(target_event, "message_str", "") or "").strip()
         if not msg:
             return
@@ -2671,8 +3467,35 @@ class TmpBotPlugin(Star):
                 yield r
             return
         if re.match(r'^服务器\s*$', msg):
-            async for r in self.tmpserver(event):
+            async for r in self.tmpserver(event, game_filter='ets'):
                 yield r
+            return
+        if re.match(r'^美卡服务器\s*$', msg):
+            async for r in self.tmpats_server(event):
+                yield r
+            return
+        if re.match(r'^查违规(?:\s*\d+)?\s*$', msg) or (msg.startswith("查违规") and has_at):
+            async for r in self.tmpviolations(event):
+                yield r
+            return
+        if re.match(r'^时间\s*$', msg):
+            async for r in self.tmpgametime(event):
+                yield r
+            return
+        if re.match(r'^今日活动\s*$', msg):
+            async for r in self.tmptoday_events(event):
+                yield r
+            return
+        if re.match(r'^活动\s*\d+\s*$', msg):
+            async for r in self.tmpevent_detail(event):
+                yield r
+            return
+        if re.fullmatch(r'vtc\s*\d+', msg, flags=re.IGNORECASE):
+            async for r in self.tmpvtc_info(event):
+                yield r
+            return
+        if re.fullmatch(r'(活动|vtc)', msg, flags=re.IGNORECASE):
+            yield event.plain_result("用法: 活动 [活动ID] 或 vtc [VTC ID]")
             return
         if re.match(r'^路况(?:\s*\S+)?\s*$', msg):
             async for r in self.tmptraffic(event):
@@ -2745,7 +3568,7 @@ class TmpBotPlugin(Star):
 
     @filter.command("足迹")
     async def cmd_tmp_today_footprint(self, event: AstrMessageEvent, server: str | None = None, tmp_id: str | None = None):
-        """查询玩家今日足迹热力图。"""
+        """查询玩家今日足迹；未指定服务器时查询全部服务器。"""
         # 此函数仅用于在 AstrBot 行为列表中显示功能
         # 实际处理通过事件监听器 _on_any_message_dispatch 完成
         # 不处理任何实际的命令逻辑
@@ -2753,10 +3576,40 @@ class TmpBotPlugin(Star):
 
     @filter.command("服务器")
     async def cmd_tmp_server(self, event: AstrMessageEvent):
-        """查看欧卡/美卡官方服务器的实时状态列表。"""
+        """查看 TruckersMP 欧卡服务器状态。"""
         # 此函数仅用于在 AstrBot 行为列表中显示功能
         # 实际处理通过事件监听器 _on_any_message_dispatch 完成
         # 不处理任何实际的命令逻辑
+        return
+
+    @filter.command("美卡服务器")
+    async def cmd_tmp_ats_server(self, event: AstrMessageEvent):
+        """查看 TruckersMP 美卡服务器状态。"""
+        return
+
+    @filter.command("查违规")
+    async def cmd_tmp_violations(self, event: AstrMessageEvent, tmp_id: str | None = None):
+        """查询玩家公开的 TMP 违规记录。"""
+        return
+
+    @filter.command("时间")
+    async def cmd_tmp_game_time(self, event: AstrMessageEvent):
+        """查询 TruckersMP 当前游戏时间。"""
+        return
+
+    @filter.command("今日活动")
+    async def cmd_tmp_today_events(self, event: AstrMessageEvent):
+        """查看 TruckersMP 今日活动。"""
+        return
+
+    @filter.command("活动")
+    async def cmd_tmp_event_detail(self, event: AstrMessageEvent, event_id: str | None = None):
+        """按活动 ID 查询 TruckersMP 活动详情。"""
+        return
+
+    @filter.command("VTC")
+    async def cmd_tmp_vtc_info(self, event: AstrMessageEvent, vtc_id: str | None = None):
+        """按 VTC ID 查询 TruckersMP 车队资料。"""
         return
 
     @filter.command("插件版本")
@@ -3242,7 +4095,14 @@ class TmpBotPlugin(Star):
             yield r
     # --- DLC 命令处理器结束 ---
 
-    async def tmptoday_footprint(self, event: AstrMessageEvent):
+    async def tmptoday_footprint(
+        self,
+        event: AstrMessageEvent,
+        _server_override: Optional[str] = None,
+        _tmp_id_override: Optional[str] = None,
+        _identity_override: Optional[Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]] = None,
+        _silent_empty: bool = False,
+    ):
         message_str = event.message_str.strip()
         user_id = event.get_sender_id()
 
@@ -3296,22 +4156,36 @@ class TmpBotPlugin(Star):
                     if t.isdigit():
                         input_id = t
                         break
-        if not server_token:
-            yield event.plain_result("用法: 足迹 [服务器简称] [ID]或 足迹 [服务器简称]，例如: 足迹 s1 123 或足迹 s1")
-            return
-        server_key_raw = str(server_token).strip().lower()
         server_alias = {
             "s1": "sim1",
+            "sim1": "sim1",
+            "simulation1": "sim1",
             "s2": "sim2",
+            "sim2": "sim2",
+            "simulation2": "sim2",
             "p": "eupromods1",
-            "a": "arc1",
             "promods": "eupromods1",
             "promods1": "eupromods1",
-            "sim1": "sim1",
-            "sim2": "sim2",
-            "arc1": "arc1"
+            "eupromods1": "eupromods1",
+            "a": "arc1",
+            "arc": "arc1",
+            "arcade": "arc1",
+            "arc1": "arc1",
         }
-        server_key = server_alias.get(server_key_raw, server_key_raw)
+        all_server_keys = ["sim1", "sim2", "arc1", "eupromods1"]
+        if _server_override:
+            server_key = str(_server_override).strip().lower()
+            if server_key not in all_server_keys:
+                yield event.plain_result("服务器参数无效，请使用 s1、s2、a、p")
+                return
+        elif server_token:
+            server_key_raw = str(server_token).strip().lower()
+            server_key = server_alias.get(server_key_raw)
+            if not server_key:
+                yield event.plain_result("服务器参数无效，请使用 s1、s2、a、p")
+                return
+        else:
+            server_key = None
         server_id_map = {
             "sim1": 2,
             "sim2": 41,
@@ -3324,45 +4198,74 @@ class TmpBotPlugin(Star):
             "eupromods1": "ProMods",
             "arc1": "Arc"
         }
-        server_label = server_label_map.get(server_key, server_key.upper())
-        map_type = 'promods' if server_key in ['eupromods1', 'promods', 'promods1'] else 'ets'
 
-        tmp_id = None
-        if input_id:
-            if len(input_id) == 17 and input_id.startswith('7'):
-                try:
-                    tmp_id = await self._get_tmp_id_from_steam_id(input_id)
-                except SteamIdNotFoundException as e:
-                    # SteamID 未注册
-                    yield event.plain_result(str(e))
-                    return
-                except NetworkException as e:
-                    # 网络错误，建议重试
-                    yield event.plain_result(f"SteamID查询失败: {str(e)}\n请稍后重试或使用TMP ID查询")
-                    return
-                    return
+        tmp_id = _tmp_id_override
+        if not tmp_id:
+            if input_id:
+                if len(input_id) == 17 and input_id.startswith('7'):
+                    try:
+                        tmp_id = await self._get_tmp_id_from_steam_id(input_id)
+                    except SteamIdNotFoundException as e:
+                        # SteamID 未注册
+                        yield event.plain_result(str(e))
+                        return
+                    except NetworkException as e:
+                        # 网络错误，建议重试
+                        yield event.plain_result(f"SteamID查询失败: {str(e)}\n请稍后重试或使用TMP ID查询")
+                        return
+                else:
+                    tmp_id = input_id
             else:
-                tmp_id = input_id
-        else:
-            bind_user_id = target_user_id or user_id
-            tmp_id = self._get_bound_tmp_id(bind_user_id)
+                bind_user_id = target_user_id or user_id
+                tmp_id = self._get_bound_tmp_id(bind_user_id)
 
         if not tmp_id:
             yield event.plain_result("请输入正确的玩家编号 TMP ID")
             return
 
-        try:
-            player_info, stats_info, online_status = await asyncio.gather(
-                self._get_player_info(tmp_id),
-                self._get_player_stats(tmp_id),
-                self._get_online_status(tmp_id)
+        if _identity_override is not None:
+            player_info, stats_info, online_status = _identity_override
+        else:
+            try:
+                player_info, stats_info, online_status = await asyncio.gather(
+                    self._get_player_info(tmp_id),
+                    self._get_player_stats(tmp_id),
+                    self._get_online_status(tmp_id)
+                )
+            except PlayerNotFoundException as e:
+                yield event.plain_result(str(e))
+                return
+            except Exception as e:
+                yield event.plain_result(f"查询失败: {str(e)}")
+                return
+
+        if server_key is None:
+            async def collect_server_footprint(target_server: str) -> List[Any]:
+                results = []
+                async for result in self.tmptoday_footprint(
+                    event,
+                    _server_override=target_server,
+                    _tmp_id_override=tmp_id,
+                    _identity_override=(player_info, stats_info, online_status),
+                    _silent_empty=True,
+                ):
+                    results.append(result)
+                return results
+
+            server_results = await asyncio.gather(
+                *(collect_server_footprint(target_server) for target_server in all_server_keys)
             )
-        except PlayerNotFoundException as e:
-            yield event.plain_result(str(e))
+            sent_count = 0
+            for results in server_results:
+                for result in results:
+                    sent_count += 1
+                    yield result
+            if sent_count == 0:
+                yield event.plain_result("所有服务器暂无可用的今日足迹数据")
             return
-        except Exception as e:
-            yield event.plain_result(f"查询失败: {str(e)}")
-            return
+
+        server_label = server_label_map.get(server_key, server_key.upper())
+        map_type = 'promods' if server_key == 'eupromods1' else 'ets'
 
         player_name = player_info.get('name', '未知')
         last_online_raw = stats_info.get('last_online') or player_info.get('lastOnline')
@@ -3371,16 +4274,14 @@ class TmpBotPlugin(Star):
             last_online_formatted = None
 
         try:
-            server_ids = await self._resolve_server_ids(server_key)
-            for k in ['serverId', 'serverDetailsId', 'apiServerId']:
-                v = online_status.get(k)
-                if v is not None:
-                    s = str(v).strip()
-                    if s:
-                        server_ids.append(s)
+            resolved_server_ids = await self._resolve_server_ids(server_key)
+            server_ids = []
+            if server_key == 'eupromods1':
+                server_ids.extend(str(sid) for sid in sorted(PROMODS_SERVER_IDS))
             mapped_id = server_id_map.get(server_key)
             if mapped_id is not None:
                 server_ids.append(str(mapped_id))
+            server_ids.extend(resolved_server_ids)
             seen = set()
             uniq = []
             for sid in server_ids:
@@ -3390,7 +4291,7 @@ class TmpBotPlugin(Star):
                 uniq.append(sid)
             server_ids = uniq
 
-            now_local = datetime.now()
+            now_local = datetime.now(BEIJING_TZ)
             start_time = now_local.replace(hour=0, minute=0, second=0, microsecond=0).strftime('%Y-%m-%d %H:%M:%S')
             end_time = now_local.replace(hour=23, minute=59, second=59, microsecond=0).strftime('%Y-%m-%d %H:%M:%S')
             history_points = []
@@ -3415,15 +4316,6 @@ class TmpBotPlugin(Star):
                 history_points = await self._get_footprint_history(tmp_id, sid or None, start_time, end_time)
                 if history_points:
                     break
-            if not history_points:
-                extended_start = (now_local - timedelta(days=7)).strftime('%Y-%m-%d %H:%M:%S')
-                extended_end = now_local.strftime('%Y-%m-%d %H:%M:%S')
-                for sid in hist_list:
-                    history_points = await self._get_footprint_history(tmp_id, sid or None, extended_start, extended_end)
-                    if history_points:
-                        range_start = extended_start
-                        range_end = extended_end
-                        break
             if history_points:
                 has_server_id = any(
                     str(p.get('serverId') or p.get('server_id') or p.get('server') or "").strip()
@@ -3458,12 +4350,20 @@ class TmpBotPlugin(Star):
                         continue
                     fallback_points.append({'axisX': x, 'axisY': y, 'serverId': 0, 'heading': 0, 'ts': 0})
                 points = fallback_points
+        except ApiResponseException:
+            logger.info(f"{server_label} 暂无今日足迹数据")
+            if not _silent_empty:
+                yield event.plain_result(f"{server_label} 暂无今日足迹数据")
+            return
         except Exception as e:
-            yield event.plain_result(f"查询今日足迹失败: {str(e)}")
+            logger.warning(f"查询 {server_label} 足迹失败: {e}")
+            if not _silent_empty:
+                yield event.plain_result(f"查询今日足迹失败: {str(e)}")
             return
 
         if not points:
-            yield event.plain_result("今日/输入的对应服务器暂无足迹数据")
+            if not _silent_empty:
+                yield event.plain_result(f"{server_label} 暂无今日足迹数据")
             return
 
         def _to_km(val):
@@ -3478,13 +4378,85 @@ class TmpBotPlugin(Star):
         distance_km = _to_km(meta.get('distance') or meta.get('mileage') or meta.get('totalDistance') or meta.get('totalMileage'))
         start_time = meta.get('startTime') or meta.get('start_time') or meta.get('beginTime') or meta.get('begin_time')
         end_time = meta.get('endTime') or meta.get('end_time') or meta.get('finishTime') or meta.get('finish_time')
-        if distance_km is None:
+        if distance_km is None and not _silent_empty:
             try:
                 daily_km = float(stats_info.get('daily_km') or 0)
                 if daily_km > 0:
                     distance_km = round(daily_km, 2)
             except Exception:
                 distance_km = None
+
+        point_timestamps = []
+        for point in points:
+            try:
+                point_ts = int(point.get('ts') or 0)
+            except Exception:
+                point_ts = 0
+            if point_ts > 0:
+                point_timestamps.append(point_ts)
+
+        route_start_raw = min(point_timestamps) if point_timestamps else start_time
+        route_end_raw = max(point_timestamps) if point_timestamps else end_time
+
+        def _format_footprint_moment(value: Any) -> str:
+            if value in (None, ''):
+                return '暂无记录'
+            parsed = None
+            try:
+                if isinstance(value, (int, float)):
+                    parsed = datetime.fromtimestamp(float(value), BEIJING_TZ)
+                else:
+                    text = str(value).strip()
+                    parsed = datetime.fromisoformat(text.replace('Z', '+00:00'))
+                    if parsed.tzinfo is None:
+                        parsed = parsed.replace(tzinfo=BEIJING_TZ)
+                    else:
+                        parsed = parsed.astimezone(BEIJING_TZ)
+            except Exception:
+                parsed = None
+            if parsed is None:
+                return str(value).replace(':00', '', 1) if str(value).count(':') >= 2 else str(value)
+            date_prefix = '今天' if parsed.date() == now_local.date() else parsed.strftime('%m月%d日')
+            return f"{date_prefix} {parsed:%H:%M}"
+
+        route_start_label = _format_footprint_moment(route_start_raw)
+        route_end_label = _format_footprint_moment(route_end_raw)
+        track_duration_label = '未记录'
+        if point_timestamps:
+            duration_seconds = max(0, max(point_timestamps) - min(point_timestamps))
+            if duration_seconds >= 86400:
+                days, remainder = divmod(duration_seconds, 86400)
+                hours = remainder // 3600
+                track_duration_label = f"{days}天{hours}小时"
+            elif duration_seconds >= 3600:
+                hours, remainder = divmod(duration_seconds, 3600)
+                track_duration_label = f"{hours}小时{remainder // 60}分"
+            elif duration_seconds >= 60:
+                track_duration_label = f"{duration_seconds // 60}分钟"
+            else:
+                track_duration_label = '少于1分钟'
+
+        route_segments = 0
+        previous_point = None
+        for point in points:
+            if previous_point is None:
+                route_segments = 1
+                previous_point = point
+                continue
+            try:
+                coordinate_jump = math.hypot(
+                    float(point.get('axisX') or 0) - float(previous_point.get('axisX') or 0),
+                    float(point.get('axisY') or 0) - float(previous_point.get('axisY') or 0),
+                ) * 19 > 30000
+                previous_ts = int(previous_point.get('ts') or 0)
+                current_ts = int(point.get('ts') or 0)
+                time_jump = bool(previous_ts and current_ts and current_ts - previous_ts > 90)
+                server_jump = point.get('serverId') != previous_point.get('serverId')
+            except Exception:
+                coordinate_jump = time_jump = server_jump = False
+            if coordinate_jump or time_jump or server_jump:
+                route_segments += 1
+            previous_point = point
 
         tile_url_ets = "https://ets-map.oss-cn-beijing.aliyuncs.com/ets2/05102019/{z}/{x}/{y}.png"
         tile_url_promods = "https://ets-map.oss-cn-beijing.aliyuncs.com/promods/05102019/{z}/{x}/{y}.png"
@@ -3502,34 +4474,107 @@ class TmpBotPlugin(Star):
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
-  html, body { margin:0; padding:0; width:100vw; height:100vh; background:#111; overflow:hidden; }
-  * { box-sizing: border-box; }
-  .wrap { width: 100vw; color:#f2f4f8; font-family: system-ui, Segoe UI, Helvetica, Arial, sans-serif; }
-  #map { width: 100vw; height: calc(100vh - 140px); background:#121417; }
-  .panel { width:100vw; height:140px; background:rgba(10,10,10,.82); display:flex; align-items:center; padding:14px 20px; color:#eaeaea; backdrop-filter: blur(4px); }
-  .avatar { width:64px; height:64px; border-radius:50%; background:#808080; object-fit:cover; margin-right:16px; }
-  .col { flex:1; }
-  .name { font-size:20px; font-weight:600; letter-spacing:.3px; color:#f0f3f5; }
-  .sub { font-size:14px; color:#d8d8d8; margin-top:6px; line-height:1.5; }
-  .right { width:260px; text-align:right; color:#f0f3f5; font-size:14px; }
+  html, body { margin:0; padding:0; width:1280px; height:720px; background:#244b63; overflow:hidden; }
+  * { box-sizing:border-box; }
+  body { font-family:"PingFang SC","Microsoft YaHei","Noto Sans CJK SC",system-ui,sans-serif; }
+  .shell { position:relative; width:1280px; height:720px; overflow:hidden; color:#f5fbfa; background:#244b63; }
+  .map-stage { position:relative; width:100%; height:100%; overflow:hidden; background:radial-gradient(circle at 52% 40%,#365f76 0,#294f66 52%,#1b3b51 100%); }
+  #map { position:absolute; inset:0; background:transparent; }
+  #map .leaflet-tile-pane {
+    opacity:.82; filter:grayscale(1) brightness(1.75) contrast(1.12);
+    mix-blend-mode:screen;
+  }
+  .leaflet-control-container { display:none; }
+  .map-stage::after {
+    content:""; position:absolute; inset:0; z-index:450; pointer-events:none;
+    background:
+      linear-gradient(180deg,rgba(7,29,45,.18) 0,rgba(7,29,45,0) 22%,rgba(7,29,45,0) 66%,rgba(7,29,45,.38) 100%),
+      radial-gradient(circle at 52% 45%,transparent 50%,rgba(8,30,45,.24) 100%);
+  }
+  .route-tooltip {
+    border:none!important; border-radius:9px!important; background:#f8f6ef!important; color:#172625!important;
+    box-shadow:0 8px 22px rgba(0,0,0,.2)!important; font-size:11px!important; font-weight:700!important;
+  }
+  .route-tooltip::before { border-top-color:#f8f6ef!important; }
+  .panel {
+    position:absolute; z-index:900; left:28px; right:28px; bottom:24px; height:112px;
+    padding:0 28px; display:grid; grid-template-columns:minmax(0,1fr) 280px;
+    gap:18px; align-items:center; border:1px solid rgba(255,255,255,.16); border-radius:20px;
+    background:linear-gradient(105deg,rgba(7,28,45,.94),rgba(8,36,55,.88));
+    box-shadow:0 18px 45px rgba(6,25,39,.34); backdrop-filter:blur(14px);
+  }
+  .panel::before {
+    content:""; position:absolute; left:22px; right:22px; top:0; height:1px;
+    background:linear-gradient(90deg,transparent,rgba(121,213,255,.7),transparent);
+  }
+  .profile { min-width:0; display:flex; align-items:center; gap:15px; }
+  .avatar-wrap {
+    width:72px; height:72px; flex:0 0 72px; padding:4px; border-radius:50%;
+    background:linear-gradient(145deg,#6bcfff,#267cad); box-shadow:0 8px 22px rgba(2,16,27,.38);
+  }
+  .avatar {
+    width:64px; height:64px; display:block; border:3px solid #102f45; border-radius:50%;
+    object-fit:cover; background:#d9e0dc;
+  }
+  .avatar-fallback {
+    width:64px; height:64px; display:flex; align-items:center; justify-content:center;
+    border:3px solid #102f45; border-radius:50%; color:#f8fffd;
+    background:linear-gradient(145deg,#237ca8,#123d59); font-size:26px; font-weight:800;
+  }
+  .profile-copy { min-width:0; flex:1; }
+  .profile-kicker { margin-bottom:5px; color:#8bb1c3; font-size:10px; font-weight:800; letter-spacing:1.35px; }
+  .name-line { display:flex; align-items:baseline; min-width:0; max-width:100%; }
+  .name {
+    min-width:0; max-width:380px; overflow:hidden; color:#f7fbfc; font-size:24px; line-height:1.18;
+    font-weight:800; letter-spacing:-.4px; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .name-suffix { flex:0 0 auto; color:#afc8d4; font-size:17px; font-weight:600; letter-spacing:0; white-space:nowrap; }
+  .chips { display:flex; align-items:center; gap:7px; margin-top:8px; }
+  .chip {
+    display:inline-flex; align-items:center; height:22px; padding:0 9px; border-radius:7px;
+    color:#c1d8e3; background:rgba(255,255,255,.08); font-size:10px; font-weight:700; letter-spacing:.35px;
+  }
+  .chip.server { color:#78ddae; background:rgba(83,199,143,.13); }
+  .mileage { display:flex; align-items:baseline; justify-content:flex-end; gap:16px; white-space:nowrap; }
+  .mileage span { color:#9bb6c4; font-size:14px; font-weight:600; }
+  .mileage strong { color:#8de4b0; font-size:29px; line-height:1; font-weight:800; letter-spacing:-.6px; }
+  .mileage small { margin-left:5px; color:#a7c6b7; font-size:13px; font-weight:600; letter-spacing:0; }
 </style>
-<div class="wrap">
-  <div id="map"></div>
+<div class="shell">
+  <div class="map-stage">
+    <div id="map"></div>
+  </div>
   <div class="panel">
-    <img class="avatar" src="{{ avatar }}" />
-    <div class="col"> 
-      <div class="name">{{ player_name }} · {{ server_label }}</div>
-      <div class="sub">点位数: {{ points_count }}{% if distance_km is not none %} · 里程: {{ '%.2f' % distance_km }} km{% endif %}</div>
-      <div class="sub">{% if start_time %}开始: {{ start_time }}{% endif %}{% if end_time %} · 结束: {{ end_time }}{% endif %}</div>
+    <div class="profile">
+      <div class="avatar-wrap">
+        {% if avatar %}
+        <img class="avatar" src="{{ avatar }}" />
+        {% else %}
+        <div class="avatar-fallback">{{ avatar_initial }}</div>
+        {% endif %}
+      </div>
+      <div class="profile-copy">
+        <div class="profile-kicker">DRIVER JOURNEY</div>
+        <div class="name-line">
+          <div class="name">{{ player_name }}</div>
+          <span class="name-suffix"> 的今日行驶足迹</span>
+        </div>
+        <div class="chips">
+          <span class="chip server">{{ server_label }}</span>
+          <span class="chip">TMP #{{ tmp_id }}</span>
+        </div>
+      </div>
     </div>
-    <div class="right">
-      {% if last_online %}<div>上次在线: {{ last_online }}</div>{% endif %}
+    <div class="mileage">
+      <span>今日里程</span>
+      <strong>
+        {% if distance_km is not none %}{{ '%.1f' % distance_km }}<small>km</small>{% else %}暂无记录{% endif %}
+      </strong>
     </div>
   </div>
 </div>
 <script>
   var mapType = "{{ map_type }}";
-  var distanceKm = {% if distance_km is not none %}{{ '%.2f' % distance_km }}{% else %}null{% endif %};
   var cfg = {
     ets: {
       tileUrl: '{{ tile_url_ets }}',
@@ -3570,20 +4615,8 @@ class TmpBotPlugin(Star):
     tileLayer = L.tileLayer(c.fallbackUrl, { minZoom: c.minZoom, maxZoom: 10, maxNativeZoom: c.maxZoom, tileSize: 512, bounds: b, reuseTiles: true }).addTo(map);
   });
   map.setMaxBounds(b);
-  function calculateDistance(p1, p2) {
-    return Math.sqrt(Math.pow(p1.axisX - p2.axisX, 2) + Math.pow(p1.axisY - p2.axisY, 2));
-  }
   var points = [ {% for p in points %}{ axisX: {{ p.axisX }}, axisY: {{ p.axisY }}, serverId: {{ p.serverId }}, heading: {{ p.heading }}, ts: {{ p.ts }} }{% if not loop.last %}, {% endif %}{% endfor %} ];
   points = points.filter(function(p){ return !(p.axisX === 0 && p.axisY === 0 && p.heading === 0); });
-  var minX = null, maxX = null, minY = null, maxY = null;
-  for (var pi=0; pi<points.length; pi++){
-    var px = points[pi].axisX;
-    var py = points[pi].axisY;
-    if (minX === null || px < minX) minX = px;
-    if (maxX === null || px > maxX) maxX = px;
-    if (minY === null || py < minY) minY = py;
-    if (maxY === null || py > maxY) maxY = py;
-  }
   var lines = [];
   var currentLine = [];
   if (points.length > 0) {
@@ -3591,7 +4624,7 @@ class TmpBotPlugin(Star):
     for (var i=1;i<points.length;i++){
       var prev = points[i-1];
       var curr = points[i];
-      var dist = calculateDistance(prev, curr) * 19;
+      var dist = Math.hypot(curr.axisX - prev.axisX, curr.axisY - prev.axisY) * 19;
       var isDistJump = dist > 30000;
       var timeDiff = 0;
       if (curr.ts && prev.ts) {
@@ -3618,59 +4651,58 @@ class TmpBotPlugin(Star):
       latlngs.push(ll);
       allLatlngs.push(ll);
     }
-    var line = L.polyline(latlngs, { color:'#3aa3ff', weight:4, opacity:0.9 }).addTo(map);
-    if (latlngs.length > 0) {
-      L.circleMarker(latlngs[0], { color:'#ffffff', weight:2, fillColor:'#21d07a', fillOpacity:1, radius:5 }).addTo(map);
-      L.circleMarker(latlngs[latlngs.length-1], { color:'#ffffff', weight:2, fillColor:'#ff4d4f', fillOpacity:1, radius:5 }).addTo(map);
-    }
+    L.polyline(latlngs, {
+      color:'#0c3653', weight:11, opacity:0.96, lineCap:'round', lineJoin:'round'
+    }).addTo(map);
+    L.polyline(latlngs, {
+      color:'#50afe8', weight:6, opacity:1, lineCap:'round', lineJoin:'round'
+    }).addTo(map);
+    L.polyline(latlngs, {
+      color:'#8bd8ff', weight:1.8, opacity:0.48, lineCap:'round', lineJoin:'round'
+    }).addTo(map);
   }
-  var fitLatlngs = null;
-  if (minX !== null && minY !== null && maxX !== null && maxY !== null) {
-    if (distanceKm && !isNaN(distanceKm)) {
-      var scaleFactor = (mapType === 'promods') ? (2.598541 / 1.609055) : 1;
-      var baseRange = (distanceKm * 1000) / 19 * scaleFactor;
-      var rangeX = maxX - minX;
-      var rangeY = maxY - minY;
-      var range = Math.max(rangeX, rangeY);
-      var targetRange = baseRange;
-      if (mapType === 'promods') {
-        if (distanceKm >= 1200) {
-          targetRange = baseRange * 2.2;
-        } else if (distanceKm >= 600) {
-          targetRange = baseRange * 1.6;
-        } else {
-          targetRange = baseRange * 1.2;
-        }
-      }
-      if (targetRange > range) {
-        var cx = (minX + maxX) / 2;
-        var cy = (minY + maxY) / 2;
-        var half = targetRange / 2;
-        minX = cx - half;
-        maxX = cx + half;
-        minY = cy - half;
-        maxY = cy + half;
-      }
-    }
-    var ll1 = map.unproject(c.calc(minX, maxY), c.maxZoom);
-    var ll2 = map.unproject(c.calc(maxX, minY), c.maxZoom);
-    fitLatlngs = [ll1, ll2];
+
+  function addEndpoint(latlng, type) {
+    var color = type === 'end' ? '#ef655e' : '#59c98d';
+    L.circleMarker(latlng, {
+      radius:11, color:color, weight:1.5, opacity:0.32, fillOpacity:0
+    }).addTo(map);
+    L.circleMarker(latlng, {
+      radius:6.5, color:'#f8fffd', weight:2, opacity:1, fillColor:color, fillOpacity:1
+    }).addTo(map);
   }
-  if (fitLatlngs && fitLatlngs.length > 0) {
-    map.fitBounds(L.latLngBounds(fitLatlngs), { padding: [30, 30] });
-  } else if (allLatlngs.length > 0) {
-    map.fitBounds(L.latLngBounds(allLatlngs), { padding: [30, 30] });
+
+  if (allLatlngs.length > 0) {
+    addEndpoint(allLatlngs[0], 'start');
+    addEndpoint(allLatlngs[allLatlngs.length - 1], 'end');
   }
+
+  if (allLatlngs.length === 1) {
+    map.setView(allLatlngs[0], 7);
+  } else if (allLatlngs.length > 1) {
+    map.fitBounds(L.latLngBounds(allLatlngs), {
+      paddingTopLeft: [48, 55],
+      paddingBottomRight: [48, 165],
+      maxZoom: 8
+    });
+  }
+  setTimeout(function(){ map.invalidateSize(); }, 80);
 </script>
 """
         data = {
             'player_name': player_name,
             'avatar': self._normalize_avatar_url(player_info.get('avatar')) or '',
+            'avatar_initial': str(player_name or '?').strip()[:1].upper() or '?',
             'points': points,
             'points_count': len(points),
             'distance_km': distance_km,
             'start_time': start_time,
             'end_time': end_time,
+            'route_start_label': route_start_label,
+            'route_end_label': route_end_label,
+            'track_duration_label': track_duration_label,
+            'route_segments': route_segments,
+            'tmp_id': tmp_id,
             'last_online': last_online_formatted if not _is_unknown_display_value(last_online_formatted) else None,
             'map_type': map_type,
             'server_label': server_label,
@@ -4467,7 +5499,7 @@ class TmpBotPlugin(Star):
         yield event.plain_result(message)
 
 
-    async def tmpserver(self, event: AstrMessageEvent):
+    async def tmpserver(self, event: AstrMessageEvent, game_filter: Optional[str] = None):
         """[命令: 服务器] 查询TruckersMP官方服务器的实时状态。"""
         if not self.session: 
             yield event.plain_result("插件初始化中，请稍后重试")
@@ -4486,23 +5518,45 @@ class TmpBotPlugin(Star):
                     if not isinstance(servers, list):
                         yield event.plain_result("查询服务器失败，请稍后重试")
                         return
+                    game_filter = str(game_filter or '').strip().lower()
+                    heading = "美卡服务器状态" if game_filter == 'ats' else None
                     # 先收集每个服务器的文本块，避免循环内以条件追加换行导致出现多余空行
                     blocks = []
                     for server in servers:
+                        game_name = str(
+                            server.get('game')
+                            or server.get('gameName')
+                            or server.get('game_name')
+                            or ''
+                        ).strip().upper()
+                        name_value = server.get('serverName') or server.get('name') or '未知服务器'
+                        try:
+                            name_trim = name_value.strip() if isinstance(name_value, str) else str(name_value)
+                        except Exception:
+                            name_trim = str(name_value)
+                        if game_filter == 'ats':
+                            if game_name:
+                                if game_name != 'ATS':
+                                    continue
+                            elif not name_trim.upper().startswith('[US]'):
+                                continue
+                        elif game_filter == 'ets':
+                            if game_name:
+                                if game_name != 'ETS2':
+                                    continue
+                            elif name_trim.upper().startswith('[US]'):
+                                continue
+
                         is_online = server.get('isOnline')
                         if is_online is None:
                             is_online = server.get('online')
                         online_flag = int(is_online) == 1 if isinstance(is_online, (int, float, str)) else bool(is_online)
 
                         # 兼容性：优先使用 serverName，再 fallback 到 name
-                        name = server.get('serverName') or server.get('name') or '未知服务器'
+                        name = name_value
                         # 忽略特定服务器（保持与 src/command/tmpServer.js 一致的精确匹配行为）
-                        try:
-                            name_trim = name.strip() if isinstance(name, str) else str(name)
-                        except Exception:
-                            name_trim = str(name)
                         ignore_servers = ['Simulation', '[US] Simulation', '[US] Arcade']
-                        if name_trim in ignore_servers:
+                        if game_filter != 'ats' and name_trim in ignore_servers:
                             continue
 
                         status = "🟢" if online_flag else "⚫"
@@ -4555,11 +5609,361 @@ class TmpBotPlugin(Star):
                         blocks.append(block)
 
                     message = "\n\n".join(blocks)
+                    if heading:
+                        message = f"{heading}\n{'=' * 18}\n\n{message}" if message else "暂无美卡服务器数据"
                     yield event.plain_result(message or "暂无在线服务器")
                 else:
                     yield event.plain_result(f"查询服务器状态失败，API返回错误状态码: {response.status}")
         except Exception:
             yield event.plain_result("网络请求失败，请检查网络或稍后重试。")
+
+    async def tmpats_server(self, event: AstrMessageEvent):
+        """[命令: 美卡服务器] 查询 TruckersMP 美卡服务器状态。"""
+        async for result in self.tmpserver(event, game_filter='ats'):
+            yield result
+
+    async def tmpviolations(self, event: AstrMessageEvent):
+        """[命令: 查违规] 查询玩家公开的 TMP 违规记录。"""
+        tmp_id, id_error = await self._resolve_tmp_id_for_user_command(event, "查违规")
+        if id_error:
+            yield event.plain_result(id_error)
+            return
+
+        try:
+            player_info, bans = await asyncio.gather(
+                self._get_player_info(tmp_id),
+                self._get_player_bans(tmp_id),
+            )
+        except PlayerNotFoundException as exc:
+            yield event.plain_result(str(exc))
+            return
+        except NetworkException as exc:
+            yield event.plain_result(f"查询违规记录失败: {exc}")
+            return
+        except Exception as exc:
+            logger.error(f"查询玩家 {tmp_id} 违规记录失败: {exc}", exc_info=True)
+            yield event.plain_result("查询违规记录失败，请稍后重试")
+            return
+
+        player_name = player_info.get('name') or '未知玩家'
+        is_banned = bool(player_info.get('banned'))
+        ban_count, sorted_bans = self._format_ban_info(bans)
+        try:
+            ban_count = int(str(player_info.get('bansCount')))
+        except (TypeError, ValueError):
+            pass
+
+        message = "🚫 TMP 违规记录\n"
+        message += "=" * 18 + "\n"
+        message += f"玩家: {player_name} (ID: {tmp_id})\n"
+        message += f"当前状态: {'封禁中' if is_banned else '正常'}\n"
+        message += f"历史封禁: {ban_count} 次\n"
+
+        if is_banned:
+            banned_until = player_info.get('bannedUntil')
+            if banned_until:
+                expiry = (
+                    "永久"
+                    if str(banned_until).lower().startswith('never')
+                    else _format_timestamp_to_beijing(str(banned_until))
+                )
+                message += f"当前封禁截止: {expiry}\n"
+
+        if not sorted_bans:
+            message += "\n未查询到公开的违规记录。\n"
+            message += "注：如果玩家隐藏了封禁记录，这里也不会显示。"
+            yield event.plain_result(message)
+            return
+
+        message += f"\n违规记录（共 {len(sorted_bans)} 条）"
+        for index, ban in enumerate(sorted_bans, 1):
+            active_raw = ban.get('active')
+            active = active_raw is True or str(active_raw).strip().lower() in {'1', 'true', 'yes'}
+            added = _format_timestamp_to_beijing(str(ban.get('timeAdded') or ''))
+            reason_raw = str(ban.get('reason') or '未提供原因').strip()
+            reason = self._translate_ban_reason(reason_raw) or reason_raw
+            expiration_raw = str(ban.get('expiration') or '').strip()
+            if not expiration_raw:
+                expiration = "未知"
+            elif expiration_raw.lower().startswith('never'):
+                expiration = "永久"
+            else:
+                expiration = _format_timestamp_to_beijing(expiration_raw)
+            admin_name = str(ban.get('adminName') or '').strip()
+            admin_id = ban.get('adminID')
+
+            message += f"\n\n{index}. {'🔴 生效中' if active else '⚪ 已结束'}"
+            message += f"\n记录时间: {added}"
+            message += f"\n违规原因: {reason}"
+            message += f"\n封禁截止: {expiration}"
+            if admin_name or admin_id:
+                admin_display = admin_name or '未知GM'
+                if admin_id is not None:
+                    admin_display += f" (ID: {admin_id})"
+                message += f"\n处理GM: {admin_display}"
+
+        yield event.plain_result(message)
+
+    async def tmpgametime(self, event: AstrMessageEvent):
+        """[命令: 时间] 查询 TruckersMP 当前游戏时间。"""
+        try:
+            game_info = await self._get_game_time()
+        except NetworkException as exc:
+            yield event.plain_result(f"查询游戏时间失败: {exc}")
+            return
+        except ApiResponseException as exc:
+            yield event.plain_result(f"查询游戏时间失败: {exc}")
+            return
+        except Exception as exc:
+            logger.error(f"查询游戏时间失败: {exc}", exc_info=True)
+            yield event.plain_result("查询游戏时间失败，请稍后重试")
+            return
+
+        game_datetime = game_info['game_datetime']
+        message = f"当前游戏时间: {game_datetime:%H:%M}"
+        yield event.plain_result(message)
+
+    @classmethod
+    def _clean_tmp_text(cls, value: Any, limit: int = 1000) -> str:
+        text = str(value or '').strip()
+        if not text:
+            return ''
+        text = re.sub(r'!\[[^\]]*\]\([^)]+\)', '', text)
+        text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
+        text = re.sub(r'[#*_>`]+', ' ', text)
+        text = re.sub(r'\s+', ' ', text).strip()
+        for source, target in cls.COMMON_TEXT_MAP_EN_TO_CN.items():
+            text = re.sub(
+                r'(?<![A-Za-z])' + re.escape(source) + r'(?![A-Za-z])',
+                target,
+                text,
+                flags=re.IGNORECASE,
+            )
+        if len(text) > limit:
+            return text[:limit].rstrip() + '…'
+        return text
+
+    @classmethod
+    def _translate_language(cls, value: Any) -> str:
+        raw = str(value or '').strip()
+        return cls.LANGUAGE_MAP_EN_TO_CN.get(raw.lower(), raw or '未知')
+
+    @classmethod
+    def _translate_event_type(cls, event_type: Dict[str, Any]) -> str:
+        if not isinstance(event_type, dict):
+            return '未知'
+        for key in (event_type.get('name'), event_type.get('key')):
+            raw = str(key or '').strip()
+            if not raw:
+                continue
+            translated = cls.EVENT_TYPE_MAP_EN_TO_CN.get(raw.lower())
+            if translated:
+                return translated
+        return str(event_type.get('name') or event_type.get('key') or '未知')
+
+    @classmethod
+    def _format_event_place(cls, place: Any) -> str:
+        if not isinstance(place, dict):
+            return ''
+        city = str(place.get('city') or '').strip()
+        location = str(place.get('location') or '').strip()
+        if city:
+            city_key = city.lower()
+            city = (
+                cls.CITY_MAP_EN_TO_CN.get(city_key)
+                or cls.LOCATION_FIX_MAP.get(city_key)
+                or cls.EVENT_LOCATION_MAP_EN_TO_CN.get(city_key)
+                or city
+            )
+        if location:
+            location_key = location.lower()
+            location = (
+                cls.EVENT_LOCATION_MAP_EN_TO_CN.get(location_key)
+                or cls.LOCATION_FIX_MAP.get(location_key)
+                or cls.CITY_MAP_EN_TO_CN.get(location_key)
+                or location
+            )
+        if city and location and city.lower() != location.lower():
+            return f"{city} · {location}"
+        return city or location
+
+    @classmethod
+    def _format_event_route(cls, event_data: Dict[str, Any]) -> str:
+        departure = cls._format_event_place(event_data.get('departure'))
+        arrival = cls._format_event_place(event_data.get('arrive'))
+        if departure and arrival:
+            return f"{departure} → {arrival}"
+        return departure or arrival or '未提供'
+
+    async def tmptoday_events(self, event: AstrMessageEvent):
+        """[命令: 今日活动] 查询 TruckersMP 今日活动。"""
+        try:
+            today_events = await self._get_today_events()
+        except NetworkException as exc:
+            yield event.plain_result(f"查询今日活动失败: {exc}")
+            return
+        except ApiResponseException as exc:
+            yield event.plain_result(f"查询今日活动失败: {exc}")
+            return
+        except Exception as exc:
+            logger.error(f"查询今日活动失败: {exc}", exc_info=True)
+            yield event.plain_result("查询今日活动失败，请稍后重试")
+            return
+
+        if not today_events:
+            yield event.plain_result("今日无活动")
+            return
+
+        today_events.sort(key=lambda item: str(item.get('start_at') or ''))
+        message = f"📅 今日活动（{len(today_events)}）"
+        for index, item in enumerate(today_events, 1):
+            game_name = str(item.get('game') or '未知')
+            game_label = '欧卡2' if game_name == 'ETS2' else '美卡' if game_name == 'ATS' else game_name
+            start_at = _format_timestamp_to_beijing(str(item.get('start_at') or ''))
+            attendances = item.get('attendances') if isinstance(item.get('attendances'), dict) else {}
+            confirmed = attendances.get('confirmed', 0)
+            message += (
+                f"\n\n{index}. {item.get('name') or '未命名活动'}"
+                f"\n活动ID: {item.get('id') or '未知'} | {game_label}"
+                f"\n开始时间: {start_at}"
+                f"\n路线: {self._format_event_route(item)}"
+                f"\n已确认参加: {confirmed} 人"
+            )
+        yield event.plain_result(message)
+
+    async def tmpevent_detail(self, event: AstrMessageEvent):
+        """[命令: 活动] 按活动 ID 查询 TruckersMP 活动详情。"""
+        match = re.search(r'活动\s*(\d+)', event.message_str.strip())
+        if not match:
+            yield event.plain_result("用法: 活动 [活动ID]")
+            return
+        event_id = match.group(1)
+        try:
+            detail = await self._get_event_detail(event_id)
+        except NetworkException as exc:
+            yield event.plain_result(f"查询活动失败: {exc}")
+            return
+        except ApiResponseException as exc:
+            yield event.plain_result(f"查询活动失败: {exc}")
+            return
+        except Exception as exc:
+            logger.error(f"查询活动 {event_id} 失败: {exc}", exc_info=True)
+            yield event.plain_result("查询活动失败，请稍后重试")
+            return
+
+        event_type = detail.get('event_type') if isinstance(detail.get('event_type'), dict) else {}
+        server = detail.get('server') if isinstance(detail.get('server'), dict) else {}
+        user = detail.get('user') if isinstance(detail.get('user'), dict) else {}
+        vtc = detail.get('vtc') if isinstance(detail.get('vtc'), dict) else {}
+        attendances = detail.get('attendances') if isinstance(detail.get('attendances'), dict) else {}
+        game_name = str(detail.get('game') or '未知')
+        game_label = '欧卡2' if game_name == 'ETS2' else '美卡' if game_name == 'ATS' else game_name
+
+        message = f"活动名称: {detail.get('name') or '未命名活动'}\n"
+        message += f"活动 ID: {detail.get('id') or event_id}\n"
+        message += f"活动类型: {self._translate_event_type(event_type)}\n"
+        message += f"游戏: {game_label}\n"
+        server_name = str(server.get('name') or '').strip()
+        if server_name.lower() == 'to be determined':
+            server_name = '待定'
+        message += f"服务器: {server_name or '待定'}\n"
+        message += f"语言: {self._translate_language(detail.get('language'))}\n"
+        message += f"集合时间: {_format_timestamp_to_beijing(str(detail.get('meetup_at') or ''))}\n"
+        message += f"开始时间: {_format_timestamp_to_beijing(str(detail.get('start_at') or ''))}\n"
+        message += f"路线: {self._format_event_route(detail)}\n"
+        if user.get('username'):
+            message += f"主办玩家: {user.get('username')}"
+            if user.get('id'):
+                message += f" (ID: {user.get('id')})"
+            message += "\n"
+        if vtc.get('name'):
+            message += f"主办车队: {vtc.get('name')}"
+            if vtc.get('id'):
+                message += f" (VTC ID: {vtc.get('id')})"
+            message += "\n"
+        message += (
+            "参加情况: "
+            f"已确认 {attendances.get('confirmed', 0)} 人"
+            f" | 待定 {attendances.get('unsure', 0)} 人"
+            f" | 车队 {attendances.get('vtcs', 0)} 个\n"
+        )
+
+        description = self._clean_tmp_text(detail.get('description'), limit=1200)
+        rules = self._clean_tmp_text(detail.get('rule'), limit=1200)
+        if description:
+            message += f"\n活动简介:\n{description}\n"
+        if rules:
+            message += f"\n活动规则:\n{rules}\n"
+        if detail.get('external_link'):
+            message += f"\n活动链接: {detail.get('external_link')}"
+        yield event.plain_result(message.rstrip())
+
+    async def tmpvtc_info(self, event: AstrMessageEvent):
+        """[命令: VTC] 按 VTC ID 查询 TruckersMP 车队资料。"""
+        match = re.search(r'vtc\s*(\d+)', event.message_str.strip(), flags=re.IGNORECASE)
+        if not match:
+            yield event.plain_result("用法: vtc [VTC ID]")
+            return
+        vtc_id = match.group(1)
+        try:
+            detail = await self._get_vtc_detail(vtc_id)
+        except NetworkException as exc:
+            yield event.plain_result(f"查询 VTC 失败: {exc}")
+            return
+        except ApiResponseException as exc:
+            yield event.plain_result(f"查询 VTC 失败: {exc}")
+            return
+        except Exception as exc:
+            logger.error(f"查询 VTC {vtc_id} 失败: {exc}", exc_info=True)
+            yield event.plain_result("查询 VTC 失败，请稍后重试")
+            return
+
+        games = detail.get('games') if isinstance(detail.get('games'), dict) else {}
+        supported_games = []
+        if games.get('ets'):
+            supported_games.append('欧卡2')
+        if games.get('ats'):
+            supported_games.append('美卡')
+        socials = detail.get('socials') if isinstance(detail.get('socials'), dict) else {}
+        recruitment_raw = str(detail.get('recruitment') or '').strip().lower()
+        recruitment = {
+            'open': '开放招募',
+            'closed': '停止招募',
+        }.get(recruitment_raw, detail.get('recruitment') or '未知')
+
+        message = f"车队名称: {detail.get('name') or '未命名车队'}\n"
+        message += f"VTC ID: {detail.get('id') or vtc_id}\n"
+        message += f"车队标签: {detail.get('tag') or '无'}\n"
+        message += f"车主: {detail.get('owner_username') or '未知'}"
+        if detail.get('owner_id'):
+            message += f" (ID: {detail.get('owner_id')})"
+        message += "\n"
+        message += f"成员数量: {detail.get('members_count', 0)} 人\n"
+        message += f"招募状态: {recruitment}\n"
+        message += f"支持游戏: {'、'.join(supported_games) or '未知'}\n"
+        message += f"主要语言: {self._translate_language(detail.get('language'))}\n"
+        message += f"成立时间: {_format_timestamp_to_beijing(str(detail.get('created') or ''))}\n"
+        if detail.get('slogan'):
+            message += f"车队口号: {self._clean_tmp_text(detail.get('slogan'), limit=300)}\n"
+
+        information = self._clean_tmp_text(detail.get('information'), limit=1000)
+        rules = self._clean_tmp_text(detail.get('rules'), limit=800)
+        requirements = self._clean_tmp_text(detail.get('requirements'), limit=800)
+        if information:
+            message += f"\n车队简介:\n{information}\n"
+        if rules:
+            message += f"\n车队规则:\n{rules}\n"
+        if requirements:
+            message += f"\n加入要求:\n{requirements}\n"
+        if detail.get('website'):
+            message += f"\n官方网站: {detail.get('website')}"
+        social_links = []
+        for platform in ('discord', 'twitter', 'youtube', 'twitch', 'facebook'):
+            if socials.get(platform):
+                social_links.append(f"{platform}: {socials.get(platform)}")
+        if social_links:
+            message += "\n社交链接:\n" + "\n".join(social_links)
+        yield event.plain_result(message.rstrip())
 
     async def tmpversion(self, event: AstrMessageEvent):
         """[命令: 插件版本] 实时查询 TMP 联机插件版本信息。"""
@@ -4706,11 +6110,17 @@ class TmpBotPlugin(Star):
 4. 路况[s1/s2/p/a]
 5. 总里程排行
 6. 今日里程排行
-7. 足迹 [服务器简称] [TMP ID]
+7. 足迹/ 足迹 [服务器简称] [TMP ID]
 8. 服务器
-9. 插件版本
-10. 历史车队 [TMP ID]
-使用提示: 绑定后可直接发送 查询/定位/足迹/历史车队 [服务器简称]
+9. 美卡服务器
+10. 查违规 [TMP ID]
+11. 时间(查询游戏时间)
+12. 今日活动
+13. 活动 [活动ID]
+14. VTC [VTC ID]
+15. 插件版本
+16. 历史车队 [TMP ID]
+使用提示: 绑定后可直接发送 查询/定位/足迹/查违规/历史车队，足迹可省略服务器
 """
 
         yield event.plain_result(main_help)
@@ -4724,7 +6134,18 @@ class TmpBotPlugin(Star):
 
 
     async def terminate(self):
-        """插件卸载时的清理工作：关闭HTTP会话。"""
+        """插件卸载时的清理工作：停止后台任务、保存状态并关闭HTTP会话。"""
+        update_task = self._tmp_update_task
+        self._tmp_update_task = None
+        if update_task and not update_task.done():
+            update_task.cancel()
+            try:
+                await update_task
+            except asyncio.CancelledError:
+                pass
+        if self._tmp_update_state or self._tmp_update_groups:
+            self._save_tmp_update_state()
+
         self._fullmap_task = None
         if self.session:
             await self.session.close()

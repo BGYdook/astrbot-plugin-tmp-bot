@@ -1,6 +1,6 @@
 name: astrbot_plugin_tmp_bot
 description: 欧洲卡车模拟2 TMP查询机器人 - 支持玩家信息查询、位置查询、服务器状态查询、里程排行榜、地图DLC、足迹等功能
-version: 1.8.6
+version: 1.9.0
 main: main.py
 author: BGYdook,晚安（Goodnight_An）
 homepage: https://github.com/BGYdook/astrbot-plugin-tmp-bot
@@ -17,10 +17,15 @@ features:
   - 玩家位置信息查询（底图渲染）
   - 服务器热门地点路况查询
   - 欧卡/美卡服务器状态查询
+  - 玩家违规记录查询
+  - TruckersMP 游戏内时间查询
+  - TruckersMP 今日活动与活动详情查询
+  - TruckersMP VTC 车队资料查询
   - 总里程与今日里程排行榜
   - 地图DLC列表查询（图片输出）
   - 支持TMPID绑定功能
   - 支持自定义 API 源与地图瓦片源
+  - 自动检测 TMP 联机插件更新并推送群聊
 
 # 支持的命令列表
 commands:
@@ -37,8 +42,26 @@ commands:
     description: 查询并渲染玩家位置信息（底图+玩家点）
     usage: 定位 123456 或 定位（使用绑定ID）
   - name: 服务器
-    description: 查询欧卡/美卡服务器信息列表
+    description: 查询 TruckersMP 欧卡服务器状态
     usage: 服务器
+  - name: 美卡服务器
+    description: 查询 TruckersMP 美卡服务器状态
+    usage: 美卡服务器
+  - name: 查违规
+    description: 查询玩家公开的 TMP 违规/封禁记录
+    usage: 查违规 123456 或 查违规（使用绑定 ID）
+  - name: 时间
+    description: 查询 TruckersMP 当前游戏内时间
+    usage: 时间
+  - name: 今日活动
+    description: 查询 TruckersMP 今日活动
+    usage: 今日活动
+  - name: 活动
+    description: 按活动 ID 查询 TruckersMP 活动详情
+    usage: 活动 38603
+  - name: VTC
+    description: 按 VTC ID 查询 TruckersMP 车队资料
+    usage: vtc 67596
   - name: 排行
     description: 查看里程排行榜（总里程/今日里程）
     usage: 排行
@@ -61,10 +84,17 @@ usage: |
   
   1. 玩家信息查询 - 查询TMP玩家的基本信息和游戏数据
   2. 位置查询 - 实时查询玩家在游戏中的位置信息
-  3. 服务器状态 - 查询欧卡/美卡各服务器的在线状态
+  3. 服务器状态 - 使用「服务器」查询欧卡，使用「美卡服务器」查询美卡
   4. 路况信息 - 查询热门地点的实时路况信息
   5. 排行榜 - 查看总里程和今日里程排行榜
   6. 绑定功能 - 绑定TMPID后可省略在命令中输入ID
+  7. 更新通知 - 定时检测 TMP 联机插件版本，更新后自动推送到所有群（可在配置中排除指定群）
+  8. 美卡服务器 - 查询 TruckersMP 美卡服务器实时状态
+  9. 违规查询 - 查询玩家公开的违规和封禁记录
+  10. 游戏时间 - 查询 TruckersMP 当前游戏内时间
+  11. 今日活动 - 查询 TruckersMP 今日活动
+  12. 活动 - 按活动 ID 查询活动详情
+  13. VTC - 按车队 ID 查询 VTC 资料
   
   支持的服务器简称：
   - Simulation 1 (简称: s1)
@@ -74,7 +104,7 @@ usage: |
 
 # 数据来源
 data_source: TMP官方API
-api_docs: https://truckersmp.com/developers/api
+api_docs: https://docs.truckersmp.com/web-api/
 
 keywords:
   - chatbot
