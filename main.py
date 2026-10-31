@@ -4106,6 +4106,7 @@ class TmpBotPlugin(Star):
         _tmp_id_override: Optional[str] = None,
         _identity_override: Optional[Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]] = None,
         _silent_empty: bool = False,
+        _render_data_collector: Optional[List[Dict[str, Any]]] = None,
     ):
         message_str = event.message_str.strip()
         user_id = event.get_sender_id()
@@ -4244,28 +4245,38 @@ class TmpBotPlugin(Star):
                 return
 
         if server_key is None:
-            async def collect_server_footprint(target_server: str) -> List[Any]:
-                results = []
-                async for result in self.tmptoday_footprint(
+            collected_server_data: List[Dict[str, Any]] = []
+
+            async def collect_server_footprint(target_server: str) -> None:
+                async for _ in self.tmptoday_footprint(
                     event,
                     _server_override=target_server,
                     _tmp_id_override=tmp_id,
                     _identity_override=(player_info, stats_info, online_status),
                     _silent_empty=True,
+                    _render_data_collector=collected_server_data,
                 ):
-                    results.append(result)
-                return results
+                    pass
 
-            server_results = await asyncio.gather(
+            await asyncio.gather(
                 *(collect_server_footprint(target_server) for target_server in all_server_keys)
             )
-            sent_count = 0
-            for results in server_results:
-                for result in results:
-                    sent_count += 1
-                    yield result
-            if sent_count == 0:
+            if not collected_server_data:
                 yield event.plain_result("所有服务器暂无可用的今日足迹数据")
+                return
+
+            label_order = {label: index for index, label in enumerate(("SIM1", "SIM2", "Arc", "ProMods"))}
+            collected_server_data.sort(
+                key=lambda item: label_order.get(item.get('server_label'), 99)
+            )
+            url = await self._render_combined_footprint(collected_server_data)
+            if isinstance(url, str) and url:
+                yield event.chain_result([Image.fromURL(url)])
+            else:
+                labels = "、".join(item['server_label'] for item in collected_server_data)
+                yield event.plain_result(
+                    f"足迹查询成功（{labels}），但图片渲染失败，请稍后重试"
+                )
             return
 
         server_label = server_label_map.get(server_key, server_key.upper())
@@ -4721,6 +4732,10 @@ class TmpBotPlugin(Star):
             'tile_url_ets': tile_url_ets,
             'tile_url_promods': tile_url_promods
         }
+        if _render_data_collector is not None:
+            _render_data_collector.append(data)
+            return
+
         logger.info(
             f"足迹渲染: revision={FOOTPRINT_RENDER_REVISION}, "
             f"server={server_label}, points={len(points)}, distance_km={distance_km}"
@@ -5810,6 +5825,246 @@ class TmpBotPlugin(Star):
         if departure and arrival:
             return f"{departure} → {arrival}"
         return departure or arrival or '未提供'
+
+    async def _render_combined_footprint(self, server_data: List[Dict[str, Any]]) -> Optional[str]:
+        """把同一天的多个服务器足迹合成为一张图片。ETS 与 ProMods 使用双地图面板。"""
+        if not server_data:
+            return None
+
+        colors = {
+            'SIM1': '#50afe8',
+            'SIM2': '#72ddb0',
+            'Arc': '#ffb45c',
+            'ProMods': '#c58aff',
+        }
+        group_order = ('ets', 'promods')
+        grouped: Dict[str, List[Dict[str, Any]]] = {key: [] for key in group_order}
+        for item in server_data:
+            map_type = item.get('map_type') if item.get('map_type') in grouped else 'ets'
+            grouped[map_type].append({
+                'label': item.get('server_label') or '未知服务器',
+                'color': colors.get(item.get('server_label'), '#50afe8'),
+                'points': item.get('points') or [],
+            })
+
+        map_groups = []
+        for map_type in group_order:
+            routes = grouped[map_type]
+            if not routes:
+                continue
+            source = next(
+                (item for item in server_data if item.get('map_type') == map_type),
+                server_data[0],
+            )
+            map_groups.append({
+                'map_type': map_type,
+                'title': 'ETS2' if map_type == 'ets' else 'ProMods',
+                'tile_url': (
+                    source.get('tile_url_ets')
+                    if map_type == 'ets'
+                    else source.get('tile_url_promods')
+                ),
+                'routes': routes,
+            })
+
+        first = server_data[0]
+        positive_distances = {
+            round(float(item['distance_km']), 1)
+            for item in server_data
+            if item.get('distance_km') is not None
+        }
+        if len(positive_distances) == 1:
+            total_distance = positive_distances.pop()
+        else:
+            total_distance = round(sum(positive_distances), 1) if positive_distances else None
+
+        combined_tmpl = """
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  html, body { margin:0; padding:0; width:1280px; height:720px; overflow:hidden; background:#244b63; }
+  * { box-sizing:border-box; }
+  body { font-family:"PingFang SC","Microsoft YaHei","Noto Sans CJK SC",system-ui,sans-serif; }
+  .shell { position:relative; width:1280px; height:720px; overflow:hidden; color:#f5fbfa; background:#244b63; }
+  .map-grid { display:grid; width:100%; height:100%; gap:5px; background:#122f43; }
+  .map-grid.single { grid-template-columns:1fr; }
+  .map-grid.dual { grid-template-columns:1fr 1fr; }
+  .map-pane { position:relative; overflow:hidden; background:radial-gradient(circle at 52% 40%,#365f76 0,#294f66 52%,#1b3b51 100%); }
+  .map-canvas { position:absolute; inset:0; background:transparent; }
+  .map-canvas .leaflet-tile-pane { opacity:.82; filter:grayscale(1) brightness(1.75) contrast(1.12); mix-blend-mode:screen; }
+  .leaflet-control-container { display:none; }
+  .map-pane::after {
+    content:""; position:absolute; inset:0; z-index:450; pointer-events:none;
+    background:linear-gradient(180deg,rgba(7,29,45,.15),transparent 25%,transparent 66%,rgba(7,29,45,.42));
+  }
+  .route-legend { position:absolute; z-index:700; top:18px; left:18px; display:flex; flex-wrap:wrap; gap:7px; }
+  .legend-pill {
+    display:flex; align-items:center; gap:7px; height:27px; padding:0 10px;
+    border:1px solid rgba(255,255,255,.18); border-radius:8px; color:#eaf6fa;
+    background:rgba(8,31,48,.78); backdrop-filter:blur(9px); font-size:10px; font-weight:800;
+  }
+  .legend-pill i { width:8px; height:8px; border-radius:50%; }
+  .panel {
+    position:absolute; z-index:900; left:24px; right:24px; bottom:20px; height:104px;
+    padding:0 25px; display:grid; grid-template-columns:minmax(0,1fr) 280px; gap:18px; align-items:center;
+    border:1px solid rgba(255,255,255,.16); border-radius:19px;
+    background:linear-gradient(105deg,rgba(7,28,45,.95),rgba(8,36,55,.9));
+    box-shadow:0 18px 45px rgba(6,25,39,.35); backdrop-filter:blur(14px);
+  }
+  .panel::before {
+    content:""; position:absolute; left:22px; right:22px; top:0; height:1px;
+    background:linear-gradient(90deg,transparent,rgba(121,213,255,.7),transparent);
+  }
+  .profile { min-width:0; display:flex; align-items:center; gap:15px; }
+  .avatar-wrap {
+    width:68px; height:68px; flex:0 0 68px; padding:4px; border-radius:50%;
+    background:linear-gradient(145deg,#6bcfff,#267cad); box-shadow:0 8px 22px rgba(2,16,27,.38);
+  }
+  .avatar { width:60px; height:60px; display:block; border:3px solid #102f45; border-radius:50%; object-fit:cover; }
+  .avatar-fallback {
+    width:60px; height:60px; display:flex; align-items:center; justify-content:center;
+    border:3px solid #102f45; border-radius:50%; color:#f8fffd;
+    background:linear-gradient(145deg,#237ca8,#123d59); font-size:24px; font-weight:800;
+  }
+  .profile-copy { min-width:0; flex:1; }
+  .profile-kicker { margin-bottom:5px; color:#8bb1c3; font-size:9px; font-weight:800; letter-spacing:1.35px; }
+  .name-line { display:flex; align-items:baseline; min-width:0; }
+  .name {
+    min-width:0; max-width:340px; overflow:hidden; color:#f7fbfc; font-size:23px; line-height:1.15;
+    font-weight:800; letter-spacing:-.4px; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .name-suffix { flex:0 0 auto; color:#afc8d4; font-size:16px; font-weight:600; white-space:nowrap; }
+  .chips { display:flex; align-items:center; gap:6px; margin-top:8px; flex-wrap:wrap; }
+  .chip {
+    display:inline-flex; align-items:center; gap:5px; height:21px; padding:0 8px; border-radius:6px;
+    color:#c1d8e3; background:rgba(255,255,255,.08); font-size:9px; font-weight:700;
+  }
+  .chip i { width:6px; height:6px; border-radius:50%; }
+  .mileage { display:flex; align-items:baseline; justify-content:flex-end; gap:15px; white-space:nowrap; }
+  .mileage span { color:#9bb6c4; font-size:14px; font-weight:600; }
+  .mileage strong { color:#8de4b0; font-size:28px; line-height:1; font-weight:800; letter-spacing:-.6px; }
+  .mileage small { margin-left:5px; color:#a7c6b7; font-size:12px; font-weight:600; }
+</style>
+<div class="shell">
+  <div class="map-grid {% if map_groups|length == 1 %}single{% else %}dual{% endif %}">
+    {% for group in map_groups %}
+    <div class="map-pane">
+      <div id="map-{{ loop.index }}" class="map-canvas"></div>
+      <div class="route-legend">
+        {% for route in group.routes %}
+        <span class="legend-pill"><i style="background:{{ route.color }}"></i>{% if group.title == route.label %}{{ route.label }}{% else %}{{ group.title }} · {{ route.label }}{% endif %}</span>
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="panel">
+    <div class="profile">
+      <div class="avatar-wrap">
+        {% if avatar %}<img class="avatar" src="{{ avatar }}" />{% else %}<div class="avatar-fallback">{{ avatar_initial }}</div>{% endif %}
+      </div>
+      <div class="profile-copy">
+        <div class="profile-kicker">COMBINED DAILY TRACE</div>
+        <div class="name-line">
+          <div class="name">{{ player_name }}</div>
+          <span class="name-suffix"> 的今日行驶足迹</span>
+        </div>
+        <div class="chips">
+          {% for route in server_chips %}
+          <span class="chip"><i style="background:{{ route.color }}"></i>{{ route.label }}</span>
+          {% endfor %}
+          <span class="chip">TMP #{{ tmp_id }}</span>
+        </div>
+      </div>
+    </div>
+    <div class="mileage">
+      <span>今日里程</span>
+      <strong>{% if total_distance is not none %}{{ '%.1f' % total_distance }}<small>km</small>{% else %}暂无记录{% endif %}</strong>
+    </div>
+  </div>
+</div>
+<script>
+  var cfg = {
+    ets: {
+      fallbackUrl:'https://ets_tiles.cnly.top/20260903/tmp-ets-yellow/Tiles/{z}/{x}/{y}.png',
+      multipliers:{x:70272,y:76157}, bounds:{x:131072,y:131072}, maxZoom:8, minZoom:2,
+      calc:function(xx,yy){return [xx/1.609055+cfg.ets.multipliers.x,yy/1.609055+cfg.ets.multipliers.y];}
+    },
+    promods: {
+      fallbackUrl:'https://ets2.online/map/ets2mappromods_156/{z}/{x}/{y}.png',
+      multipliers:{x:51953,y:76024}, bounds:{x:131072,y:131072}, maxZoom:8, minZoom:2,
+      calc:function(xx,yy){return [xx/2.598541+cfg.promods.multipliers.x,yy/2.598541+cfg.promods.multipliers.y];}
+    }
+  };
+  var groups = [
+  {% for group in map_groups %}
+    { type:'{{ group.map_type }}', tileUrl:'{{ group.tile_url }}', routes:[
+      {% for route in group.routes %}
+      { color:'{{ route.color }}', points:[
+        {% for p in route.points %}{axisX:{{ p.axisX }},axisY:{{ p.axisY }},serverId:{{ p.serverId }},heading:{{ p.heading }},ts:{{ p.ts }}}{% if not loop.last %},{% endif %}{% endfor %}
+      ] }{% if not loop.last %},{% endif %}
+      {% endfor %}
+    ] }{% if not loop.last %},{% endif %}
+  {% endfor %}
+  ];
+  groups.forEach(function(group, index) {
+    var map = L.map('map-' + (index + 1), {attributionControl:false,crs:L.CRS.Simple,zoomControl:false,zoomSnap:0.2,zoomDelta:0.2});
+    var c = cfg[group.type];
+    var world = L.latLngBounds(map.unproject([0,c.bounds.y],c.maxZoom),map.unproject([c.bounds.x,0],c.maxZoom));
+    var tile = L.tileLayer(group.tileUrl || c.fallbackUrl,{minZoom:c.minZoom,maxZoom:10,maxNativeZoom:c.maxZoom,tileSize:512,bounds:world,reuseTiles:true}).addTo(map);
+    var switched = false;
+    tile.on('tileerror',function(){if(switched||!c.fallbackUrl)return;switched=true;map.removeLayer(tile);tile=L.tileLayer(c.fallbackUrl,{minZoom:c.minZoom,maxZoom:10,maxNativeZoom:c.maxZoom,tileSize:512,bounds:world,reuseTiles:true}).addTo(map);});
+    map.setMaxBounds(world);
+    var panelFocus = [];
+    group.routes.forEach(function(route){
+      var points = route.points.filter(function(p){return !(p.axisX===0&&p.axisY===0&&p.heading===0);});
+      var lines=[], current=[];
+      if(points.length){current.push(points[0]);for(var i=1;i<points.length;i++){var prev=points[i-1],curr=points[i];var dist=Math.hypot(curr.axisX-prev.axisX,curr.axisY-prev.axisY)*19;var timeDiff=(curr.ts&&prev.ts)?curr.ts-prev.ts:0;if(dist>30000||timeDiff>90||prev.serverId!==curr.serverId){if(current.length)lines.push(current);current=[];}current.push(curr);}if(current.length)lines.push(current);}
+      var focus=[];
+      lines.forEach(function(linePts){
+        var latlngs=linePts.map(function(p){var xy=c.calc(p.axisX,p.axisY);return map.unproject(xy,c.maxZoom);});
+        if(latlngs.length>focus.length)focus=latlngs;
+        L.polyline(latlngs,{color:'#0a2638',weight:10,opacity:.72,lineCap:'round',lineJoin:'round'}).addTo(map);
+        L.polyline(latlngs,{color:route.color,weight:5,opacity:1,lineCap:'round',lineJoin:'round'}).addTo(map);
+      });
+      if(focus.length){L.circleMarker(focus[0],{radius:6,color:'#fff',weight:2,fillColor:'#59c98d',fillOpacity:1}).addTo(map);L.circleMarker(focus[focus.length-1],{radius:6,color:'#fff',weight:2,fillColor:'#ef655e',fillOpacity:1}).addTo(map);panelFocus=panelFocus.concat(focus);}
+    });
+    if(panelFocus.length===1){map.setView(panelFocus[0],7);}else if(panelFocus.length>1){map.fitBounds(L.latLngBounds(panelFocus),{paddingTopLeft:[45,60],paddingBottomRight:[45,145],maxZoom:8});}
+    setTimeout(function(){map.invalidateSize();},80);
+  });
+</script>
+"""
+        server_chips = [
+            {
+                'label': item.get('server_label') or '未知服务器',
+                'color': colors.get(item.get('server_label'), '#50afe8'),
+            }
+            for item in server_data
+        ]
+        data = {
+            'map_groups': map_groups,
+            'server_chips': server_chips,
+            'player_name': first.get('player_name') or '未知',
+            'avatar': first.get('avatar') or '',
+            'avatar_initial': first.get('avatar_initial') or '?',
+            'tmp_id': first.get('tmp_id') or '',
+            'total_distance': total_distance,
+        }
+        try:
+            return await self.html_render(
+                combined_tmpl,
+                data,
+                options={
+                    'type': 'jpeg',
+                    'quality': 92,
+                    'full_page': True,
+                    'timeout': 8000,
+                    'animations': 'disabled',
+                },
+            )
+        except Exception as exc:
+            logger.error(f"足迹合并渲染失败: {exc}", exc_info=True)
+            return None
 
     async def tmptoday_events(self, event: AstrMessageEvent):
         """[命令: 今日活动] 查询 TruckersMP 今日活动。"""
