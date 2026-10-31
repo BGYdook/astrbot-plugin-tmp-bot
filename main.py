@@ -116,6 +116,7 @@ USER_GROUP_MAP = {
 PROMODS_SERVER_IDS = {50, 51}
 BEIJING_TZ = timezone(timedelta(hours=8))
 TMP_GAME_EPOCH = datetime(2015, 10, 25, 15, 48, 32)
+FOOTPRINT_RENDER_REVISION = "2026-10-31-r5"
 
 RANK_IMAGE_TEMPLATE = """
 <style>
@@ -4720,6 +4721,10 @@ class TmpBotPlugin(Star):
             'tile_url_ets': tile_url_ets,
             'tile_url_promods': tile_url_promods
         }
+        logger.info(
+            f"足迹渲染: revision={FOOTPRINT_RENDER_REVISION}, "
+            f"server={server_label}, points={len(points)}, distance_km={distance_km}"
+        )
         try:
             url = await self.html_render(map_tmpl, data, options={'type': 'jpeg', 'quality': 92, 'full_page': True, 'timeout': 8000, 'animations': 'disabled'})
             if isinstance(url, str) and url:
