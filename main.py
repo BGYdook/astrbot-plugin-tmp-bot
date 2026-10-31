@@ -78,6 +78,9 @@ except ImportError:
             return os.path.join(os.getcwd(), name)
     class _Logger:
         @staticmethod
+        def debug(msg):
+            pass
+        @staticmethod
         def info(msg):
             print("[INFO]", msg)
         @staticmethod
@@ -4380,7 +4383,7 @@ class TmpBotPlugin(Star):
         distance_km = _to_km(meta.get('distance') or meta.get('mileage') or meta.get('totalDistance') or meta.get('totalMileage'))
         start_time = meta.get('startTime') or meta.get('start_time') or meta.get('beginTime') or meta.get('begin_time')
         end_time = meta.get('endTime') or meta.get('end_time') or meta.get('finishTime') or meta.get('finish_time')
-        if distance_km is None and not _silent_empty:
+        if distance_km is None:
             try:
                 daily_km = float(stats_info.get('daily_km') or 0)
                 if daily_km > 0:
@@ -4643,6 +4646,8 @@ class TmpBotPlugin(Star):
     if (currentLine.length > 0) lines.push(currentLine);
   }
   var allLatlngs = [];
+  var routeLines = [];
+  var focusLatlngs = [];
   for (var li=0; li<lines.length; li++){
     var linePts = lines[li];
     if (!linePts || linePts.length === 0) continue;
@@ -4652,6 +4657,10 @@ class TmpBotPlugin(Star):
       var ll = map.unproject(xy, c.maxZoom);
       latlngs.push(ll);
       allLatlngs.push(ll);
+    }
+    routeLines.push(latlngs);
+    if (latlngs.length > focusLatlngs.length) {
+      focusLatlngs = latlngs;
     }
     L.polyline(latlngs, {
       color:'#0c3653', weight:11, opacity:0.96, lineCap:'round', lineJoin:'round'
@@ -4674,15 +4683,15 @@ class TmpBotPlugin(Star):
     }).addTo(map);
   }
 
-  if (allLatlngs.length > 0) {
-    addEndpoint(allLatlngs[0], 'start');
-    addEndpoint(allLatlngs[allLatlngs.length - 1], 'end');
+  if (focusLatlngs.length > 0) {
+    addEndpoint(focusLatlngs[0], 'start');
+    addEndpoint(focusLatlngs[focusLatlngs.length - 1], 'end');
   }
 
-  if (allLatlngs.length === 1) {
-    map.setView(allLatlngs[0], 7);
-  } else if (allLatlngs.length > 1) {
-    map.fitBounds(L.latLngBounds(allLatlngs), {
+  if (focusLatlngs.length === 1) {
+    map.setView(focusLatlngs[0], 7);
+  } else if (focusLatlngs.length > 1) {
+    map.fitBounds(L.latLngBounds(focusLatlngs), {
       paddingTopLeft: [48, 55],
       paddingBottomRight: [48, 165],
       maxZoom: 8
