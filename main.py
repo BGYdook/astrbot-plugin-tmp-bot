@@ -3,7 +3,7 @@
 
 """
 astrbot-plugin-tmp-bot
-欧卡2TMP查询插件 (版本 1.9.0)
+欧卡2TMP查询插件 (版本 1.9.1)
 """
 
 import re
@@ -696,7 +696,7 @@ class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
 
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.9.0", "https://github.com/BGYdook/astrbot-plugin-tmp-bot")
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.9.1", "https://github.com/BGYdook/astrbot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context, config=None):  # 接收 context 和 config
         super().__init__(context)              # 将 context 传给父类
@@ -829,7 +829,7 @@ class TmpBotPlugin(Star):
         # 使用 IPv4 优先的连接器，并允许读取环境代理设置（与浏览器/系统行为更一致）
         connector = aiohttp.TCPConnector(family=socket.AF_INET)
         self.session = aiohttp.ClientSession(
-            headers={'User-Agent': 'astrBot-TMP-Plugin/1.9.0'}, 
+            headers={'User-Agent': 'astrBot-TMP-Plugin/1.9.1'}, 
             timeout=aiohttp.ClientTimeout(total=timeout_sec),
             connector=connector,
             trust_env=True
@@ -1891,6 +1891,9 @@ class TmpBotPlugin(Star):
         "travemunde": "特拉弗明德",
         "zürich": "苏黎世",
         "zurich": "苏黎世",
+        "alpen road": "阿尔卑斯公路",
+        "channel tunnel": "英吉利海峡隧道",
+        "folkestone": "福克斯通",
     }
 
     def _load_location_maps(self) -> None:
@@ -2466,7 +2469,7 @@ class TmpBotPlugin(Star):
         logger.info(f"尝试 Trucky V3 API (地图实时状态): {trucky_url}")
         
         try:
-            async with self.session.get(trucky_url, timeout=5) as response:
+            async with self.session.get(trucky_url, timeout=8) as response:
                 
                 status = response.status
                 raw_data = await response.json()
@@ -2484,9 +2487,15 @@ class TmpBotPlugin(Star):
                         server_details = online_data.get('serverDetails', {})
                         server_name = server_details.get('name', f"未知服务器 ({online_data.get('server')})")
                         
-                        location_data = online_data.get('location', {})
-                        country = location_data.get('poi', {}).get('country')
-                        real_name = location_data.get('poi', {}).get('realName')
+                        location_data = online_data.get('location')
+                        if not isinstance(location_data, dict):
+                            location_data = {}
+                        poi = location_data.get('poi')
+                        if not isinstance(poi, dict):
+                            poi = {}
+                        country = poi.get('country')
+                        real_name = poi.get('realName')
+                        location_type = poi.get('type') or ''
 
                         if not country:
                             country = location_data.get('country')
@@ -2495,11 +2504,12 @@ class TmpBotPlugin(Star):
 
                         country_cn, city_cn = await self._translate_country_city(country, real_name)
 
+                        location_cn = city_cn or str(real_name or '').strip()
                         formatted_location = '未知位置'
-                        if country_cn and city_cn:
-                            formatted_location = f"{country_cn}-{city_cn}"
-                        elif city_cn:
-                            formatted_location = city_cn
+                        if country_cn and location_cn:
+                            formatted_location = f"{country_cn}-{location_cn}"
+                        elif location_cn:
+                            formatted_location = location_cn
                         elif country_cn:
                             formatted_location = country_cn
                         
@@ -2514,8 +2524,9 @@ class TmpBotPlugin(Star):
                             'serverCode': server_details.get('code') or server_details.get('shortname'),
                             'x': online_data.get('x'),
                             'y': online_data.get('y'),
-                            'country': country_cn,
-                            'realName': city_cn,
+                            'country': country_cn or str(country or '').strip(),
+                            'realName': location_cn,
+                            'locationType': location_type,
                             'debug_error': 'Trucky V3 判断在线，并获取到实时数据。',
                             'raw_data': '' 
                         }
@@ -4910,10 +4921,24 @@ class TmpBotPlugin(Star):
             if not fullmap_player:
                 yield event.plain_result("玩家未在线")
                 return
+            fullmap_server_id = fullmap_player.get('ServerId')
+            fullmap_server_names = {
+                2: 'Simulation 1',
+                41: 'Simulation 2',
+                7: 'Arcade',
+                50: 'ProMods',
+                51: 'ProMods Arcade',
+                15: '[US] Simulation',
+                38: '[US] Arcade',
+            }
             online = {
                 'online': True,
-                'serverName': '未知服务器',
-                'serverId': fullmap_player.get('ServerId'),
+                'serverName': fullmap_server_names.get(
+                    int(fullmap_server_id or 0),
+                    f'服务器 {fullmap_server_id or "未知"}',
+                ),
+                'game': 2 if int(fullmap_server_id or 0) in {9, 11, 38} else 1,
+                'serverId': fullmap_server_id,
                 'x': fullmap_player.get('X'),
                 'y': fullmap_player.get('Y'),
                 'country': None,
@@ -5055,7 +5080,7 @@ class TmpBotPlugin(Star):
             tile_url_ets = self._tile_url(
                 'ets', "https://ets_tiles.cnly.top/20260903/tmp-ets-yellow/Tiles/{z}/{x}/{y}.png")
             tile_url_promods = self._tile_url(
-                'promods', "https://ets-map.oss-cn-beijing.aliyuncs.com/promods/05102019/{z}/{x}/{y}.png")
+                'promods', "https://ets_tiles.cnly.top/20260903/tmp-promods-yellow/Tiles/{z}/{x}/{y}.png")
             logger.info(f"定位: tile_ets={tile_url_ets}")
             logger.info(f"定位: tile_promods={tile_url_promods}")
 
@@ -5063,28 +5088,117 @@ class TmpBotPlugin(Star):
 <link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css\">
 <script src=\"https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js\"></script>
 <style>
-  html, body { margin:0; padding:0; width:100vw; height:100vh; background:#1f2328; overflow:hidden; }
-  * { box-sizing: border-box; }
-  .wrap { width: 100vw; color:#f2f4f8; font-family: system-ui, Segoe UI, Helvetica, Arial, sans-serif; }
-  #map { width: 100vw; height: calc(100vh - 150px); background:#2a2f36; filter: contrast(1.08) saturate(1.15) brightness(1.18); }
-  .panel { width:100vw; height:150px; background:rgba(28,28,28,.75); display:flex; align-items:center; padding:16px 20px; color:#eaeaea; backdrop-filter: blur(4px); }
-  .avatar { width:64px; height:64px; border-radius:50%; background:#808080; object-fit:cover; margin-right:16px; }
-  .col { flex:1; }
-  .name { font-size:22px; font-weight:600; letter-spacing:.3px; color:#f0f3f5; }
-  .sub { font-size:16px; color:#d8d8d8; margin-top:6px; }
-  .right { width:240px; text-align:right; color:#f0f3f5; font-size:16px; }
+  html, body { margin:0; padding:0; width:1280px; height:720px; overflow:hidden; background:#244b63; }
+  * { box-sizing:border-box; }
+  body { font-family:"PingFang SC","Microsoft YaHei","Noto Sans CJK SC",system-ui,sans-serif; }
+  .shell { position:relative; width:1280px; height:720px; overflow:hidden; color:#f5fbfa; background:#244b63; }
+  #map { position:absolute; inset:0; background:radial-gradient(circle at 52% 42%,#365f76 0,#294f66 52%,#1b3b51 100%); }
+  #map .leaflet-tile-pane { opacity:.82; filter:grayscale(1) brightness(1.75) contrast(1.12); mix-blend-mode:screen; }
+  .leaflet-control-container { display:none; }
+  .map-shade {
+    position:absolute; inset:0; z-index:450; pointer-events:none;
+    background:
+      linear-gradient(180deg,rgba(7,29,45,.15),transparent 24%,transparent 66%,rgba(7,29,45,.42)),
+      radial-gradient(circle at 50% 45%,transparent 48%,rgba(8,30,45,.22));
+  }
+  .live-pill {
+    position:absolute; z-index:700; top:24px; left:26px; height:40px; padding:0 14px;
+    display:flex; align-items:center; gap:9px; border:1px solid rgba(255,255,255,.18);
+    border-radius:11px; color:#edf7fb; background:rgba(8,31,48,.8);
+    backdrop-filter:blur(10px); box-shadow:0 10px 24px rgba(0,0,0,.18);
+    font-size:11px; font-weight:800; letter-spacing:1px;
+  }
+  .live-dot {
+    width:8px; height:8px; border-radius:50%; background:#69d9ff;
+    box-shadow:0 0 0 4px rgba(105,217,255,.15),0 0 14px rgba(105,217,255,.75);
+  }
+  .server-pill {
+    position:absolute; z-index:700; top:24px; right:26px; height:40px; padding:0 14px;
+    display:flex; align-items:center; gap:8px; border:1px solid rgba(255,255,255,.17);
+    border-radius:11px; color:#dfecef; background:rgba(8,31,48,.8);
+    backdrop-filter:blur(10px); box-shadow:0 10px 24px rgba(0,0,0,.18);
+    font-size:11px; font-weight:700;
+  }
+  .server-pill::before { content:""; width:7px; height:7px; border-radius:50%; background:#59c98d; }
+  .self-ring {
+    width:48px; height:48px; display:grid; place-items:center; border-radius:50%;
+    border:1px solid rgba(112,229,183,.45); background:rgba(80,199,154,.1);
+    box-shadow:0 0 0 9px rgba(80,199,154,.08);
+  }
+  .self-ring::after {
+    content:""; width:15px; height:15px; border-radius:50%;
+    border:3px solid #f7fffc; background:#59c98d; box-shadow:0 4px 12px rgba(0,0,0,.35);
+  }
+  .panel {
+    position:absolute; z-index:900; left:24px; right:24px; bottom:20px; height:112px;
+    padding:0 25px; display:grid; grid-template-columns:minmax(0,1fr) 520px;
+    gap:24px; align-items:center; border:1px solid rgba(255,255,255,.16); border-radius:19px;
+    background:linear-gradient(105deg,rgba(7,28,45,.95),rgba(8,36,55,.9));
+    box-shadow:0 18px 45px rgba(6,25,39,.35); backdrop-filter:blur(14px);
+  }
+  .panel::before {
+    content:""; position:absolute; left:22px; right:22px; top:0; height:1px;
+    background:linear-gradient(90deg,transparent,rgba(121,213,255,.7),transparent);
+  }
+  .profile { min-width:0; display:flex; align-items:center; gap:15px; }
+  .avatar-wrap {
+    width:70px; height:70px; flex:0 0 70px; padding:4px; border-radius:50%;
+    background:linear-gradient(145deg,#6bcfff,#267cad); box-shadow:0 8px 22px rgba(2,16,27,.38);
+  }
+  .avatar { width:62px; height:62px; display:block; border:3px solid #102f45; border-radius:50%; object-fit:cover; background:#d8e0e3; }
+  .avatar-fallback {
+    width:62px; height:62px; display:flex; align-items:center; justify-content:center;
+    border:3px solid #102f45; border-radius:50%; color:#f8fffd;
+    background:linear-gradient(145deg,#237ca8,#123d59); font-size:24px; font-weight:800;
+  }
+  .profile-copy { min-width:0; }
+  .profile-kicker { margin-bottom:5px; color:#8bb1c3; font-size:9px; font-weight:800; letter-spacing:1.4px; }
+  .name {
+    max-width:330px; overflow:hidden; color:#f7fbfc; font-size:23px; line-height:1.15;
+    font-weight:800; letter-spacing:-.4px; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .chips { display:flex; align-items:center; gap:6px; margin-top:8px; }
+  .chip {
+    display:inline-flex; align-items:center; height:21px; padding:0 8px; border-radius:6px;
+    color:#c1d8e3; background:rgba(255,255,255,.08); font-size:9px; font-weight:700;
+  }
+  .chip.server { color:#7ce0b1; background:rgba(83,199,143,.13); }
+  .location-card { min-width:0; text-align:right; }
+  .location-label { color:#89a5b3; font-size:9px; font-weight:800; letter-spacing:1.4px; }
+  .location-value {
+    margin-top:6px; overflow:hidden; color:#f6fbfc; font-size:21px; line-height:1.2;
+    font-weight:800; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .direction {
+    display:flex; justify-content:flex-end; align-items:center; gap:7px;
+    margin-top:7px; color:#7dd9b0; font-size:11px; font-weight:700;
+  }
+  .direction::before { content:""; width:6px; height:6px; border-radius:50%; background:#59c98d; }
 </style>
-<div class=\"wrap\">
+<div class=\"shell\">
   <div id=\"map\"></div>
+  <div class=\"map-shade\"></div>
+  <div class=\"live-pill\"><span class=\"live-dot\"></span>LIVE POSITION</div>
+  <div class=\"server-pill\">{{ server_name }} · 游戏中</div>
   <div class=\"panel\">
-    <img class=\"avatar\" src=\"{{ avatar }}\" />
-    <div class=\"col\"> 
-      <div class=\"name\">{{ player_name }}</div>
-      <div class=\"sub\">{{ server_name }} 游戏中</div>
+    <div class=\"profile\">
+      <div class=\"avatar-wrap\">
+        {% if avatar %}<img class=\"avatar\" src=\"{{ avatar }}\" />{% else %}<div class=\"avatar-fallback\">{{ avatar_initial }}</div>{% endif %}
+      </div>
+      <div class=\"profile-copy\">
+        <div class=\"profile-kicker\">DRIVER LOCATION</div>
+        <div class=\"name\">{{ player_name }}</div>
+        <div class=\"chips\">
+          <span class=\"chip server\">{{ server_name }}</span>
+          <span class=\"chip\">TMP #{{ me_id }}</span>
+          <span class=\"chip\">附近 {{ nearby_count }} 人</span>
+        </div>
+      </div>
     </div>
-    <div class=\"right\">
-      {% if location_line %}<div>{{ location_line }}</div>{% endif %}
-      {% if direction_text %}<div>{{ direction_text }}</div>{% endif %}
+    <div class=\"location-card\">
+      <div class=\"location-label\">当前位置</div>
+      <div class=\"location-value\">{{ location_line }}</div>
+      {% if direction_text %}<div class=\"direction\">{{ direction_text }}</div>{% endif %}
     </div>
   </div>
 </div>
@@ -5095,7 +5209,7 @@ class TmpBotPlugin(Star):
   var cfg = {
     ets: {
       tileUrl: '{{ tile_url_ets }}',
-      fallbackUrl: 'https://ets2.online/map/ets2map_157/{z}/{x}/{y}.png',
+      fallbackUrl: 'https://ets2.online/map/ets2map_158/{z}/{x}/{y}.png',
       multipliers: { x: 70272, y: 76157 },
       breakpoints: { uk: { x: -31056.8, y: -5832.867 } },
       bounds: { x:131072, y:131072 },
@@ -5106,7 +5220,7 @@ class TmpBotPlugin(Star):
     },
     promods: {
       tileUrl: '{{ tile_url_promods }}',
-      fallbackUrl: 'https://ets2.online/map/ets2mappromods_156/{z}/{x}/{y}.png',
+      fallbackUrl: 'https://ets2.online/map/ets2mappromods_158/{z}/{x}/{y}.png',
       multipliers: { x: 51953, y: 76024 },
       breakpoints: { uk: { x: -31056.8, y: -5832.867 } },
       bounds: { x:131072, y:131072 },
@@ -5137,13 +5251,20 @@ class TmpBotPlugin(Star):
   var players = [ {% for p in players %}{ axisX: {{ p.axisX }}, axisY: {{ p.axisY }}, tmpId: "{{ p.tmpId }}" }{% if not loop.last %}, {% endif %}{% endfor %} ];
   for (var i=0;i<players.length;i++){
     var p = players[i];
+    if (p.tmpId === '{{ me_id }}') continue;
     var xy = c.calc(p.axisX, p.axisY);
     var latlng = map.unproject(xy, c.maxZoom);
-    L.circleMarker(latlng, { color:'#2f2f2f', weight:2, fillColor:(p.tmpId === '{{ me_id }}' ? '#57bd00' : '#3ca7ff'), fillOpacity:1, radius:(p.tmpId === '{{ me_id }}' ? 6 : 5) }).addTo(map);
+    L.circleMarker(latlng, { color:'#c9f3ff', weight:1, opacity:.5, fillColor:'#69bce8', fillOpacity:.72, radius:4 }).addTo(map);
   }
   var centerLL = map.unproject(c.calc(centerX, centerY+80), c.maxZoom);
+  var meLL = map.unproject(c.calc(centerX, centerY), c.maxZoom);
+  L.circleMarker(meLL, { color:'#8de4b0', weight:1, opacity:.25, fillColor:'#59c98d', fillOpacity:.08, radius:25 }).addTo(map);
+  L.marker(meLL, {
+    interactive:false,
+    icon:L.divIcon({className:'',html:'<div class=\"self-ring\"></div>',iconSize:[48,48],iconAnchor:[24,24]})
+  }).addTo(map);
   map.setView(centerLL, 8);
-  setTimeout(function(){}, 800); // 轻微延时确保瓦片加载
+  setTimeout(function(){ map.invalidateSize(); }, 80);
 </script>
 """
             min_x, max_x = ax, bx
@@ -5159,6 +5280,8 @@ class TmpBotPlugin(Star):
                 'min_y': min_y,
                 'max_y': max_y,
                 'avatar': avatar_url or '',
+                'avatar_initial': str(player_name or '?').strip()[:1].upper() or '?',
+                'nearby_count': max(0, len(area_players) - 1),
                 'location_line': location_line,
                 'direction_text': direction_text,
                 'server_id': int(online.get('serverId') or 0),
