@@ -1,5 +1,5 @@
  # astrbot-plugin-tmp-bot
-[![npm](https://img.shields.io/badge/npm-v1.9.1-blue)](https://github.com/BGYdook/astrbot-plugin-tmp-bot)
+[![npm](https://img.shields.io/badge/npm-v1.9.2-blue)](https://github.com/BGYdook/astrbot-plugin-tmp-bot)
 
 ![:astrbot_plugin_tmp_bot](https://count.getloli.com/@:astrbot_plugin_tmp-bot?theme=minecraft)
 
@@ -50,6 +50,21 @@ https://docs.truckersmp.com/web-api/
 ### 非常感谢[晚安](https://github.com/nulijiazaizhong)和[鲸鱼](https://github.com/jingyu8127)提供的帮助
 
 ## 历史更新
+
+## 版本v1.9.2
+- 修复 有些请求关闭了 TLS 证书校验
+- 修复 带毫秒和时区偏移的时间戳会被错误换算
+- 修复 “足迹”查询全部服务器时不会尝试备用足迹接口的问题
+- 修复 查询失败时只查询失败的问题 
+- 修复 当user被永久封禁/被隐藏时显示未知的问题
+- 修复 不翻译封禁后追的//2.x的问题
+- 修复 "足迹"命令无法@user查询的问题
+- 修复 输入(比如足迹s1)时足迹可能把其他服务器的路线编写进当前服务器地图
+- 修复其他安全问题
+- 修改 输入"插件版本"命令后会显示更多内容
+- 修改 查询足迹时将使用并发以来提高查询速度
+- 删除 启用绑定功能
+- 新增未知问题
 
 ## 版本v1.9.1
 - 优化 定位图片的地图

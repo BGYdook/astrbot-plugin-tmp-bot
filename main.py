@@ -3,7 +3,7 @@
 
 """
 astrbot-plugin-tmp-bot
-欧卡2TMP查询插件 (版本 1.9.1)
+欧卡2TMP查询插件 (版本 1.9.2)
 """
 
 import re
@@ -458,12 +458,12 @@ RANK_IMAGE_TEMPLATE = """
       <div class="brand-mark">TMP</div>
       <div>
         <div class="eyebrow">TRUCKERSMP · ETS2</div>
-        <h1>{{ title }}</h1>
+        <h1>{{ title|e }}</h1>
       </div>
     </div>
     <div class="hero-meta">
       <strong>TOP 10</strong>
-      <span>{{ subtitle }}</span>
+      <span>{{ subtitle|e }}</span>
     </div>
   </header>
 
@@ -472,11 +472,11 @@ RANK_IMAGE_TEMPLATE = """
   <div class="champion">
     <div class="medal">01</div>
     <div class="player">
-      <div class="player-name">{{ items[0].name }}</div>
-      <div class="player-id">TMP ID · {{ items[0].tmp_id }}</div>
+      <div class="player-name">{{ items[0].name|e }}</div>
+      <div class="player-id">TMP ID · {{ items[0].tmp_id|e }}</div>
     </div>
     <div class="mileage">
-      <strong>{{ items[0].km_text }}</strong>
+      <strong>{{ items[0].km_text|e }}</strong>
       <span>KILOMETERS</span>
     </div>
   </div>
@@ -487,19 +487,19 @@ RANK_IMAGE_TEMPLATE = """
     <div class="runner-card silver">
       <div class="medal">02</div>
       <div>
-        <div class="player-name">{{ items[1].name }}</div>
-        <div class="player-id">TMP ID · {{ items[1].tmp_id }}</div>
+        <div class="player-name">{{ items[1].name|e }}</div>
+        <div class="player-id">TMP ID · {{ items[1].tmp_id|e }}</div>
       </div>
-      <div class="mileage"><strong>{{ items[1].km_text }}</strong><span>KM</span></div>
+      <div class="mileage"><strong>{{ items[1].km_text|e }}</strong><span>KM</span></div>
     </div>
     {% if items|length > 2 %}
     <div class="runner-card bronze">
       <div class="medal">03</div>
       <div>
-        <div class="player-name">{{ items[2].name }}</div>
-        <div class="player-id">TMP ID · {{ items[2].tmp_id }}</div>
+        <div class="player-name">{{ items[2].name|e }}</div>
+        <div class="player-id">TMP ID · {{ items[2].tmp_id|e }}</div>
       </div>
-      <div class="mileage"><strong>{{ items[2].km_text }}</strong><span>KM</span></div>
+      <div class="mileage"><strong>{{ items[2].km_text|e }}</strong><span>KM</span></div>
     </div>
     {% endif %}
   </div>
@@ -511,12 +511,12 @@ RANK_IMAGE_TEMPLATE = """
   <div class="rows">
     {% for it in items if it.rank > 3 %}
     <div class="row">
-      <div class="row-rank">{{ '%02d' % it.rank }}</div>
+      <div class="row-rank">{{ '%02d' % it.rank|e }}</div>
       <div>
-        <div class="player-name">{{ it.name }}</div>
-        <div class="player-id">TMP ID · {{ it.tmp_id }}</div>
+        <div class="player-name">{{ it.name|e }}</div>
+        <div class="player-id">TMP ID · {{ it.tmp_id|e }}</div>
       </div>
-      <div class="mileage"><strong>{{ it.km_text }}</strong><span>KM</span></div>
+      <div class="mileage"><strong>{{ it.km_text|e }}</strong><span>KM</span></div>
     </div>
     {% endfor %}
   </div>
@@ -526,19 +526,19 @@ RANK_IMAGE_TEMPLATE = """
   <div class="me-card">
     <div>
       <div class="me-label">MY POSITION</div>
-      <div class="me-name">{{ me.name }}</div>
-      <div class="me-sub">TMP ID · {{ me.tmp_id }}{% if me.vtc_role %} · {{ me.vtc_role }}{% endif %}</div>
+      <div class="me-name">{{ me.name|e }}</div>
+      <div class="me-sub">TMP ID · {{ me.tmp_id|e }}{% if me.vtc_role %} · {{ me.vtc_role|e }}{% endif %}</div>
     </div>
     <div class="me-values">
-      <strong>{{ me.km_text }} KM</strong>
-      <span>{% if me.rank is not none %}RANK #{{ me.rank }}{% else %}{{ scope }}{% endif %}</span>
+      <strong>{{ me.km_text|e }} KM</strong>
+      <span>{% if me.rank is not none %}RANK #{{ me.rank }}{% else %}{{ scope|e }}{% endif %}</span>
     </div>
   </div>
   {% endif %}
 
   <footer class="footer">
     <span><b>LIVE DATA</b> · TRUCKERSMP MILEAGE</span>
-    <span>{{ scope }} · TOP 10</span>
+    <span>{{ scope|e }} · TOP 10</span>
   </footer>
 </div>
 """
@@ -591,23 +591,13 @@ def _format_timestamp_to_beijing(timestamp_str: Optional[str]) -> str:
         return "永久封禁"
 
     try:
-        clean_str = s.replace('T', ' ').split('.')[0].replace('Z', '')
-        dt_utc = datetime.strptime(clean_str, '%Y-%m-%d %H:%M:%S')
-        dt_bj = dt_utc + timedelta(hours=8)
-        return dt_bj.strftime('%Y-%m-%d %H:%M:%S')
-    except Exception:
-        try:
-            # ISO 8601 with timezone offset, e.g. 2025-12-01T07:55:00+00:00
-            iso = s.replace('Z', '+00:00')
-            dt = datetime.fromisoformat(iso)
-            dt_bj = (
-                dt.astimezone(BEIJING_TZ)
-                if dt.tzinfo is not None
-                else dt.replace(tzinfo=BEIJING_TZ)
-            )
-            return dt_bj.strftime('%Y-%m-%d %H:%M:%S')
-        except Exception:
-            return s
+        iso = s.replace('Z', '+00:00')
+        dt = datetime.fromisoformat(iso)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(BEIJING_TZ).strftime('%Y-%m-%d %H:%M:%S')
+    except (TypeError, ValueError):
+        return s
 
 def _normalize_heading_to_direction(heading: Any) -> Optional[str]:
     """把角度值转换为方向字符串，如 0°≈北、90°≈东，并附带箭头符号。"""
@@ -696,7 +686,28 @@ class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
 
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.9.1", "https://github.com/BGYdook/astrbot-plugin-tmp-bot")
+
+def _is_permanent_ban_expiry(value: Any) -> bool:
+    normalized = str(value or '').strip().lower()
+    return normalized.startswith(('never', 'permanent', 'forever')) or normalized in {'永久', '永久封禁'}
+
+
+def _is_hidden_ban_reason(value: Any) -> bool:
+    normalized = str(value or '').strip().lower()
+    return normalized in {
+        'hidden', 'private', 'not public', 'hidden reason', 'reason hidden',
+        'hidden by player', 'hidden by user',
+    }
+
+
+def _is_hidden_ban_expiry(value: Any) -> bool:
+    normalized = str(value or '').strip().lower()
+    return not normalized or normalized in {
+        'hidden', 'private', 'not public', 'hidden expiry', 'expiry hidden',
+        'hidden by player', 'hidden by user',
+    }
+
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.9.2", "https://github.com/BGYdook/astrbot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context, config=None):  # 接收 context 和 config
         super().__init__(context)              # 将 context 传给父类
@@ -714,6 +725,7 @@ class TmpBotPlugin(Star):
         self._fullmap_task: Optional[asyncio.Task] = None
         self._fullmap_lock = asyncio.Lock()
         self._fullmap_fetch_lock = asyncio.Lock()
+        self._footprint_request_semaphore = asyncio.Semaphore(6)
 
         self._load_location_maps()
         try:
@@ -749,7 +761,17 @@ class TmpBotPlugin(Star):
     # --- 配置读取辅助 ---
     def _cfg_bool(self, key: str, default: bool) -> bool:
         v = self.config.get(key, default)
-        return bool(v) if isinstance(v, (bool, int, str)) else default
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, (int, float)):
+            return bool(v)
+        if isinstance(v, str):
+            normalized = v.strip().lower()
+            if normalized in {'1', 'true', 'yes', 'on', '是', '开启', '启用'}:
+                return True
+            if normalized in {'0', 'false', 'no', 'off', '否', '关闭', '禁用', ''}:
+                return False
+        return default
 
     def _cfg_int(self, key: str, default: int) -> int:
         try:
@@ -829,7 +851,7 @@ class TmpBotPlugin(Star):
         # 使用 IPv4 优先的连接器，并允许读取环境代理设置（与浏览器/系统行为更一致）
         connector = aiohttp.TCPConnector(family=socket.AF_INET)
         self.session = aiohttp.ClientSession(
-            headers={'User-Agent': 'astrBot-TMP-Plugin/1.9.1'}, 
+            headers={'User-Agent': 'astrBot-TMP-Plugin/1.9.2'}, 
             timeout=aiohttp.ClientTimeout(total=timeout_sec),
             connector=connector,
             trust_env=True
@@ -974,21 +996,28 @@ class TmpBotPlugin(Star):
     @classmethod
     def _format_tmp_update_message(cls, snapshot: Dict[str, Any]) -> str:
         version = str(snapshot.get('name') or '未知')
-        official_raw = str(snapshot.get('official') or '').strip()
-        official = official_raw or '未知'
+        official_data = snapshot.get('official')
+        if isinstance(official_data, dict):
+            official_ets2_raw = str(official_data.get('ets2') or '').strip()
+        else:
+            # Backward compatibility with update state saved by older versions.
+            official_ets2_raw = str(official_data or '').strip()
+        official_ets2 = official_ets2_raw or '未知'
         ets2 = str(snapshot.get('ets2') or '未知')
         ats = str(snapshot.get('ats') or '未知')
 
-        if not official_raw or official_raw == '未知':
+        if official_ets2 == '未知':
             ets2_ok = '未知'
-            ats_ok = '未知'
         else:
             # 欧卡：官方 Steam 版本必须与 TMP 支持的版本完全一致
-            ets2_ok = '✅' if ets2 != '未知' and official_raw == ets2 else '❌'
-            # 美卡：接口没有单独提供美卡官方版本，按主次版本号（如 1.61）判断
-            official_mm = cls._tmp_major_minor(official_raw)
-            ats_mm = cls._tmp_major_minor(ats)
-            ats_ok = '✅' if ats != '未知' and official_mm and official_mm == ats_mm else '❌'
+            ets2_ok = '✅' if ets2 != '未知' and official_ets2_raw == ets2 else '❌'
+        if official_ets2 == '未知':
+            ats_ok = '未知'
+        else:
+            # ATS shares the major/minor game release with ETS2.
+            ats_mm = cls._tmp_major_minor(official_ets2_raw)
+            supported_ats_mm = cls._tmp_major_minor(ats)
+            ats_ok = '✅' if ats != '未知' and ats_mm and ats_mm == supported_ats_mm else '❌'
 
         return (
             "检测到联机插件有更新!\n"
@@ -996,7 +1025,7 @@ class TmpBotPlugin(Star):
             f"支持欧卡版本: {ets2}\n"
             f"支持美卡版本: {ats}\n"
             "-----------------------------\n"
-            f"📊 官方Steam版本: {official}\n"
+            f"📊 官方Steam版本: {official_ets2}\n"
             f"🎮 欧卡兼容: {ets2_ok}\n"
             f"🎮 美卡兼容: {ats_ok}"
         )
@@ -1199,15 +1228,15 @@ class TmpBotPlugin(Star):
             'api_time': str(data.get('time') or ''),
         }
 
-    async def _fetch_tmp_official_game_version(self) -> str:
-        """获取 Steam 官方游戏版本（欧卡）。
+    async def _fetch_tmp_official_game_version(self) -> Dict[str, str]:
+        """获取 Steam 官方欧卡版本
 
         数据来自插件内置/自定义 API 源的 /other/tmpVersion 接口；
-        该值只用于展示「官方Steam版本」，不参与更新判断。
-        接口不可用时返回空字符串，通知里显示为「未知」。
+        该值只用于通知展示和兼容性提示，不参与 TMP 更新判断。
+        接口不可用时版本留空，通知里显示为「未知」。
         """
         if not self.session:
-            return ''
+            return {'ets2': ''}
         timeout = self._cfg_int('api_timeout_seconds', 10)
         for base in self._api_bases():
             url = f"{base}/other/tmpVersion"
@@ -1226,15 +1255,19 @@ class TmpBotPlugin(Star):
             if code not in (None, 200, '200'):
                 continue
             data = payload.get('data')
-            official = None
+            official_ets2 = None
             if isinstance(data, dict):
-                official = data.get('officialGameVersion')
-            if not official:
-                official = payload.get('officialGameVersion')
-            if official:
-                return str(official)
-        logger.warning("获取官方 Steam 版本失败，通知中将显示为未知")
-        return ''
+                official_ets2 = (
+                    data.get('officialGameVersion')
+                    or data.get('officialEts2GameVersion')
+                    or data.get('officialETS2GameVersion')
+                    or data.get('officialEts2Version')
+                )
+            official_ets2 = official_ets2 or payload.get('officialGameVersion')
+            if official_ets2:
+                return {'ets2': str(official_ets2)}
+        logger.warning("获取官方 Steam 游戏版本失败，通知中显示为未知")
+        return {'ets2': ''}
 
     def _start_tmp_update_task(self) -> None:
         if not self._tmp_update_enabled():
@@ -1359,10 +1392,11 @@ class TmpBotPlugin(Star):
             return
 
         # 官方 Steam 版本只在真正推送时查询，避免每次检测都多请求一次
-        if not snapshot.get('official'):
-            official = await self._fetch_tmp_official_game_version()
-            if official:
-                snapshot['official'] = official
+        official = snapshot.get('official')
+        if not isinstance(official, dict) or not official.get('ets2'):
+            official_versions = await self._fetch_tmp_official_game_version()
+            if official_versions.get('ets2'):
+                snapshot['official'] = official_versions
                 pending['snapshot'] = snapshot
                 self._save_tmp_update_state()
 
@@ -2176,43 +2210,63 @@ class TmpBotPlugin(Star):
             async with self.session.get(url, timeout=10) as response:
                 if response.status == 200:
                     data = await response.json()
+                    if not isinstance(data, dict):
+                        raise ApiResponseException("玩家信息 API 返回格式异常")
+                    if data.get('error'):
+                        descriptor = str(data.get('descriptor') or data.get('message') or '').strip()
+                        if 'not found' in descriptor.lower() or 'unable to find' in descriptor.lower():
+                            raise PlayerNotFoundException("此TMPID不存在，请检查后重试")
+                        raise ApiResponseException(descriptor or "TruckersMP 玩家信息查询失败")
                     response_data = data.get('response')
                     if response_data and isinstance(response_data, dict):
                         return response_data
-                    raise PlayerNotFoundException(f"玩家 {tmp_id} 不存在") 
+                    raise PlayerNotFoundException("此TMPID不存在，请检查后重试")
                 elif response.status == 404:
-                    raise PlayerNotFoundException(f"玩家 {tmp_id} 不存在")
+                    raise PlayerNotFoundException("此TMPID不存在，请检查后重试")
                 else:
                     raise ApiResponseException(f"API返回错误状态码: {response.status}")
+        except (PlayerNotFoundException, ApiResponseException, NetworkException):
+            raise
         except aiohttp.ClientError:
             raise NetworkException("TruckersMP API 网络请求失败")
         except asyncio.TimeoutError:
             raise NetworkException("请求TruckersMP API超时")
         except Exception as e:
             logger.error(f"查询玩家信息失败: {e}")
-            raise NetworkException("查询失败")
+            raise NetworkException(f"玩家信息查询失败: {e}") from e
 
     async def _get_player_bans(self, tmp_id: str) -> List[Dict]:
-        if not self.session: return []
+        if not self.session:
+            raise NetworkException("插件初始化中，HTTP会话不可用")
 
         try:
             url = f"https://api.truckersmp.com/v2/bans/{tmp_id}"
             async with self.session.get(url, timeout=10) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    # 兼容：优先取 response，其次直接取 data（防止结构变化）
-                    bans = data.get('response') or data.get('data') or []
-                    if not isinstance(bans, list):
-                        bans = []
-                    # 额外打印完整返回，方便一次性定位
-                    logger.info(f"Bans API 原始返回: {data}")
-                    logger.info(f"Bans API 提取后: keys={list(data.keys())}, count={len(bans)}")
-                    return bans
-                logger.warning(f"Bans API 非200状态: {response.status}")
-                return []
+                if response.status != 200:
+                    raise ApiResponseException(f"封禁 API 返回错误状态码: {response.status}")
+                data = await response.json()
+                if not isinstance(data, dict):
+                    raise ApiResponseException("封禁 API 返回格式异常")
+                if data.get('error'):
+                    detail = data.get('descriptor') or data.get('message') or "未知 API 错误"
+                    raise ApiResponseException(f"封禁 API 查询失败: {detail}")
+
+                bans = data.get('response') if 'response' in data else data.get('data')
+                if not isinstance(bans, list):
+                    raise ApiResponseException("封禁 API 未返回有效的违规记录列表")
+                logger.info(f"Bans API 提取后: keys={list(data.keys())}, count={len(bans)}")
+                return bans
+        except (ApiResponseException, NetworkException):
+            raise
+        except asyncio.TimeoutError as e:
+            logger.error(f"获取玩家封禁超时: {e}", exc_info=False)
+            raise NetworkException("封禁 API 请求超时") from e
+        except aiohttp.ClientError as e:
+            logger.error(f"获取玩家封禁网络失败: {e}", exc_info=False)
+            raise NetworkException("封禁 API 网络请求失败") from e
         except Exception as e:
             logger.error(f"获取玩家封禁失败: {e}", exc_info=False)
-            return []
+            raise NetworkException(f"封禁记录查询失败: {e}") from e
 
     async def _resolve_tmp_id_for_user_command(
         self,
@@ -2383,7 +2437,6 @@ class TmpBotPlugin(Star):
                 async with self.session.get(
                     vtcm_stats_url,
                     timeout=self._cfg_int('api_timeout_seconds', 10),
-                    ssl=False,
                     allow_redirects=True
                 ) as response:
                     if response.status != 200:
@@ -2894,27 +2947,49 @@ class TmpBotPlugin(Star):
                 urls.append(f"{base}/map/footprint?tmpId={tmp_id}&serverId={sid}")
                 urls.append(f"{base}/map/track?tmpId={tmp_id}&serverId={sid}")
         last_error = None
-        for url in urls:
+        request_limit = getattr(self, '_footprint_request_semaphore', None)
+        if request_limit is None:
+            request_limit = asyncio.Semaphore(6)
+            self._footprint_request_semaphore = request_limit
+
+        async def _request_footprint_url(url: str):
+            nonlocal last_error
             try:
-                logger.debug(f"足迹接口: 请求 {url}")
-                async with self.session.get(url, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
-                    if resp.status == 200:
+                async with request_limit:
+                    logger.debug(f"足迹接口: 请求 {url}")
+                    async with self.session.get(
+                        url,
+                        timeout=self._cfg_int('api_timeout_seconds', 10),
+                    ) as resp:
+                        if resp.status != 200:
+                            return None
                         data = await resp.json()
-                        if isinstance(data, dict):
-                            code = data.get('code')
-                            if code is not None and int(code) != 200:
-                                continue
-                            success = data.get('success')
-                            if success is not None and success is False:
-                                continue
-                        points, _ = self._extract_footprint_points(data, server_key, server_ids)
-                        if not points:
-                            continue
-                        return { 'url': url, 'data': data }
-                    if resp.status in (404, 204):
-                        continue
+                    if isinstance(data, dict):
+                        code = data.get('code')
+                        if code is not None and int(code) != 200:
+                            return None
+                        success = data.get('success')
+                        if success is not None and success is False:
+                            return None
+                    points, _ = self._extract_footprint_points(data, server_key, server_ids)
+                    return { 'url': url, 'data': data } if points else None
+            except asyncio.CancelledError:
+                raise
             except Exception as e:
                 last_error = e
+                return None
+
+        tasks = [asyncio.create_task(_request_footprint_url(url)) for url in urls]
+        try:
+            for completed in asyncio.as_completed(tasks):
+                result = await completed
+                if result:
+                    return result
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
         if last_error:
             raise NetworkException(f"足迹接口请求失败: {last_error}")
         raise ApiResponseException("足迹接口无可用数据")
@@ -2938,21 +3013,46 @@ class TmpBotPlugin(Star):
             except Exception:
                 return None
 
-        def _collect_points_from_list(items: List[Any]) -> List[Dict[str, float]]:
-            pts: List[Dict[str, float]] = []
-            for it in items:
-                p = _point_from_item(it)
-                if p:
-                    pts.append(p)
-            return pts
+        def _server_value(item: Any) -> Optional[str]:
+            if not isinstance(item, dict):
+                return None
+            for field in ('serverId', 'server_id', 'server'):
+                if field not in item or item.get(field) is None:
+                    continue
+                value = str(item.get(field)).strip().lower()
+                if value:
+                    return value
+            return None
 
         def _match_server(item: Dict[str, Any]) -> bool:
-            sid = str(item.get('serverId') or item.get('server_id') or item.get('server') or '').strip().lower()
+            sid = _server_value(item)
             if not sid:
                 return False
-            if sid == key:
-                return True
-            return sid in ids
+            return sid == key or sid in ids
+
+        def _collect_points_from_list(items: List[Any]) -> List[Dict[str, float]]:
+            """Collect direct points while excluding points from other servers.
+
+            Some sources return a mixed flat list and others return a pure point
+            list after the server has already been selected by the request. In
+            the former case, the presence of a non-zero server id makes the
+            filter authoritative; in the latter case all points are retained.
+            """
+            point_items = [(it, _point_from_item(it)) for it in items]
+            point_items = [(it, point) for it, point in point_items if point]
+            if not point_items:
+                return []
+
+            server_values = {
+                sid for it, _ in point_items
+                if (sid := _server_value(it)) and sid not in {'0', 'none', 'null'}
+            }
+            if server_values:
+                return [
+                    point for it, point in point_items
+                    if _match_server(it)
+                ]
+            return [point for _, point in point_items]
 
         def _find_points(obj: Any, depth: int = 0) -> Tuple[List[Dict[str, float]], Dict[str, Any]]:
             if depth > 5:
@@ -2966,12 +3066,24 @@ class TmpBotPlugin(Star):
                         pts2, meta2 = _find_points(it, depth + 1)
                         if pts2:
                             return pts2, meta2 or it
+                # A server-tagged group that does not match the requested
+                # server must not be searched recursively, otherwise its
+                # nested points would leak into the current route.
                 for it in obj:
+                    if isinstance(it, dict) and _server_value(it) and not _match_server(it):
+                        continue
                     pts2, meta2 = _find_points(it, depth + 1)
                     if pts2:
                         return pts2, meta2
                 return [], {}
             if isinstance(obj, dict):
+                container_server = _server_value(obj)
+                if (
+                    container_server
+                    and container_server not in {'0', 'none', 'null'}
+                    and not _match_server(obj)
+                ):
+                    return [], {}
                 for k in ['points', 'track', 'tracks', 'list', 'route', 'path', 'data', 'response', 'result', 'items']:
                     if k in obj:
                         pts2, meta2 = _find_points(obj.get(k), depth + 1)
@@ -3113,7 +3225,7 @@ class TmpBotPlugin(Star):
             try:
                 url = f"{base}/vtc/history?tmpId={tmp_id}"
                 logger.info(f"VTC历史: {base} -> {url}")
-                async with self.session.get(url, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
+                async with self.session.get(url, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
                     if resp.status == 200:
                         data = await resp.json()
                         items = data.get('data') or data.get('response') or []
@@ -3153,7 +3265,7 @@ class TmpBotPlugin(Star):
                 # 获取 VTC 信息以获取角色 ID
                 vtc_info_url = f"https://api.truckersmp.com/v2/vtc/{vtc_id}"
                 logger.info(f"官方VTC查询: 获取VTC信息 {vtc_info_url}")
-                async with self.session.get(vtc_info_url, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
+                async with self.session.get(vtc_info_url, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
                     if resp.status == 200:
                         vtc_data = await resp.json()
                         if vtc_data.get('error') is False:
@@ -3167,7 +3279,7 @@ class TmpBotPlugin(Star):
                                         # 获取角色详细信息
                                         role_url = f"https://api.truckersmp.com/v2/vtc/{vtc_id}/role/{role_id}"
                                         logger.info(f"官方VTC角色查询: {role_url}")
-                                        async with self.session.get(role_url, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as role_resp:
+                                        async with self.session.get(role_url, timeout=self._cfg_int('api_timeout_seconds', 10)) as role_resp:
                                             if role_resp.status == 200:
                                                 role_data = await role_resp.json()
                                                 if role_data.get('error') is False:
@@ -3217,7 +3329,7 @@ class TmpBotPlugin(Star):
                 try:
                     url_vid = f"{base}/vtc/memberAll/role?vtcId={vtc_id}"
                     logger.info(f"VTC 角色查询: 使用 vtcId 查询 {url_vid}")
-                    async with self.session.get(url_vid, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
+                    async with self.session.get(url_vid, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
                         if resp.status == 200:
                             data = await resp.json()
                             members = data.get('data') or data.get('response') or []
@@ -3235,7 +3347,7 @@ class TmpBotPlugin(Star):
             try:
                 url_tmp = f"{base}/vtc/memberAll/role?tmpId={tmp_id}"
                 logger.info(f"VTC 角色查询: 回退尝试 tmpId 查询 {url_tmp}")
-                async with self.session.get(url_tmp, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
+                async with self.session.get(url_tmp, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
                     if resp.status == 200:
                         data = await resp.json()
                         members = data.get('data') or data.get('response') or []
@@ -3256,7 +3368,7 @@ class TmpBotPlugin(Star):
                     qname = quote_plus(str(vtc_name))
                     search_url = f"{base}/vtc/search?name={qname}"
                     logger.info(f"VTC 车队搜索: {search_url}")
-                    async with self.session.get(search_url, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
+                    async with self.session.get(search_url, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
                         if resp.status == 200:
                             data = await resp.json()
                             items = data.get('data') or data.get('response') or []
@@ -3276,7 +3388,7 @@ class TmpBotPlugin(Star):
                     try:
                         url_vid2 = f"{base}/vtc/memberAll/role?vtcId={vtc_id}"
                         logger.info(f"VTC 角色查询: 通过搜索得到 vtcId 后查询 {url_vid2}")
-                        async with self.session.get(url_vid2, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
+                        async with self.session.get(url_vid2, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
                             if resp.status == 200:
                                 data = await resp.json()
                                 members = data.get('data') or data.get('response') or []
@@ -3297,7 +3409,7 @@ class TmpBotPlugin(Star):
                     qname = quote_plus(str(vtc_name))
                     url_name = f"{base}/vtc/memberAll/role?vtcName={qname}"
                     logger.info(f"VTC 最后回退: 通过 vtcName 查询 {url_name}")
-                    async with self.session.get(url_name, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
+                    async with self.session.get(url_name, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
                         if resp.status == 200:
                             data = await resp.json()
                             members = data.get('data') or data.get('response') or []
@@ -3328,7 +3440,7 @@ class TmpBotPlugin(Star):
 
         支持多段原因，例如：
         输入："§2.2 - Collisions, §2.5 - Reckless Driving - https://youtu.be/xxx // 30 days due to history (§2.8)"
-        输出："§2.2 - 碰撞, §2.5 - 鲁莽驾驶 - https://youtu.be/xxx // 30天（§2.8历史）"（保留原样的链接与说明）
+        输出："§2.2 - 碰撞, §2.5 - 鲁莽驾驶 - https://youtu.be/xxx // 因历史违规追加30天 (§2.8 历史原因)"
         """
         if not reason or not isinstance(reason, str):
             return reason or ""
@@ -3383,6 +3495,27 @@ class TmpBotPlugin(Star):
         for en, zh in keyword_map.items():
             pattern = r"\b" + re.escape(en) + r"\b"
             result = re.sub(pattern, zh, result, flags=re.IGNORECASE)
+
+        duration_units = {
+            'day': '天',
+            'week': '周',
+            'month': '个月',
+            'year': '年',
+        }
+
+        def _translate_history_duration(match: re.Match) -> str:
+            amount = match.group('amount')
+            unit = match.group('unit').lower().rstrip('s')
+            return f"因历史违规追加{amount}{duration_units[unit]}"
+
+        result = re.sub(
+            r"\b(?P<amount>\d+)\s+(?P<unit>days?|weeks?|months?|years?)\s+due\s+to\s+history\b",
+            _translate_history_duration,
+            result,
+            flags=re.IGNORECASE,
+        )
+        result = re.sub(r"\bdue\s+to\s+history\b", "因历史违规", result, flags=re.IGNORECASE)
+        result = re.sub(r"§\s*2\.8(?!\s*-)", "§2.8 历史原因", result, flags=re.IGNORECASE)
 
         return result
 
@@ -3742,7 +3875,7 @@ class TmpBotPlugin(Star):
             
         steam_id_to_display = self._get_steam_id_from_player_info(player_info)
         is_banned = player_info.get('banned', False) 
-        banned_until_main = player_info.get('bannedUntil', '永久/未知') 
+        banned_until_main = player_info.get('bannedUntil')
         
         ban_count, sorted_bans = self._format_ban_info(bans_info)
         bans_count_raw = player_info.get('bansCount')
@@ -3917,26 +4050,38 @@ class TmpBotPlugin(Star):
             
             current_ban = None
             if sorted_bans:
-                current_ban = next((ban for ban in sorted_bans if ban.get('active')), None)
+                current_ban = next((
+                    ban for ban in sorted_bans
+                    if ban.get('active') is True
+                    or str(ban.get('active')).strip().lower() in {'1', 'true', 'yes'}
+                ), None)
                 if not current_ban:
                     current_ban = sorted_bans[0]
                     
             if current_ban:
-                ban_reason_raw = current_ban.get('reason', '未知封禁原因 (API V2)')
-                ban_reason = self._translate_ban_reason(ban_reason_raw)
-                ban_expiration = current_ban.get('expiration', banned_until_main) 
+                ban_reason_raw = str(current_ban.get('reason') or '').strip()
+                ban_reason = (
+                    "该用户的封禁原因被隐藏"
+                    if not ban_reason_raw or _is_hidden_ban_reason(ban_reason_raw)
+                    else self._translate_ban_reason(ban_reason_raw)
+                )
+                ban_expiration = current_ban.get('expiration') or banned_until_main
                 
                 body += f"🚫封禁原因: {ban_reason}\n"
                 
-                if ban_expiration and isinstance(ban_expiration, str) and ban_expiration.lower().startswith('never'):
+                if _is_permanent_ban_expiry(ban_expiration):
                     body += f"🚫封禁截止: 永久封禁\n"
+                elif _is_hidden_ban_expiry(ban_expiration):
+                    body += "🚫封禁截止: 该用户的封禁截止被隐藏\n"
                 else:
                     body += f"🚫封禁截止: {_format_timestamp_to_beijing(ban_expiration)}\n"
                     
             else:
-                body += f"🚫封禁原因: 隐藏\n"
-                if banned_until_main and isinstance(banned_until_main, str) and banned_until_main.lower().startswith('never'):
+                body += f"🚫封禁原因: 该用户的封禁原因被隐藏\n"
+                if _is_permanent_ban_expiry(banned_until_main):
                     body += f"🚫封禁截止: 永久封禁\n"
+                elif _is_hidden_ban_expiry(banned_until_main):
+                    body += "🚫封禁截止: 该用户的封禁截止被隐藏\n"
                 else:
                     body += f"🚫封禁截止: {_format_timestamp_to_beijing(banned_until_main)}\n"
         
@@ -4046,15 +4191,15 @@ class TmpBotPlugin(Star):
   <div style=\"font-size:20px;font-weight:600;margin:0;padding:12px 0 8px 0;\">DLC 列表</div>
   {% for it in items %}
   <div style=\"display:flex;flex-direction:row;background:#24313a;margin:0 0 12px 0;padding:12px;\">
-    <img src=\"{{ it.headerImageUrl }}\" style=\"width:210px;height:auto;object-fit:cover;\"/>
+    <img src=\"{{ it.headerImageUrl|e }}\" style=\"width:210px;height:auto;object-fit:cover;\"/>
     <div style=\"flex:1;padding:0 12px;\">
-      <div style=\"font-size:18px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;\">{{ it.name }}</div>
-      <div style=\"font-size:14px;color:#e5e5e5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-overflow:ellipsis;\">{{ it.desc }}</div>
+      <div style=\"font-size:18px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;\">{{ it.name|e }}</div>
+      <div style=\"font-size:14px;color:#e5e5e5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-overflow:ellipsis;\">{{ it.desc|e }}</div>
       <div style=\"margin-top:8px;\">
-        <span style=\"display:inline-block;color:#BEEE11;font-size:16px;\">{{ it.price_str }}</span>
+        <span style=\"display:inline-block;color:#BEEE11;font-size:16px;\">{{ it.price_str|e }}</span>
         {% if it.discount and it.discount > 0 %}
-        <span style=\"display:inline-block;color:#cbcbcb;font-size:16px;text-decoration:line-through;margin-left:6px;\">{{ it.original_price_str }}</span>
-        <span style=\"font-size:14px;color:#BEEE11;background:#4c6b22;padding:2px 6px;margin-left:4px;\">-{{ it.discount }}%</span>
+        <span style=\"display:inline-block;color:#cbcbcb;font-size:16px;text-decoration:line-through;margin-left:6px;\">{{ it.original_price_str|e }}</span>
+        <span style=\"font-size:14px;color:#BEEE11;background:#4c6b22;padding:2px 6px;margin-left:4px;\">-{{ it.discount|e }}%</span>
         {% endif %}
       </div>
     </div>
@@ -4123,6 +4268,7 @@ class TmpBotPlugin(Star):
         user_id = event.get_sender_id()
 
         target_user_id = None
+        message_text_parts = []
         message_obj = getattr(event, "message_obj", None)
         if message_obj is not None:
             try:
@@ -4131,25 +4277,37 @@ class TmpBotPlugin(Star):
                     seg_type = getattr(seg, "type", None)
                     if isinstance(seg, dict):
                         seg_type = seg.get("type") or seg_type
-                    if isinstance(seg_type, str) and seg_type.lower() == "at":
+                    seg_data = getattr(seg, "data", None)
+                    if isinstance(seg, dict):
+                        seg_data = seg.get("data") or seg_data
+                    if not isinstance(seg_data, dict):
+                        seg_data = {}
+                    normalized_type = str(seg_type or "").lower()
+                    if normalized_type == "at":
                         uid = (
                             getattr(seg, "qq", None)
                             or getattr(seg, "user_id", None)
                             or getattr(seg, "id", None)
+                            or seg_data.get("qq")
+                            or seg_data.get("user_id")
+                            or seg_data.get("id")
                         )
                         if isinstance(seg, dict):
                             uid = seg.get("qq") or seg.get("user_id") or seg.get("id") or uid
                         if uid:
                             target_user_id = str(uid)
-                            break
-                    uid2 = getattr(seg, "qq", None)
-                    if isinstance(seg, dict):
-                        uid2 = seg.get("qq") or uid2
-                    if uid2:
-                        target_user_id = str(uid2)
-                        break
+                        continue
+                    if normalized_type in {"text", "plain"} or isinstance(seg_data.get("text"), str):
+                        text_value = getattr(seg, "text", None) or seg_data.get("text")
+                        if isinstance(seg, dict):
+                            text_value = seg_data.get("text") or seg.get("text") or text_value
+                        if text_value is not None:
+                            message_text_parts.append(str(text_value))
             except Exception:
                 target_user_id = None
+                message_text_parts = []
+        if message_text_parts:
+            message_str = "".join(message_text_parts).strip()
 
         server_alias = {
             "s1": "sim1",
@@ -4336,10 +4494,20 @@ class TmpBotPlugin(Star):
                 hist_list.append(s)
             range_start = start_time
             range_end = end_time
-            for sid in hist_list:
-                history_points = await self._get_footprint_history(tmp_id, sid or None, start_time, end_time)
-                if history_points:
-                    break
+            history_results = await asyncio.gather(
+                *(
+                    self._get_footprint_history(tmp_id, sid or None, start_time, end_time)
+                    for sid in hist_list
+                ),
+                return_exceptions=True,
+            )
+            history_points = next(
+                (
+                    result for result in history_results
+                    if isinstance(result, list) and result
+                ),
+                [],
+            )
             if history_points:
                 has_server_id = any(
                     str(p.get('serverId') or p.get('server_id') or p.get('server') or "").strip()
@@ -4362,7 +4530,7 @@ class TmpBotPlugin(Star):
             if history_points:
                 points = self._normalize_history_points(history_points)
                 meta = {'source': 'playerHistory', 'startTime': range_start, 'endTime': range_end}
-            elif not _silent_empty:
+            else:
                 logger.info("足迹历史为空，开始回退足迹接口")
                 footprint_resp = await self._get_footprint_data(server_key, tmp_id, server_ids)
                 points, meta = self._extract_footprint_points(footprint_resp.get('data'), server_key, server_ids)
@@ -4374,10 +4542,6 @@ class TmpBotPlugin(Star):
                         continue
                     fallback_points.append({'axisX': x, 'axisY': y, 'serverId': 0, 'heading': 0, 'ts': 0})
                 points = fallback_points
-            else:
-                # 全服务器批量查询时只使用历史接口，避免为空服务器发起整组备用请求。
-                points = []
-                meta = {}
         except ApiResponseException:
             logger.info(f"{server_label} 暂无今日足迹数据")
             if not _silent_empty:
@@ -4576,20 +4740,20 @@ class TmpBotPlugin(Star):
     <div class="profile">
       <div class="avatar-wrap">
         {% if avatar %}
-        <img class="avatar" src="{{ avatar }}" />
+        <img class="avatar" src="{{ avatar|e }}" />
         {% else %}
-        <div class="avatar-fallback">{{ avatar_initial }}</div>
+        <div class="avatar-fallback">{{ avatar_initial|e }}</div>
         {% endif %}
       </div>
       <div class="profile-copy">
         <div class="profile-kicker">DRIVER JOURNEY</div>
         <div class="name-line">
-          <div class="name">{{ player_name }}</div>
+          <div class="name">{{ player_name|e }}</div>
           <span class="name-suffix"> 的今日行驶足迹</span>
         </div>
         <div class="chips">
-          <span class="chip server">{{ server_label }}</span>
-          <span class="chip">TMP #{{ tmp_id }}</span>
+          <span class="chip server">{{ server_label|e }}</span>
+          <span class="chip">TMP #{{ tmp_id|e }}</span>
         </div>
       </div>
     </div>
@@ -4602,10 +4766,10 @@ class TmpBotPlugin(Star):
   </div>
 </div>
 <script>
-  var mapType = "{{ map_type }}";
+  var mapType = {{ map_type|tojson }};
   var cfg = {
     ets: {
-      tileUrl: '{{ tile_url_ets }}',
+      tileUrl: {{ tile_url_ets|tojson }},
       fallbackUrl: 'https://ets_tiles.cnly.top/20260903/tmp-ets-yellow/Tiles/{z}/{x}/{y}.png',
       multipliers: { x: 70272, y: 76157 },
       breakpoints: { uk: { x: -31056.8, y: -5832.867 } },
@@ -4616,7 +4780,7 @@ class TmpBotPlugin(Star):
       }
     },
     promods: {
-      tileUrl: '{{ tile_url_promods }}',
+      tileUrl: {{ tile_url_promods|tojson }},
       fallbackUrl: 'https://ets2.online/map/ets2mappromods_156/{z}/{x}/{y}.png',
       multipliers: { x: 51953, y: 76024 },
       breakpoints: { uk: { x: -31056.8, y: -5832.867 } },
@@ -4643,7 +4807,7 @@ class TmpBotPlugin(Star):
     tileLayer = L.tileLayer(c.fallbackUrl, { minZoom: c.minZoom, maxZoom: 10, maxNativeZoom: c.maxZoom, tileSize: 512, bounds: b, reuseTiles: true }).addTo(map);
   });
   map.setMaxBounds(b);
-  var points = [ {% for p in points %}{ axisX: {{ p.axisX }}, axisY: {{ p.axisY }}, serverId: {{ p.serverId }}, heading: {{ p.heading }}, ts: {{ p.ts }} }{% if not loop.last %}, {% endif %}{% endfor %} ];
+  var points = {{ points|tojson }};
   points = points.filter(function(p){ return !(p.axisX === 0 && p.axisY === 0 && p.heading === 0); });
   var lines = [];
   var currentLine = [];
@@ -5025,7 +5189,7 @@ class TmpBotPlugin(Star):
                     area_url = f"{api_base}/map/playerList?aAxisX={ax}&aAxisY={ay}&bAxisX={bx}&bAxisY={by}&serverId={server_id}"
                     logger.info(f"定位: 使用底图查询周边玩家 serverId={server_id} center=({cx},{cy}) url={area_url}")
                     try:
-                        async with self.session.get(area_url, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
+                        async with self.session.get(area_url, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
                             if resp.status == 200:
                                 j = await resp.json()
                                 area_players = j.get('data') or []
@@ -5179,26 +5343,26 @@ class TmpBotPlugin(Star):
   <div id=\"map\"></div>
   <div class=\"map-shade\"></div>
   <div class=\"live-pill\"><span class=\"live-dot\"></span>LIVE POSITION</div>
-  <div class=\"server-pill\">{{ server_name }} · 游戏中</div>
+  <div class=\"server-pill\">{{ server_name|e }} · 游戏中</div>
   <div class=\"panel\">
     <div class=\"profile\">
       <div class=\"avatar-wrap\">
-        {% if avatar %}<img class=\"avatar\" src=\"{{ avatar }}\" />{% else %}<div class=\"avatar-fallback\">{{ avatar_initial }}</div>{% endif %}
+        {% if avatar %}<img class=\"avatar\" src=\"{{ avatar|e }}\" />{% else %}<div class=\"avatar-fallback\">{{ avatar_initial|e }}</div>{% endif %}
       </div>
       <div class=\"profile-copy\">
         <div class=\"profile-kicker\">DRIVER LOCATION</div>
-        <div class=\"name\">{{ player_name }}</div>
+        <div class=\"name\">{{ player_name|e }}</div>
         <div class=\"chips\">
-          <span class=\"chip server\">{{ server_name }}</span>
-          <span class=\"chip\">TMP #{{ me_id }}</span>
-          <span class=\"chip\">附近 {{ nearby_count }} 人</span>
+          <span class=\"chip server\">{{ server_name|e }}</span>
+          <span class=\"chip\">TMP #{{ me_id|e }}</span>
+          <span class=\"chip\">附近 {{ nearby_count|e }} 人</span>
         </div>
       </div>
     </div>
     <div class=\"location-card\">
       <div class=\"location-label\">当前位置</div>
-      <div class=\"location-value\">{{ location_line }}</div>
-      {% if direction_text %}<div class=\"direction\">{{ direction_text }}</div>{% endif %}
+      <div class=\"location-value\">{{ location_line|e }}</div>
+      {% if direction_text %}<div class=\"direction\">{{ direction_text|e }}</div>{% endif %}
     </div>
   </div>
 </div>
@@ -5208,7 +5372,7 @@ class TmpBotPlugin(Star):
   var mapType = promodsIds.indexOf(serverId) !== -1 ? 'promods' : 'ets';
   var cfg = {
     ets: {
-      tileUrl: '{{ tile_url_ets }}',
+      tileUrl: {{ tile_url_ets|tojson }},
       fallbackUrl: 'https://ets2.online/map/ets2map_158/{z}/{x}/{y}.png',
       multipliers: { x: 70272, y: 76157 },
       breakpoints: { uk: { x: -31056.8, y: -5832.867 } },
@@ -5219,7 +5383,7 @@ class TmpBotPlugin(Star):
       }
     },
     promods: {
-      tileUrl: '{{ tile_url_promods }}',
+      tileUrl: {{ tile_url_promods|tojson }},
       fallbackUrl: 'https://ets2.online/map/ets2mappromods_158/{z}/{x}/{y}.png',
       multipliers: { x: 51953, y: 76024 },
       breakpoints: { uk: { x: -31056.8, y: -5832.867 } },
@@ -5248,10 +5412,10 @@ class TmpBotPlugin(Star):
   map.setMaxBounds(b);
   var centerX = {{ center_x }};
   var centerY = {{ center_y }};
-  var players = [ {% for p in players %}{ axisX: {{ p.axisX }}, axisY: {{ p.axisY }}, tmpId: "{{ p.tmpId }}" }{% if not loop.last %}, {% endif %}{% endfor %} ];
+  var players = [{% for p in players %}{ axisX: {{ p.axisX }}, axisY: {{ p.axisY }}, tmpId: {{ p.tmpId|tojson }} }{% if not loop.last %}, {% endif %}{% endfor %}];
   for (var i=0;i<players.length;i++){
     var p = players[i];
-    if (p.tmpId === '{{ me_id }}') continue;
+    if (p.tmpId === {{ me_id|tojson }}) continue;
     var xy = c.calc(p.axisX, p.axisY);
     var latlng = map.unproject(xy, c.maxZoom);
     L.circleMarker(latlng, { color:'#c9f3ff', weight:1, opacity:.5, fillColor:'#69bce8', fillOpacity:.72, radius:4 }).addTo(map);
@@ -5794,6 +5958,9 @@ class TmpBotPlugin(Star):
         except NetworkException as exc:
             yield event.plain_result(f"查询违规记录失败: {exc}")
             return
+        except ApiResponseException as exc:
+            yield event.plain_result(f"查询违规记录失败: {exc}")
+            return
         except Exception as exc:
             logger.error(f"查询玩家 {tmp_id} 违规记录失败: {exc}", exc_info=True)
             yield event.plain_result("查询违规记录失败，请稍后重试")
@@ -5815,17 +5982,28 @@ class TmpBotPlugin(Star):
 
         if is_banned:
             banned_until = player_info.get('bannedUntil')
-            if banned_until:
-                expiry = (
-                    "永久"
-                    if str(banned_until).lower().startswith('never')
-                    else _format_timestamp_to_beijing(str(banned_until))
-                )
+            active_ban = next((
+                ban for ban in sorted_bans
+                if ban.get('active') is True
+                or str(ban.get('active')).strip().lower() in {'1', 'true', 'yes'}
+            ), None)
+            if not banned_until and active_ban:
+                banned_until = active_ban.get('expiration')
+            if _is_permanent_ban_expiry(banned_until):
+                expiry = "永久"
+                message += f"当前封禁截止: {expiry}\n"
+            elif _is_hidden_ban_expiry(banned_until):
+                message += "当前封禁截止: 该用户的封禁截止被隐藏\n"
+            else:
+                expiry = _format_timestamp_to_beijing(str(banned_until))
                 message += f"当前封禁截止: {expiry}\n"
 
         if not sorted_bans:
-            message += "\n未查询到公开的违规记录。\n"
-            message += "注：如果玩家隐藏了封禁记录，这里也不会显示。"
+            if is_banned or ban_count > 0:
+                message += "\n该用户的封禁原因被隐藏。"
+            else:
+                message += "\n未查询到公开的违规记录。\n"
+                message += "注：如果玩家隐藏了封禁记录，这里也不会显示。"
             yield event.plain_result(message)
             return
 
@@ -5834,13 +6012,19 @@ class TmpBotPlugin(Star):
             active_raw = ban.get('active')
             active = active_raw is True or str(active_raw).strip().lower() in {'1', 'true', 'yes'}
             added = _format_timestamp_to_beijing(str(ban.get('timeAdded') or ''))
-            reason_raw = str(ban.get('reason') or '未提供原因').strip()
-            reason = self._translate_ban_reason(reason_raw) or reason_raw
+            reason_raw = str(ban.get('reason') or '').strip()
+            reason = (
+                "该用户的封禁原因被隐藏"
+                if not reason_raw or _is_hidden_ban_reason(reason_raw)
+                else self._translate_ban_reason(reason_raw) or reason_raw
+            )
             expiration_raw = str(ban.get('expiration') or '').strip()
-            if not expiration_raw:
-                expiration = "未知"
-            elif expiration_raw.lower().startswith('never'):
+            if active and not expiration_raw:
+                expiration_raw = str(player_info.get('bannedUntil') or '').strip()
+            if _is_permanent_ban_expiry(expiration_raw):
                 expiration = "永久"
+            elif _is_hidden_ban_expiry(expiration_raw):
+                expiration = "该用户的封禁截止被隐藏"
             else:
                 expiration = _format_timestamp_to_beijing(expiration_raw)
             admin_name = str(ban.get('adminName') or '').strip()
@@ -6075,7 +6259,7 @@ class TmpBotPlugin(Star):
       <div id="map-{{ loop.index }}" class="map-canvas"></div>
       <div class="route-legend">
         {% for route in group.routes %}
-        <span class="legend-pill"><i style="background:{{ route.color }}"></i>{% if group.title == route.label %}{{ route.label }}{% else %}{{ group.title }} · {{ route.label }}{% endif %}</span>
+        <span class="legend-pill"><i style="background:{{ route.color|e }}"></i>{% if group.title == route.label %}{{ route.label|e }}{% else %}{{ group.title|e }} · {{ route.label|e }}{% endif %}</span>
         {% endfor %}
       </div>
     </div>
@@ -6084,19 +6268,19 @@ class TmpBotPlugin(Star):
   <div class="panel">
     <div class="profile">
       <div class="avatar-wrap">
-        {% if avatar %}<img class="avatar" src="{{ avatar }}" />{% else %}<div class="avatar-fallback">{{ avatar_initial }}</div>{% endif %}
+        {% if avatar %}<img class="avatar" src="{{ avatar|e }}" />{% else %}<div class="avatar-fallback">{{ avatar_initial|e }}</div>{% endif %}
       </div>
       <div class="profile-copy">
         <div class="profile-kicker">COMBINED DAILY TRACE</div>
         <div class="name-line">
-          <div class="name">{{ player_name }}</div>
+          <div class="name">{{ player_name|e }}</div>
           <span class="name-suffix"> 的今日行驶足迹</span>
         </div>
         <div class="chips">
           {% for route in server_chips %}
-          <span class="chip"><i style="background:{{ route.color }}"></i>{{ route.label }}</span>
+          <span class="chip"><i style="background:{{ route.color|e }}"></i>{{ route.label|e }}</span>
           {% endfor %}
-          <span class="chip">TMP #{{ tmp_id }}</span>
+          <span class="chip">TMP #{{ tmp_id|e }}</span>
         </div>
       </div>
     </div>
@@ -6121,9 +6305,9 @@ class TmpBotPlugin(Star):
   };
   var groups = [
   {% for group in map_groups %}
-    { type:'{{ group.map_type }}', tileUrl:'{{ group.tile_url }}', routes:[
+    { type:{{ group.map_type|tojson }}, tileUrl:{{ group.tile_url|tojson }}, routes:[
       {% for route in group.routes %}
-      { color:'{{ route.color }}', points:[
+      { color:{{ route.color|tojson }}, points:[
         {% for p in route.points %}{axisX:{{ p.axisX }},axisY:{{ p.axisY }},serverId:{{ p.serverId }},heading:{{ p.heading }},ts:{{ p.ts }}}{% if not loop.last %},{% endif %}{% endfor %}
       ] }{% if not loop.last %},{% endif %}
       {% endfor %}
@@ -6373,12 +6557,31 @@ class TmpBotPlugin(Star):
                     plugin_ver = data.get("name") or data.get("version") or "未知"
                     ets2_ver = data.get("supported_game_version") or data.get("supported_ets2_version") or "未知"
                     ats_ver = data.get("supported_ats_game_version") or data.get("supported_ats_version") or "未知"
-                    protocol = data.get("protocol") or "未知"
-                    
-                    message = "TMP 插件版本信息\n" + "=" * 18 + "\n"
-                    message += f"TMP 插件版本: {plugin_ver}\n"
-                    message += f"欧卡支持版本: {ets2_ver}\n"
-                    message += f"美卡支持版本: {ats_ver}"
+                    official = await self._fetch_tmp_official_game_version()
+                    official_ets2 = str(official.get('ets2') or '').strip()
+                    official_display = official_ets2 or '未知'
+                    if official_ets2:
+                        ets2_compatible = '✅' if ets2_ver != '未知' and official_ets2 == str(ets2_ver) else '❌'
+                        official_major_minor = self._tmp_major_minor(official_ets2)
+                        ats_major_minor = self._tmp_major_minor(str(ats_ver))
+                        ats_compatible = (
+                            '✅'
+                            if ats_ver != '未知' and official_major_minor and official_major_minor == ats_major_minor
+                            else '❌'
+                        )
+                    else:
+                        ets2_compatible = '未知'
+                        ats_compatible = '未知'
+
+                    message = (
+                        f"联机插件版本: {plugin_ver}\n"
+                        f"支持欧卡版本: {ets2_ver}\n"
+                        f"支持美卡版本: {ats_ver}\n"
+                        "-----------------------------\n"
+                        f"📊 官方Steam版本: {official_display}\n"
+                        f"🎮 欧卡兼容: {ets2_compatible}\n"
+                        f"🎮 美卡兼容: {ats_compatible}"
+                    )
                     yield event.plain_result(message)
                 else:
                     yield event.plain_result(f"查询版本信息失败，API返回错误状态码: {response.status}")
