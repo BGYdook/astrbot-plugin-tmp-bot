@@ -1,5 +1,5 @@
  # astrbot-plugin-tmp-bot
-[![npm](https://img.shields.io/badge/npm-v1.9.1-blue)](https://github.com/BGYdook/astrbot-plugin-tmp-bot)
+[![npm](https://img.shields.io/badge/npm-v1.9.2-blue)](https://github.com/BGYdook/astrbot-plugin-tmp-bot)
 
 ![:astrbot_plugin_tmp_bot](https://count.getloli.com/@:astrbot_plugin_tmp-bot?theme=minecraft)
 
@@ -58,6 +58,9 @@ https://docs.truckersmp.com/web-api/
 - 修复 查询失败时只查询失败的问题 
 - 修复 当user被永久封禁/被隐藏时显示未知的问题
 - 修复 不翻译封禁后追的//2.x的问题
+- 修复 "足迹"命令无法@user查询的问题
+- 修复 输入(比如足迹s1)时足迹可能把其他服务器的路线编写进当前服务器地图
+- 修改 输入"插件版本"命令后会显示更多内容
 - 修复其他安全问题
 - 删除 启用绑定功能
 - 新增未知问题

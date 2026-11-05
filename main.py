@@ -458,12 +458,12 @@ RANK_IMAGE_TEMPLATE = """
       <div class="brand-mark">TMP</div>
       <div>
         <div class="eyebrow">TRUCKERSMP · ETS2</div>
-        <h1>{{ title }}</h1>
+        <h1>{{ title|e }}</h1>
       </div>
     </div>
     <div class="hero-meta">
       <strong>TOP 10</strong>
-      <span>{{ subtitle }}</span>
+      <span>{{ subtitle|e }}</span>
     </div>
   </header>
 
@@ -472,11 +472,11 @@ RANK_IMAGE_TEMPLATE = """
   <div class="champion">
     <div class="medal">01</div>
     <div class="player">
-      <div class="player-name">{{ items[0].name }}</div>
-      <div class="player-id">TMP ID · {{ items[0].tmp_id }}</div>
+      <div class="player-name">{{ items[0].name|e }}</div>
+      <div class="player-id">TMP ID · {{ items[0].tmp_id|e }}</div>
     </div>
     <div class="mileage">
-      <strong>{{ items[0].km_text }}</strong>
+      <strong>{{ items[0].km_text|e }}</strong>
       <span>KILOMETERS</span>
     </div>
   </div>
@@ -487,19 +487,19 @@ RANK_IMAGE_TEMPLATE = """
     <div class="runner-card silver">
       <div class="medal">02</div>
       <div>
-        <div class="player-name">{{ items[1].name }}</div>
-        <div class="player-id">TMP ID · {{ items[1].tmp_id }}</div>
+        <div class="player-name">{{ items[1].name|e }}</div>
+        <div class="player-id">TMP ID · {{ items[1].tmp_id|e }}</div>
       </div>
-      <div class="mileage"><strong>{{ items[1].km_text }}</strong><span>KM</span></div>
+      <div class="mileage"><strong>{{ items[1].km_text|e }}</strong><span>KM</span></div>
     </div>
     {% if items|length > 2 %}
     <div class="runner-card bronze">
       <div class="medal">03</div>
       <div>
-        <div class="player-name">{{ items[2].name }}</div>
-        <div class="player-id">TMP ID · {{ items[2].tmp_id }}</div>
+        <div class="player-name">{{ items[2].name|e }}</div>
+        <div class="player-id">TMP ID · {{ items[2].tmp_id|e }}</div>
       </div>
-      <div class="mileage"><strong>{{ items[2].km_text }}</strong><span>KM</span></div>
+      <div class="mileage"><strong>{{ items[2].km_text|e }}</strong><span>KM</span></div>
     </div>
     {% endif %}
   </div>
@@ -511,12 +511,12 @@ RANK_IMAGE_TEMPLATE = """
   <div class="rows">
     {% for it in items if it.rank > 3 %}
     <div class="row">
-      <div class="row-rank">{{ '%02d' % it.rank }}</div>
+      <div class="row-rank">{{ '%02d' % it.rank|e }}</div>
       <div>
-        <div class="player-name">{{ it.name }}</div>
-        <div class="player-id">TMP ID · {{ it.tmp_id }}</div>
+        <div class="player-name">{{ it.name|e }}</div>
+        <div class="player-id">TMP ID · {{ it.tmp_id|e }}</div>
       </div>
-      <div class="mileage"><strong>{{ it.km_text }}</strong><span>KM</span></div>
+      <div class="mileage"><strong>{{ it.km_text|e }}</strong><span>KM</span></div>
     </div>
     {% endfor %}
   </div>
@@ -526,19 +526,19 @@ RANK_IMAGE_TEMPLATE = """
   <div class="me-card">
     <div>
       <div class="me-label">MY POSITION</div>
-      <div class="me-name">{{ me.name }}</div>
-      <div class="me-sub">TMP ID · {{ me.tmp_id }}{% if me.vtc_role %} · {{ me.vtc_role }}{% endif %}</div>
+      <div class="me-name">{{ me.name|e }}</div>
+      <div class="me-sub">TMP ID · {{ me.tmp_id|e }}{% if me.vtc_role %} · {{ me.vtc_role|e }}{% endif %}</div>
     </div>
     <div class="me-values">
-      <strong>{{ me.km_text }} KM</strong>
-      <span>{% if me.rank is not none %}RANK #{{ me.rank }}{% else %}{{ scope }}{% endif %}</span>
+      <strong>{{ me.km_text|e }} KM</strong>
+      <span>{% if me.rank is not none %}RANK #{{ me.rank }}{% else %}{{ scope|e }}{% endif %}</span>
     </div>
   </div>
   {% endif %}
 
   <footer class="footer">
     <span><b>LIVE DATA</b> · TRUCKERSMP MILEAGE</span>
-    <span>{{ scope }} · TOP 10</span>
+    <span>{{ scope|e }} · TOP 10</span>
   </footer>
 </div>
 """
@@ -699,6 +699,14 @@ def _is_hidden_ban_reason(value: Any) -> bool:
         'hidden by player', 'hidden by user',
     }
 
+
+def _is_hidden_ban_expiry(value: Any) -> bool:
+    normalized = str(value or '').strip().lower()
+    return not normalized or normalized in {
+        'hidden', 'private', 'not public', 'hidden expiry', 'expiry hidden',
+        'hidden by player', 'hidden by user',
+    }
+
 @register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.9.2", "https://github.com/BGYdook/astrbot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context, config=None):  # 接收 context 和 config
@@ -752,7 +760,17 @@ class TmpBotPlugin(Star):
     # --- 配置读取辅助 ---
     def _cfg_bool(self, key: str, default: bool) -> bool:
         v = self.config.get(key, default)
-        return bool(v) if isinstance(v, (bool, int, str)) else default
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, (int, float)):
+            return bool(v)
+        if isinstance(v, str):
+            normalized = v.strip().lower()
+            if normalized in {'1', 'true', 'yes', 'on', '是', '开启', '启用'}:
+                return True
+            if normalized in {'0', 'false', 'no', 'off', '否', '关闭', '禁用', ''}:
+                return False
+        return default
 
     def _cfg_int(self, key: str, default: int) -> int:
         try:
@@ -977,21 +995,28 @@ class TmpBotPlugin(Star):
     @classmethod
     def _format_tmp_update_message(cls, snapshot: Dict[str, Any]) -> str:
         version = str(snapshot.get('name') or '未知')
-        official_raw = str(snapshot.get('official') or '').strip()
-        official = official_raw or '未知'
+        official_data = snapshot.get('official')
+        if isinstance(official_data, dict):
+            official_ets2_raw = str(official_data.get('ets2') or '').strip()
+        else:
+            # Backward compatibility with update state saved by older versions.
+            official_ets2_raw = str(official_data or '').strip()
+        official_ets2 = official_ets2_raw or '未知'
         ets2 = str(snapshot.get('ets2') or '未知')
         ats = str(snapshot.get('ats') or '未知')
 
-        if not official_raw or official_raw == '未知':
+        if official_ets2 == '未知':
             ets2_ok = '未知'
-            ats_ok = '未知'
         else:
             # 欧卡：官方 Steam 版本必须与 TMP 支持的版本完全一致
-            ets2_ok = '✅' if ets2 != '未知' and official_raw == ets2 else '❌'
-            # 美卡：接口没有单独提供美卡官方版本，按主次版本号（如 1.61）判断
-            official_mm = cls._tmp_major_minor(official_raw)
-            ats_mm = cls._tmp_major_minor(ats)
-            ats_ok = '✅' if ats != '未知' and official_mm and official_mm == ats_mm else '❌'
+            ets2_ok = '✅' if ets2 != '未知' and official_ets2_raw == ets2 else '❌'
+        if official_ets2 == '未知':
+            ats_ok = '未知'
+        else:
+            # ATS shares the major/minor game release with ETS2.
+            ats_mm = cls._tmp_major_minor(official_ets2_raw)
+            supported_ats_mm = cls._tmp_major_minor(ats)
+            ats_ok = '✅' if ats != '未知' and ats_mm and ats_mm == supported_ats_mm else '❌'
 
         return (
             "检测到联机插件有更新!\n"
@@ -999,7 +1024,7 @@ class TmpBotPlugin(Star):
             f"支持欧卡版本: {ets2}\n"
             f"支持美卡版本: {ats}\n"
             "-----------------------------\n"
-            f"📊 官方Steam版本: {official}\n"
+            f"📊 官方Steam版本: {official_ets2}\n"
             f"🎮 欧卡兼容: {ets2_ok}\n"
             f"🎮 美卡兼容: {ats_ok}"
         )
@@ -1202,15 +1227,15 @@ class TmpBotPlugin(Star):
             'api_time': str(data.get('time') or ''),
         }
 
-    async def _fetch_tmp_official_game_version(self) -> str:
-        """获取 Steam 官方游戏版本（欧卡）。
+    async def _fetch_tmp_official_game_version(self) -> Dict[str, str]:
+        """获取 Steam 官方欧卡版本
 
         数据来自插件内置/自定义 API 源的 /other/tmpVersion 接口；
-        该值只用于展示「官方Steam版本」，不参与更新判断。
-        接口不可用时返回空字符串，通知里显示为「未知」。
+        该值只用于通知展示和兼容性提示，不参与 TMP 更新判断。
+        接口不可用时版本留空，通知里显示为「未知」。
         """
         if not self.session:
-            return ''
+            return {'ets2': ''}
         timeout = self._cfg_int('api_timeout_seconds', 10)
         for base in self._api_bases():
             url = f"{base}/other/tmpVersion"
@@ -1229,15 +1254,19 @@ class TmpBotPlugin(Star):
             if code not in (None, 200, '200'):
                 continue
             data = payload.get('data')
-            official = None
+            official_ets2 = None
             if isinstance(data, dict):
-                official = data.get('officialGameVersion')
-            if not official:
-                official = payload.get('officialGameVersion')
-            if official:
-                return str(official)
-        logger.warning("获取官方 Steam 版本失败，通知中将显示为未知")
-        return ''
+                official_ets2 = (
+                    data.get('officialGameVersion')
+                    or data.get('officialEts2GameVersion')
+                    or data.get('officialETS2GameVersion')
+                    or data.get('officialEts2Version')
+                )
+            official_ets2 = official_ets2 or payload.get('officialGameVersion')
+            if official_ets2:
+                return {'ets2': str(official_ets2)}
+        logger.warning("获取官方 Steam 游戏版本失败，通知中显示为未知")
+        return {'ets2': ''}
 
     def _start_tmp_update_task(self) -> None:
         if not self._tmp_update_enabled():
@@ -1362,10 +1391,11 @@ class TmpBotPlugin(Star):
             return
 
         # 官方 Steam 版本只在真正推送时查询，避免每次检测都多请求一次
-        if not snapshot.get('official'):
-            official = await self._fetch_tmp_official_game_version()
-            if official:
-                snapshot['official'] = official
+        official = snapshot.get('official')
+        if not isinstance(official, dict) or not official.get('ets2'):
+            official_versions = await self._fetch_tmp_official_game_version()
+            if official_versions.get('ets2'):
+                snapshot['official'] = official_versions
                 pending['snapshot'] = snapshot
                 self._save_tmp_update_state()
 
@@ -2205,26 +2235,37 @@ class TmpBotPlugin(Star):
             raise NetworkException(f"玩家信息查询失败: {e}") from e
 
     async def _get_player_bans(self, tmp_id: str) -> List[Dict]:
-        if not self.session: return []
+        if not self.session:
+            raise NetworkException("插件初始化中，HTTP会话不可用")
 
         try:
             url = f"https://api.truckersmp.com/v2/bans/{tmp_id}"
             async with self.session.get(url, timeout=10) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    # 兼容：优先取 response，其次直接取 data（防止结构变化）
-                    bans = data.get('response') or data.get('data') or []
-                    if not isinstance(bans, list):
-                        bans = []
-                    # 额外打印完整返回，方便一次性定位
-                    logger.info(f"Bans API 原始返回: {data}")
-                    logger.info(f"Bans API 提取后: keys={list(data.keys())}, count={len(bans)}")
-                    return bans
-                logger.warning(f"Bans API 非200状态: {response.status}")
-                return []
+                if response.status != 200:
+                    raise ApiResponseException(f"封禁 API 返回错误状态码: {response.status}")
+                data = await response.json()
+                if not isinstance(data, dict):
+                    raise ApiResponseException("封禁 API 返回格式异常")
+                if data.get('error'):
+                    detail = data.get('descriptor') or data.get('message') or "未知 API 错误"
+                    raise ApiResponseException(f"封禁 API 查询失败: {detail}")
+
+                bans = data.get('response') if 'response' in data else data.get('data')
+                if not isinstance(bans, list):
+                    raise ApiResponseException("封禁 API 未返回有效的违规记录列表")
+                logger.info(f"Bans API 提取后: keys={list(data.keys())}, count={len(bans)}")
+                return bans
+        except (ApiResponseException, NetworkException):
+            raise
+        except asyncio.TimeoutError as e:
+            logger.error(f"获取玩家封禁超时: {e}", exc_info=False)
+            raise NetworkException("封禁 API 请求超时") from e
+        except aiohttp.ClientError as e:
+            logger.error(f"获取玩家封禁网络失败: {e}", exc_info=False)
+            raise NetworkException("封禁 API 网络请求失败") from e
         except Exception as e:
             logger.error(f"获取玩家封禁失败: {e}", exc_info=False)
-            return []
+            raise NetworkException(f"封禁记录查询失败: {e}") from e
 
     async def _resolve_tmp_id_for_user_command(
         self,
@@ -2949,21 +2990,46 @@ class TmpBotPlugin(Star):
             except Exception:
                 return None
 
-        def _collect_points_from_list(items: List[Any]) -> List[Dict[str, float]]:
-            pts: List[Dict[str, float]] = []
-            for it in items:
-                p = _point_from_item(it)
-                if p:
-                    pts.append(p)
-            return pts
+        def _server_value(item: Any) -> Optional[str]:
+            if not isinstance(item, dict):
+                return None
+            for field in ('serverId', 'server_id', 'server'):
+                if field not in item or item.get(field) is None:
+                    continue
+                value = str(item.get(field)).strip().lower()
+                if value:
+                    return value
+            return None
 
         def _match_server(item: Dict[str, Any]) -> bool:
-            sid = str(item.get('serverId') or item.get('server_id') or item.get('server') or '').strip().lower()
+            sid = _server_value(item)
             if not sid:
                 return False
-            if sid == key:
-                return True
-            return sid in ids
+            return sid == key or sid in ids
+
+        def _collect_points_from_list(items: List[Any]) -> List[Dict[str, float]]:
+            """Collect direct points while excluding points from other servers.
+
+            Some sources return a mixed flat list and others return a pure point
+            list after the server has already been selected by the request. In
+            the former case, the presence of a non-zero server id makes the
+            filter authoritative; in the latter case all points are retained.
+            """
+            point_items = [(it, _point_from_item(it)) for it in items]
+            point_items = [(it, point) for it, point in point_items if point]
+            if not point_items:
+                return []
+
+            server_values = {
+                sid for it, _ in point_items
+                if (sid := _server_value(it)) and sid not in {'0', 'none', 'null'}
+            }
+            if server_values:
+                return [
+                    point for it, point in point_items
+                    if _match_server(it)
+                ]
+            return [point for _, point in point_items]
 
         def _find_points(obj: Any, depth: int = 0) -> Tuple[List[Dict[str, float]], Dict[str, Any]]:
             if depth > 5:
@@ -2977,12 +3043,24 @@ class TmpBotPlugin(Star):
                         pts2, meta2 = _find_points(it, depth + 1)
                         if pts2:
                             return pts2, meta2 or it
+                # A server-tagged group that does not match the requested
+                # server must not be searched recursively, otherwise its
+                # nested points would leak into the current route.
                 for it in obj:
+                    if isinstance(it, dict) and _server_value(it) and not _match_server(it):
+                        continue
                     pts2, meta2 = _find_points(it, depth + 1)
                     if pts2:
                         return pts2, meta2
                 return [], {}
             if isinstance(obj, dict):
+                container_server = _server_value(obj)
+                if (
+                    container_server
+                    and container_server not in {'0', 'none', 'null'}
+                    and not _match_server(obj)
+                ):
+                    return [], {}
                 for k in ['points', 'track', 'tracks', 'list', 'route', 'path', 'data', 'response', 'result', 'items']:
                     if k in obj:
                         pts2, meta2 = _find_points(obj.get(k), depth + 1)
@@ -3970,6 +4048,8 @@ class TmpBotPlugin(Star):
                 
                 if _is_permanent_ban_expiry(ban_expiration):
                     body += f"🚫封禁截止: 永久封禁\n"
+                elif _is_hidden_ban_expiry(ban_expiration):
+                    body += "🚫封禁截止: 该用户的封禁截止被隐藏\n"
                 else:
                     body += f"🚫封禁截止: {_format_timestamp_to_beijing(ban_expiration)}\n"
                     
@@ -3977,6 +4057,8 @@ class TmpBotPlugin(Star):
                 body += f"🚫封禁原因: 该用户的封禁原因被隐藏\n"
                 if _is_permanent_ban_expiry(banned_until_main):
                     body += f"🚫封禁截止: 永久封禁\n"
+                elif _is_hidden_ban_expiry(banned_until_main):
+                    body += "🚫封禁截止: 该用户的封禁截止被隐藏\n"
                 else:
                     body += f"🚫封禁截止: {_format_timestamp_to_beijing(banned_until_main)}\n"
         
@@ -4086,15 +4168,15 @@ class TmpBotPlugin(Star):
   <div style=\"font-size:20px;font-weight:600;margin:0;padding:12px 0 8px 0;\">DLC 列表</div>
   {% for it in items %}
   <div style=\"display:flex;flex-direction:row;background:#24313a;margin:0 0 12px 0;padding:12px;\">
-    <img src=\"{{ it.headerImageUrl }}\" style=\"width:210px;height:auto;object-fit:cover;\"/>
+    <img src=\"{{ it.headerImageUrl|e }}\" style=\"width:210px;height:auto;object-fit:cover;\"/>
     <div style=\"flex:1;padding:0 12px;\">
-      <div style=\"font-size:18px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;\">{{ it.name }}</div>
-      <div style=\"font-size:14px;color:#e5e5e5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-overflow:ellipsis;\">{{ it.desc }}</div>
+      <div style=\"font-size:18px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;\">{{ it.name|e }}</div>
+      <div style=\"font-size:14px;color:#e5e5e5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-overflow:ellipsis;\">{{ it.desc|e }}</div>
       <div style=\"margin-top:8px;\">
-        <span style=\"display:inline-block;color:#BEEE11;font-size:16px;\">{{ it.price_str }}</span>
+        <span style=\"display:inline-block;color:#BEEE11;font-size:16px;\">{{ it.price_str|e }}</span>
         {% if it.discount and it.discount > 0 %}
-        <span style=\"display:inline-block;color:#cbcbcb;font-size:16px;text-decoration:line-through;margin-left:6px;\">{{ it.original_price_str }}</span>
-        <span style=\"font-size:14px;color:#BEEE11;background:#4c6b22;padding:2px 6px;margin-left:4px;\">-{{ it.discount }}%</span>
+        <span style=\"display:inline-block;color:#cbcbcb;font-size:16px;text-decoration:line-through;margin-left:6px;\">{{ it.original_price_str|e }}</span>
+        <span style=\"font-size:14px;color:#BEEE11;background:#4c6b22;padding:2px 6px;margin-left:4px;\">-{{ it.discount|e }}%</span>
         {% endif %}
       </div>
     </div>
@@ -4163,6 +4245,7 @@ class TmpBotPlugin(Star):
         user_id = event.get_sender_id()
 
         target_user_id = None
+        message_text_parts = []
         message_obj = getattr(event, "message_obj", None)
         if message_obj is not None:
             try:
@@ -4171,25 +4254,37 @@ class TmpBotPlugin(Star):
                     seg_type = getattr(seg, "type", None)
                     if isinstance(seg, dict):
                         seg_type = seg.get("type") or seg_type
-                    if isinstance(seg_type, str) and seg_type.lower() == "at":
+                    seg_data = getattr(seg, "data", None)
+                    if isinstance(seg, dict):
+                        seg_data = seg.get("data") or seg_data
+                    if not isinstance(seg_data, dict):
+                        seg_data = {}
+                    normalized_type = str(seg_type or "").lower()
+                    if normalized_type == "at":
                         uid = (
                             getattr(seg, "qq", None)
                             or getattr(seg, "user_id", None)
                             or getattr(seg, "id", None)
+                            or seg_data.get("qq")
+                            or seg_data.get("user_id")
+                            or seg_data.get("id")
                         )
                         if isinstance(seg, dict):
                             uid = seg.get("qq") or seg.get("user_id") or seg.get("id") or uid
                         if uid:
                             target_user_id = str(uid)
-                            break
-                    uid2 = getattr(seg, "qq", None)
-                    if isinstance(seg, dict):
-                        uid2 = seg.get("qq") or uid2
-                    if uid2:
-                        target_user_id = str(uid2)
-                        break
+                        continue
+                    if normalized_type in {"text", "plain"} or isinstance(seg_data.get("text"), str):
+                        text_value = getattr(seg, "text", None) or seg_data.get("text")
+                        if isinstance(seg, dict):
+                            text_value = seg_data.get("text") or seg.get("text") or text_value
+                        if text_value is not None:
+                            message_text_parts.append(str(text_value))
             except Exception:
                 target_user_id = None
+                message_text_parts = []
+        if message_text_parts:
+            message_str = "".join(message_text_parts).strip()
 
         server_alias = {
             "s1": "sim1",
@@ -4612,20 +4707,20 @@ class TmpBotPlugin(Star):
     <div class="profile">
       <div class="avatar-wrap">
         {% if avatar %}
-        <img class="avatar" src="{{ avatar }}" />
+        <img class="avatar" src="{{ avatar|e }}" />
         {% else %}
-        <div class="avatar-fallback">{{ avatar_initial }}</div>
+        <div class="avatar-fallback">{{ avatar_initial|e }}</div>
         {% endif %}
       </div>
       <div class="profile-copy">
         <div class="profile-kicker">DRIVER JOURNEY</div>
         <div class="name-line">
-          <div class="name">{{ player_name }}</div>
+          <div class="name">{{ player_name|e }}</div>
           <span class="name-suffix"> 的今日行驶足迹</span>
         </div>
         <div class="chips">
-          <span class="chip server">{{ server_label }}</span>
-          <span class="chip">TMP #{{ tmp_id }}</span>
+          <span class="chip server">{{ server_label|e }}</span>
+          <span class="chip">TMP #{{ tmp_id|e }}</span>
         </div>
       </div>
     </div>
@@ -4638,10 +4733,10 @@ class TmpBotPlugin(Star):
   </div>
 </div>
 <script>
-  var mapType = "{{ map_type }}";
+  var mapType = {{ map_type|tojson }};
   var cfg = {
     ets: {
-      tileUrl: '{{ tile_url_ets }}',
+      tileUrl: {{ tile_url_ets|tojson }},
       fallbackUrl: 'https://ets_tiles.cnly.top/20260903/tmp-ets-yellow/Tiles/{z}/{x}/{y}.png',
       multipliers: { x: 70272, y: 76157 },
       breakpoints: { uk: { x: -31056.8, y: -5832.867 } },
@@ -4652,7 +4747,7 @@ class TmpBotPlugin(Star):
       }
     },
     promods: {
-      tileUrl: '{{ tile_url_promods }}',
+      tileUrl: {{ tile_url_promods|tojson }},
       fallbackUrl: 'https://ets2.online/map/ets2mappromods_156/{z}/{x}/{y}.png',
       multipliers: { x: 51953, y: 76024 },
       breakpoints: { uk: { x: -31056.8, y: -5832.867 } },
@@ -4679,7 +4774,7 @@ class TmpBotPlugin(Star):
     tileLayer = L.tileLayer(c.fallbackUrl, { minZoom: c.minZoom, maxZoom: 10, maxNativeZoom: c.maxZoom, tileSize: 512, bounds: b, reuseTiles: true }).addTo(map);
   });
   map.setMaxBounds(b);
-  var points = [ {% for p in points %}{ axisX: {{ p.axisX }}, axisY: {{ p.axisY }}, serverId: {{ p.serverId }}, heading: {{ p.heading }}, ts: {{ p.ts }} }{% if not loop.last %}, {% endif %}{% endfor %} ];
+  var points = {{ points|tojson }};
   points = points.filter(function(p){ return !(p.axisX === 0 && p.axisY === 0 && p.heading === 0); });
   var lines = [];
   var currentLine = [];
@@ -5215,26 +5310,26 @@ class TmpBotPlugin(Star):
   <div id=\"map\"></div>
   <div class=\"map-shade\"></div>
   <div class=\"live-pill\"><span class=\"live-dot\"></span>LIVE POSITION</div>
-  <div class=\"server-pill\">{{ server_name }} · 游戏中</div>
+  <div class=\"server-pill\">{{ server_name|e }} · 游戏中</div>
   <div class=\"panel\">
     <div class=\"profile\">
       <div class=\"avatar-wrap\">
-        {% if avatar %}<img class=\"avatar\" src=\"{{ avatar }}\" />{% else %}<div class=\"avatar-fallback\">{{ avatar_initial }}</div>{% endif %}
+        {% if avatar %}<img class=\"avatar\" src=\"{{ avatar|e }}\" />{% else %}<div class=\"avatar-fallback\">{{ avatar_initial|e }}</div>{% endif %}
       </div>
       <div class=\"profile-copy\">
         <div class=\"profile-kicker\">DRIVER LOCATION</div>
-        <div class=\"name\">{{ player_name }}</div>
+        <div class=\"name\">{{ player_name|e }}</div>
         <div class=\"chips\">
-          <span class=\"chip server\">{{ server_name }}</span>
-          <span class=\"chip\">TMP #{{ me_id }}</span>
-          <span class=\"chip\">附近 {{ nearby_count }} 人</span>
+          <span class=\"chip server\">{{ server_name|e }}</span>
+          <span class=\"chip\">TMP #{{ me_id|e }}</span>
+          <span class=\"chip\">附近 {{ nearby_count|e }} 人</span>
         </div>
       </div>
     </div>
     <div class=\"location-card\">
       <div class=\"location-label\">当前位置</div>
-      <div class=\"location-value\">{{ location_line }}</div>
-      {% if direction_text %}<div class=\"direction\">{{ direction_text }}</div>{% endif %}
+      <div class=\"location-value\">{{ location_line|e }}</div>
+      {% if direction_text %}<div class=\"direction\">{{ direction_text|e }}</div>{% endif %}
     </div>
   </div>
 </div>
@@ -5244,7 +5339,7 @@ class TmpBotPlugin(Star):
   var mapType = promodsIds.indexOf(serverId) !== -1 ? 'promods' : 'ets';
   var cfg = {
     ets: {
-      tileUrl: '{{ tile_url_ets }}',
+      tileUrl: {{ tile_url_ets|tojson }},
       fallbackUrl: 'https://ets2.online/map/ets2map_158/{z}/{x}/{y}.png',
       multipliers: { x: 70272, y: 76157 },
       breakpoints: { uk: { x: -31056.8, y: -5832.867 } },
@@ -5255,7 +5350,7 @@ class TmpBotPlugin(Star):
       }
     },
     promods: {
-      tileUrl: '{{ tile_url_promods }}',
+      tileUrl: {{ tile_url_promods|tojson }},
       fallbackUrl: 'https://ets2.online/map/ets2mappromods_158/{z}/{x}/{y}.png',
       multipliers: { x: 51953, y: 76024 },
       breakpoints: { uk: { x: -31056.8, y: -5832.867 } },
@@ -5284,10 +5379,10 @@ class TmpBotPlugin(Star):
   map.setMaxBounds(b);
   var centerX = {{ center_x }};
   var centerY = {{ center_y }};
-  var players = [ {% for p in players %}{ axisX: {{ p.axisX }}, axisY: {{ p.axisY }}, tmpId: "{{ p.tmpId }}" }{% if not loop.last %}, {% endif %}{% endfor %} ];
+  var players = [{% for p in players %}{ axisX: {{ p.axisX }}, axisY: {{ p.axisY }}, tmpId: {{ p.tmpId|tojson }} }{% if not loop.last %}, {% endif %}{% endfor %}];
   for (var i=0;i<players.length;i++){
     var p = players[i];
-    if (p.tmpId === '{{ me_id }}') continue;
+    if (p.tmpId === {{ me_id|tojson }}) continue;
     var xy = c.calc(p.axisX, p.axisY);
     var latlng = map.unproject(xy, c.maxZoom);
     L.circleMarker(latlng, { color:'#c9f3ff', weight:1, opacity:.5, fillColor:'#69bce8', fillOpacity:.72, radius:4 }).addTo(map);
@@ -5830,6 +5925,9 @@ class TmpBotPlugin(Star):
         except NetworkException as exc:
             yield event.plain_result(f"查询违规记录失败: {exc}")
             return
+        except ApiResponseException as exc:
+            yield event.plain_result(f"查询违规记录失败: {exc}")
+            return
         except Exception as exc:
             logger.error(f"查询玩家 {tmp_id} 违规记录失败: {exc}", exc_info=True)
             yield event.plain_result("查询违规记录失败，请稍后重试")
@@ -5861,10 +5959,10 @@ class TmpBotPlugin(Star):
             if _is_permanent_ban_expiry(banned_until):
                 expiry = "永久"
                 message += f"当前封禁截止: {expiry}\n"
-            elif banned_until:
-                expiry = (
-                    _format_timestamp_to_beijing(str(banned_until))
-                )
+            elif _is_hidden_ban_expiry(banned_until):
+                message += "当前封禁截止: 该用户的封禁截止被隐藏\n"
+            else:
+                expiry = _format_timestamp_to_beijing(str(banned_until))
                 message += f"当前封禁截止: {expiry}\n"
 
         if not sorted_bans:
@@ -5892,8 +5990,8 @@ class TmpBotPlugin(Star):
                 expiration_raw = str(player_info.get('bannedUntil') or '').strip()
             if _is_permanent_ban_expiry(expiration_raw):
                 expiration = "永久"
-            elif not expiration_raw:
-                expiration = "未知"
+            elif _is_hidden_ban_expiry(expiration_raw):
+                expiration = "该用户的封禁截止被隐藏"
             else:
                 expiration = _format_timestamp_to_beijing(expiration_raw)
             admin_name = str(ban.get('adminName') or '').strip()
@@ -6128,7 +6226,7 @@ class TmpBotPlugin(Star):
       <div id="map-{{ loop.index }}" class="map-canvas"></div>
       <div class="route-legend">
         {% for route in group.routes %}
-        <span class="legend-pill"><i style="background:{{ route.color }}"></i>{% if group.title == route.label %}{{ route.label }}{% else %}{{ group.title }} · {{ route.label }}{% endif %}</span>
+        <span class="legend-pill"><i style="background:{{ route.color|e }}"></i>{% if group.title == route.label %}{{ route.label|e }}{% else %}{{ group.title|e }} · {{ route.label|e }}{% endif %}</span>
         {% endfor %}
       </div>
     </div>
@@ -6137,19 +6235,19 @@ class TmpBotPlugin(Star):
   <div class="panel">
     <div class="profile">
       <div class="avatar-wrap">
-        {% if avatar %}<img class="avatar" src="{{ avatar }}" />{% else %}<div class="avatar-fallback">{{ avatar_initial }}</div>{% endif %}
+        {% if avatar %}<img class="avatar" src="{{ avatar|e }}" />{% else %}<div class="avatar-fallback">{{ avatar_initial|e }}</div>{% endif %}
       </div>
       <div class="profile-copy">
         <div class="profile-kicker">COMBINED DAILY TRACE</div>
         <div class="name-line">
-          <div class="name">{{ player_name }}</div>
+          <div class="name">{{ player_name|e }}</div>
           <span class="name-suffix"> 的今日行驶足迹</span>
         </div>
         <div class="chips">
           {% for route in server_chips %}
-          <span class="chip"><i style="background:{{ route.color }}"></i>{{ route.label }}</span>
+          <span class="chip"><i style="background:{{ route.color|e }}"></i>{{ route.label|e }}</span>
           {% endfor %}
-          <span class="chip">TMP #{{ tmp_id }}</span>
+          <span class="chip">TMP #{{ tmp_id|e }}</span>
         </div>
       </div>
     </div>
@@ -6174,9 +6272,9 @@ class TmpBotPlugin(Star):
   };
   var groups = [
   {% for group in map_groups %}
-    { type:'{{ group.map_type }}', tileUrl:'{{ group.tile_url }}', routes:[
+    { type:{{ group.map_type|tojson }}, tileUrl:{{ group.tile_url|tojson }}, routes:[
       {% for route in group.routes %}
-      { color:'{{ route.color }}', points:[
+      { color:{{ route.color|tojson }}, points:[
         {% for p in route.points %}{axisX:{{ p.axisX }},axisY:{{ p.axisY }},serverId:{{ p.serverId }},heading:{{ p.heading }},ts:{{ p.ts }}}{% if not loop.last %},{% endif %}{% endfor %}
       ] }{% if not loop.last %},{% endif %}
       {% endfor %}
@@ -6426,12 +6524,31 @@ class TmpBotPlugin(Star):
                     plugin_ver = data.get("name") or data.get("version") or "未知"
                     ets2_ver = data.get("supported_game_version") or data.get("supported_ets2_version") or "未知"
                     ats_ver = data.get("supported_ats_game_version") or data.get("supported_ats_version") or "未知"
-                    protocol = data.get("protocol") or "未知"
-                    
-                    message = "TMP 插件版本信息\n" + "=" * 18 + "\n"
-                    message += f"TMP 插件版本: {plugin_ver}\n"
-                    message += f"欧卡支持版本: {ets2_ver}\n"
-                    message += f"美卡支持版本: {ats_ver}"
+                    official = await self._fetch_tmp_official_game_version()
+                    official_ets2 = str(official.get('ets2') or '').strip()
+                    official_display = official_ets2 or '未知'
+                    if official_ets2:
+                        ets2_compatible = '✅' if ets2_ver != '未知' and official_ets2 == str(ets2_ver) else '❌'
+                        official_major_minor = self._tmp_major_minor(official_ets2)
+                        ats_major_minor = self._tmp_major_minor(str(ats_ver))
+                        ats_compatible = (
+                            '✅'
+                            if ats_ver != '未知' and official_major_minor and official_major_minor == ats_major_minor
+                            else '❌'
+                        )
+                    else:
+                        ets2_compatible = '未知'
+                        ats_compatible = '未知'
+
+                    message = (
+                        f"联机插件版本: {plugin_ver}\n"
+                        f"支持欧卡版本: {ets2_ver}\n"
+                        f"支持美卡版本: {ats_ver}\n"
+                        "-----------------------------\n"
+                        f"📊 官方Steam版本: {official_display}\n"
+                        f"🎮 欧卡兼容: {ets2_compatible}\n"
+                        f"🎮 美卡兼容: {ats_compatible}"
+                    )
                     yield event.plain_result(message)
                 else:
                     yield event.plain_result(f"查询版本信息失败，API返回错误状态码: {response.status}")
