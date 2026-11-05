@@ -3,7 +3,7 @@
 
 """
 astrbot-plugin-tmp-bot
-欧卡2TMP查询插件 (版本 1.9.1)
+欧卡2TMP查询插件 (版本 1.9.2)
 """
 
 import re
@@ -591,23 +591,13 @@ def _format_timestamp_to_beijing(timestamp_str: Optional[str]) -> str:
         return "永久封禁"
 
     try:
-        clean_str = s.replace('T', ' ').split('.')[0].replace('Z', '')
-        dt_utc = datetime.strptime(clean_str, '%Y-%m-%d %H:%M:%S')
-        dt_bj = dt_utc + timedelta(hours=8)
-        return dt_bj.strftime('%Y-%m-%d %H:%M:%S')
-    except Exception:
-        try:
-            # ISO 8601 with timezone offset, e.g. 2025-12-01T07:55:00+00:00
-            iso = s.replace('Z', '+00:00')
-            dt = datetime.fromisoformat(iso)
-            dt_bj = (
-                dt.astimezone(BEIJING_TZ)
-                if dt.tzinfo is not None
-                else dt.replace(tzinfo=BEIJING_TZ)
-            )
-            return dt_bj.strftime('%Y-%m-%d %H:%M:%S')
-        except Exception:
-            return s
+        iso = s.replace('Z', '+00:00')
+        dt = datetime.fromisoformat(iso)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(BEIJING_TZ).strftime('%Y-%m-%d %H:%M:%S')
+    except (TypeError, ValueError):
+        return s
 
 def _normalize_heading_to_direction(heading: Any) -> Optional[str]:
     """把角度值转换为方向字符串，如 0°≈北、90°≈东，并附带箭头符号。"""
@@ -696,7 +686,20 @@ class ApiResponseException(TmpApiException):
     """API响应异常"""
     pass
 
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.9.1", "https://github.com/BGYdook/astrbot-plugin-tmp-bot")
+
+def _is_permanent_ban_expiry(value: Any) -> bool:
+    normalized = str(value or '').strip().lower()
+    return normalized.startswith(('never', 'permanent', 'forever')) or normalized in {'永久', '永久封禁'}
+
+
+def _is_hidden_ban_reason(value: Any) -> bool:
+    normalized = str(value or '').strip().lower()
+    return normalized in {
+        'hidden', 'private', 'not public', 'hidden reason', 'reason hidden',
+        'hidden by player', 'hidden by user',
+    }
+
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.9.2", "https://github.com/BGYdook/astrbot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context, config=None):  # 接收 context 和 config
         super().__init__(context)              # 将 context 传给父类
@@ -829,7 +832,7 @@ class TmpBotPlugin(Star):
         # 使用 IPv4 优先的连接器，并允许读取环境代理设置（与浏览器/系统行为更一致）
         connector = aiohttp.TCPConnector(family=socket.AF_INET)
         self.session = aiohttp.ClientSession(
-            headers={'User-Agent': 'astrBot-TMP-Plugin/1.9.1'}, 
+            headers={'User-Agent': 'astrBot-TMP-Plugin/1.9.2'}, 
             timeout=aiohttp.ClientTimeout(total=timeout_sec),
             connector=connector,
             trust_env=True
@@ -2176,21 +2179,30 @@ class TmpBotPlugin(Star):
             async with self.session.get(url, timeout=10) as response:
                 if response.status == 200:
                     data = await response.json()
+                    if not isinstance(data, dict):
+                        raise ApiResponseException("玩家信息 API 返回格式异常")
+                    if data.get('error'):
+                        descriptor = str(data.get('descriptor') or data.get('message') or '').strip()
+                        if 'not found' in descriptor.lower() or 'unable to find' in descriptor.lower():
+                            raise PlayerNotFoundException("此TMPID不存在，请检查后重试")
+                        raise ApiResponseException(descriptor or "TruckersMP 玩家信息查询失败")
                     response_data = data.get('response')
                     if response_data and isinstance(response_data, dict):
                         return response_data
-                    raise PlayerNotFoundException(f"玩家 {tmp_id} 不存在") 
+                    raise PlayerNotFoundException("此TMPID不存在，请检查后重试")
                 elif response.status == 404:
-                    raise PlayerNotFoundException(f"玩家 {tmp_id} 不存在")
+                    raise PlayerNotFoundException("此TMPID不存在，请检查后重试")
                 else:
                     raise ApiResponseException(f"API返回错误状态码: {response.status}")
+        except (PlayerNotFoundException, ApiResponseException, NetworkException):
+            raise
         except aiohttp.ClientError:
             raise NetworkException("TruckersMP API 网络请求失败")
         except asyncio.TimeoutError:
             raise NetworkException("请求TruckersMP API超时")
         except Exception as e:
             logger.error(f"查询玩家信息失败: {e}")
-            raise NetworkException("查询失败")
+            raise NetworkException(f"玩家信息查询失败: {e}") from e
 
     async def _get_player_bans(self, tmp_id: str) -> List[Dict]:
         if not self.session: return []
@@ -2383,7 +2395,6 @@ class TmpBotPlugin(Star):
                 async with self.session.get(
                     vtcm_stats_url,
                     timeout=self._cfg_int('api_timeout_seconds', 10),
-                    ssl=False,
                     allow_redirects=True
                 ) as response:
                     if response.status != 200:
@@ -3113,7 +3124,7 @@ class TmpBotPlugin(Star):
             try:
                 url = f"{base}/vtc/history?tmpId={tmp_id}"
                 logger.info(f"VTC历史: {base} -> {url}")
-                async with self.session.get(url, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
+                async with self.session.get(url, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
                     if resp.status == 200:
                         data = await resp.json()
                         items = data.get('data') or data.get('response') or []
@@ -3153,7 +3164,7 @@ class TmpBotPlugin(Star):
                 # 获取 VTC 信息以获取角色 ID
                 vtc_info_url = f"https://api.truckersmp.com/v2/vtc/{vtc_id}"
                 logger.info(f"官方VTC查询: 获取VTC信息 {vtc_info_url}")
-                async with self.session.get(vtc_info_url, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
+                async with self.session.get(vtc_info_url, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
                     if resp.status == 200:
                         vtc_data = await resp.json()
                         if vtc_data.get('error') is False:
@@ -3167,7 +3178,7 @@ class TmpBotPlugin(Star):
                                         # 获取角色详细信息
                                         role_url = f"https://api.truckersmp.com/v2/vtc/{vtc_id}/role/{role_id}"
                                         logger.info(f"官方VTC角色查询: {role_url}")
-                                        async with self.session.get(role_url, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as role_resp:
+                                        async with self.session.get(role_url, timeout=self._cfg_int('api_timeout_seconds', 10)) as role_resp:
                                             if role_resp.status == 200:
                                                 role_data = await role_resp.json()
                                                 if role_data.get('error') is False:
@@ -3217,7 +3228,7 @@ class TmpBotPlugin(Star):
                 try:
                     url_vid = f"{base}/vtc/memberAll/role?vtcId={vtc_id}"
                     logger.info(f"VTC 角色查询: 使用 vtcId 查询 {url_vid}")
-                    async with self.session.get(url_vid, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
+                    async with self.session.get(url_vid, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
                         if resp.status == 200:
                             data = await resp.json()
                             members = data.get('data') or data.get('response') or []
@@ -3235,7 +3246,7 @@ class TmpBotPlugin(Star):
             try:
                 url_tmp = f"{base}/vtc/memberAll/role?tmpId={tmp_id}"
                 logger.info(f"VTC 角色查询: 回退尝试 tmpId 查询 {url_tmp}")
-                async with self.session.get(url_tmp, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
+                async with self.session.get(url_tmp, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
                     if resp.status == 200:
                         data = await resp.json()
                         members = data.get('data') or data.get('response') or []
@@ -3256,7 +3267,7 @@ class TmpBotPlugin(Star):
                     qname = quote_plus(str(vtc_name))
                     search_url = f"{base}/vtc/search?name={qname}"
                     logger.info(f"VTC 车队搜索: {search_url}")
-                    async with self.session.get(search_url, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
+                    async with self.session.get(search_url, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
                         if resp.status == 200:
                             data = await resp.json()
                             items = data.get('data') or data.get('response') or []
@@ -3276,7 +3287,7 @@ class TmpBotPlugin(Star):
                     try:
                         url_vid2 = f"{base}/vtc/memberAll/role?vtcId={vtc_id}"
                         logger.info(f"VTC 角色查询: 通过搜索得到 vtcId 后查询 {url_vid2}")
-                        async with self.session.get(url_vid2, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
+                        async with self.session.get(url_vid2, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
                             if resp.status == 200:
                                 data = await resp.json()
                                 members = data.get('data') or data.get('response') or []
@@ -3297,7 +3308,7 @@ class TmpBotPlugin(Star):
                     qname = quote_plus(str(vtc_name))
                     url_name = f"{base}/vtc/memberAll/role?vtcName={qname}"
                     logger.info(f"VTC 最后回退: 通过 vtcName 查询 {url_name}")
-                    async with self.session.get(url_name, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
+                    async with self.session.get(url_name, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
                         if resp.status == 200:
                             data = await resp.json()
                             members = data.get('data') or data.get('response') or []
@@ -3328,7 +3339,7 @@ class TmpBotPlugin(Star):
 
         支持多段原因，例如：
         输入："§2.2 - Collisions, §2.5 - Reckless Driving - https://youtu.be/xxx // 30 days due to history (§2.8)"
-        输出："§2.2 - 碰撞, §2.5 - 鲁莽驾驶 - https://youtu.be/xxx // 30天（§2.8历史）"（保留原样的链接与说明）
+        输出："§2.2 - 碰撞, §2.5 - 鲁莽驾驶 - https://youtu.be/xxx // 因历史违规追加30天 (§2.8 历史原因)"
         """
         if not reason or not isinstance(reason, str):
             return reason or ""
@@ -3383,6 +3394,27 @@ class TmpBotPlugin(Star):
         for en, zh in keyword_map.items():
             pattern = r"\b" + re.escape(en) + r"\b"
             result = re.sub(pattern, zh, result, flags=re.IGNORECASE)
+
+        duration_units = {
+            'day': '天',
+            'week': '周',
+            'month': '个月',
+            'year': '年',
+        }
+
+        def _translate_history_duration(match: re.Match) -> str:
+            amount = match.group('amount')
+            unit = match.group('unit').lower().rstrip('s')
+            return f"因历史违规追加{amount}{duration_units[unit]}"
+
+        result = re.sub(
+            r"\b(?P<amount>\d+)\s+(?P<unit>days?|weeks?|months?|years?)\s+due\s+to\s+history\b",
+            _translate_history_duration,
+            result,
+            flags=re.IGNORECASE,
+        )
+        result = re.sub(r"\bdue\s+to\s+history\b", "因历史违规", result, flags=re.IGNORECASE)
+        result = re.sub(r"§\s*2\.8(?!\s*-)", "§2.8 历史原因", result, flags=re.IGNORECASE)
 
         return result
 
@@ -3742,7 +3774,7 @@ class TmpBotPlugin(Star):
             
         steam_id_to_display = self._get_steam_id_from_player_info(player_info)
         is_banned = player_info.get('banned', False) 
-        banned_until_main = player_info.get('bannedUntil', '永久/未知') 
+        banned_until_main = player_info.get('bannedUntil')
         
         ban_count, sorted_bans = self._format_ban_info(bans_info)
         bans_count_raw = player_info.get('bansCount')
@@ -3917,25 +3949,33 @@ class TmpBotPlugin(Star):
             
             current_ban = None
             if sorted_bans:
-                current_ban = next((ban for ban in sorted_bans if ban.get('active')), None)
+                current_ban = next((
+                    ban for ban in sorted_bans
+                    if ban.get('active') is True
+                    or str(ban.get('active')).strip().lower() in {'1', 'true', 'yes'}
+                ), None)
                 if not current_ban:
                     current_ban = sorted_bans[0]
                     
             if current_ban:
-                ban_reason_raw = current_ban.get('reason', '未知封禁原因 (API V2)')
-                ban_reason = self._translate_ban_reason(ban_reason_raw)
-                ban_expiration = current_ban.get('expiration', banned_until_main) 
+                ban_reason_raw = str(current_ban.get('reason') or '').strip()
+                ban_reason = (
+                    "该用户的封禁原因被隐藏"
+                    if not ban_reason_raw or _is_hidden_ban_reason(ban_reason_raw)
+                    else self._translate_ban_reason(ban_reason_raw)
+                )
+                ban_expiration = current_ban.get('expiration') or banned_until_main
                 
                 body += f"🚫封禁原因: {ban_reason}\n"
                 
-                if ban_expiration and isinstance(ban_expiration, str) and ban_expiration.lower().startswith('never'):
+                if _is_permanent_ban_expiry(ban_expiration):
                     body += f"🚫封禁截止: 永久封禁\n"
                 else:
                     body += f"🚫封禁截止: {_format_timestamp_to_beijing(ban_expiration)}\n"
                     
             else:
-                body += f"🚫封禁原因: 隐藏\n"
-                if banned_until_main and isinstance(banned_until_main, str) and banned_until_main.lower().startswith('never'):
+                body += f"🚫封禁原因: 该用户的封禁原因被隐藏\n"
+                if _is_permanent_ban_expiry(banned_until_main):
                     body += f"🚫封禁截止: 永久封禁\n"
                 else:
                     body += f"🚫封禁截止: {_format_timestamp_to_beijing(banned_until_main)}\n"
@@ -4362,7 +4402,7 @@ class TmpBotPlugin(Star):
             if history_points:
                 points = self._normalize_history_points(history_points)
                 meta = {'source': 'playerHistory', 'startTime': range_start, 'endTime': range_end}
-            elif not _silent_empty:
+            else:
                 logger.info("足迹历史为空，开始回退足迹接口")
                 footprint_resp = await self._get_footprint_data(server_key, tmp_id, server_ids)
                 points, meta = self._extract_footprint_points(footprint_resp.get('data'), server_key, server_ids)
@@ -4374,10 +4414,6 @@ class TmpBotPlugin(Star):
                         continue
                     fallback_points.append({'axisX': x, 'axisY': y, 'serverId': 0, 'heading': 0, 'ts': 0})
                 points = fallback_points
-            else:
-                # 全服务器批量查询时只使用历史接口，避免为空服务器发起整组备用请求。
-                points = []
-                meta = {}
         except ApiResponseException:
             logger.info(f"{server_label} 暂无今日足迹数据")
             if not _silent_empty:
@@ -5025,7 +5061,7 @@ class TmpBotPlugin(Star):
                     area_url = f"{api_base}/map/playerList?aAxisX={ax}&aAxisY={ay}&bAxisX={bx}&bAxisY={by}&serverId={server_id}"
                     logger.info(f"定位: 使用底图查询周边玩家 serverId={server_id} center=({cx},{cy}) url={area_url}")
                     try:
-                        async with self.session.get(area_url, timeout=self._cfg_int('api_timeout_seconds', 10), ssl=False) as resp:
+                        async with self.session.get(area_url, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
                             if resp.status == 200:
                                 j = await resp.json()
                                 area_players = j.get('data') or []
@@ -5815,17 +5851,28 @@ class TmpBotPlugin(Star):
 
         if is_banned:
             banned_until = player_info.get('bannedUntil')
-            if banned_until:
+            active_ban = next((
+                ban for ban in sorted_bans
+                if ban.get('active') is True
+                or str(ban.get('active')).strip().lower() in {'1', 'true', 'yes'}
+            ), None)
+            if not banned_until and active_ban:
+                banned_until = active_ban.get('expiration')
+            if _is_permanent_ban_expiry(banned_until):
+                expiry = "永久"
+                message += f"当前封禁截止: {expiry}\n"
+            elif banned_until:
                 expiry = (
-                    "永久"
-                    if str(banned_until).lower().startswith('never')
-                    else _format_timestamp_to_beijing(str(banned_until))
+                    _format_timestamp_to_beijing(str(banned_until))
                 )
                 message += f"当前封禁截止: {expiry}\n"
 
         if not sorted_bans:
-            message += "\n未查询到公开的违规记录。\n"
-            message += "注：如果玩家隐藏了封禁记录，这里也不会显示。"
+            if is_banned or ban_count > 0:
+                message += "\n该用户的封禁原因被隐藏。"
+            else:
+                message += "\n未查询到公开的违规记录。\n"
+                message += "注：如果玩家隐藏了封禁记录，这里也不会显示。"
             yield event.plain_result(message)
             return
 
@@ -5834,13 +5881,19 @@ class TmpBotPlugin(Star):
             active_raw = ban.get('active')
             active = active_raw is True or str(active_raw).strip().lower() in {'1', 'true', 'yes'}
             added = _format_timestamp_to_beijing(str(ban.get('timeAdded') or ''))
-            reason_raw = str(ban.get('reason') or '未提供原因').strip()
-            reason = self._translate_ban_reason(reason_raw) or reason_raw
+            reason_raw = str(ban.get('reason') or '').strip()
+            reason = (
+                "该用户的封禁原因被隐藏"
+                if not reason_raw or _is_hidden_ban_reason(reason_raw)
+                else self._translate_ban_reason(reason_raw) or reason_raw
+            )
             expiration_raw = str(ban.get('expiration') or '').strip()
-            if not expiration_raw:
-                expiration = "未知"
-            elif expiration_raw.lower().startswith('never'):
+            if active and not expiration_raw:
+                expiration_raw = str(player_info.get('bannedUntil') or '').strip()
+            if _is_permanent_ban_expiry(expiration_raw):
                 expiration = "永久"
+            elif not expiration_raw:
+                expiration = "未知"
             else:
                 expiration = _format_timestamp_to_beijing(expiration_raw)
             admin_name = str(ban.get('adminName') or '').strip()

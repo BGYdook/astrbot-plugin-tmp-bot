@@ -53,13 +53,6 @@
     "title": "自定义 ProMods 地图瓦片地址（可选）",
     "description": "形如 https://example.com/promods/{z}/{x}/{y}.png，必须带 {z}/{x}/{y} 三个占位符。留空则使用内置瓦片源。"
   },
-  "enable_bind_feature": {
-    "type": "bool",
-    "default": true,
-    "title": "启用绑定功能",
-    "description": "允许用户绑定 TMPID 用于快捷查询。"
-  }
-  ,
   "dlc_list_image": {
     "type": "bool",
     "default": false,
