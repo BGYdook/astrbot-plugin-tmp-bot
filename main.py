@@ -725,6 +725,7 @@ class TmpBotPlugin(Star):
         self._fullmap_task: Optional[asyncio.Task] = None
         self._fullmap_lock = asyncio.Lock()
         self._fullmap_fetch_lock = asyncio.Lock()
+        self._footprint_request_semaphore = asyncio.Semaphore(6)
 
         self._load_location_maps()
         try:
@@ -2946,27 +2947,49 @@ class TmpBotPlugin(Star):
                 urls.append(f"{base}/map/footprint?tmpId={tmp_id}&serverId={sid}")
                 urls.append(f"{base}/map/track?tmpId={tmp_id}&serverId={sid}")
         last_error = None
-        for url in urls:
+        request_limit = getattr(self, '_footprint_request_semaphore', None)
+        if request_limit is None:
+            request_limit = asyncio.Semaphore(6)
+            self._footprint_request_semaphore = request_limit
+
+        async def _request_footprint_url(url: str):
+            nonlocal last_error
             try:
-                logger.debug(f"足迹接口: 请求 {url}")
-                async with self.session.get(url, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
-                    if resp.status == 200:
+                async with request_limit:
+                    logger.debug(f"足迹接口: 请求 {url}")
+                    async with self.session.get(
+                        url,
+                        timeout=self._cfg_int('api_timeout_seconds', 10),
+                    ) as resp:
+                        if resp.status != 200:
+                            return None
                         data = await resp.json()
-                        if isinstance(data, dict):
-                            code = data.get('code')
-                            if code is not None and int(code) != 200:
-                                continue
-                            success = data.get('success')
-                            if success is not None and success is False:
-                                continue
-                        points, _ = self._extract_footprint_points(data, server_key, server_ids)
-                        if not points:
-                            continue
-                        return { 'url': url, 'data': data }
-                    if resp.status in (404, 204):
-                        continue
+                    if isinstance(data, dict):
+                        code = data.get('code')
+                        if code is not None and int(code) != 200:
+                            return None
+                        success = data.get('success')
+                        if success is not None and success is False:
+                            return None
+                    points, _ = self._extract_footprint_points(data, server_key, server_ids)
+                    return { 'url': url, 'data': data } if points else None
+            except asyncio.CancelledError:
+                raise
             except Exception as e:
                 last_error = e
+                return None
+
+        tasks = [asyncio.create_task(_request_footprint_url(url)) for url in urls]
+        try:
+            for completed in asyncio.as_completed(tasks):
+                result = await completed
+                if result:
+                    return result
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
         if last_error:
             raise NetworkException(f"足迹接口请求失败: {last_error}")
         raise ApiResponseException("足迹接口无可用数据")
@@ -4471,10 +4494,20 @@ class TmpBotPlugin(Star):
                 hist_list.append(s)
             range_start = start_time
             range_end = end_time
-            for sid in hist_list:
-                history_points = await self._get_footprint_history(tmp_id, sid or None, start_time, end_time)
-                if history_points:
-                    break
+            history_results = await asyncio.gather(
+                *(
+                    self._get_footprint_history(tmp_id, sid or None, start_time, end_time)
+                    for sid in hist_list
+                ),
+                return_exceptions=True,
+            )
+            history_points = next(
+                (
+                    result for result in history_results
+                    if isinstance(result, list) and result
+                ),
+                [],
+            )
             if history_points:
                 has_server_id = any(
                     str(p.get('serverId') or p.get('server_id') or p.get('server') or "").strip()
