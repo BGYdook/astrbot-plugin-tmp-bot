@@ -27,9 +27,6 @@ try:
     from astrbot.api.star import Context, Star, register, StarTools
     from astrbot.api import logger
     from astrbot.api.message_components import Image, Plain
-    # 强制 INFO 级别，确保能看到 bans 日志
-    import logging
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 except ImportError:
     # 最小化兼容回退 
     class _DummyFilter:
@@ -729,19 +726,30 @@ class TmpBotPlugin(Star):
 
         self._load_location_maps()
         try:
-            bind_path = self.config.get('bind_file')
-            if not bind_path:
-                root = os.getcwd()
-                bind_path = os.path.join(root, 'data', 'tmp_bindings.json')
+            data_dir = StarTools.get_data_dir('astrbot_plugin_tmp_bot')
+            os.makedirs(data_dir, exist_ok=True)
+            bind_path = self.config.get('bind_file') or os.path.join(
+                data_dir,
+                'tmp_bindings.json',
+            )
+            if not os.path.isabs(bind_path):
+                bind_path = os.path.join(data_dir, bind_path)
             d = os.path.dirname(bind_path)
             if d:
                 os.makedirs(d, exist_ok=True)
             self.bind_file = bind_path
         except Exception:
-            self.bind_file = os.path.join(os.getcwd(), 'tmp_bindings.json')
+            fallback_data_dir = os.path.join(
+                os.path.dirname(__file__),
+                'data',
+                'plugin_data',
+                'astrbot_plugin_tmp_bot',
+            )
+            os.makedirs(fallback_data_dir, exist_ok=True)
+            self.bind_file = os.path.join(fallback_data_dir, 'tmp_bindings.json')
 
         self._tmp_update_state_file = os.path.join(
-            os.path.dirname(self.bind_file) or os.getcwd(),
+            os.path.dirname(os.path.abspath(self.bind_file)),
             'tmp_plugin_update_state.json',
         )
         self._tmp_update_state: Dict[str, Any] = {}
