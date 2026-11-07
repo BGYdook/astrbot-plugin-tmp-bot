@@ -3,7 +3,7 @@
 
 """
 astrbot-plugin-tmp-bot
-欧卡2TMP查询插件 (版本 1.9.2)
+欧卡2TMP查询插件 (版本 1.9.3)
 """
 
 import re
@@ -704,7 +704,7 @@ def _is_hidden_ban_expiry(value: Any) -> bool:
         'hidden by player', 'hidden by user',
     }
 
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.9.2", "https://github.com/BGYdook/astrbot-plugin-tmp-bot")
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.9.3", "https://github.com/BGYdook/astrbot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context, config=None):  # 接收 context 和 config
         super().__init__(context)              # 将 context 传给父类
@@ -859,7 +859,7 @@ class TmpBotPlugin(Star):
         # 使用 IPv4 优先的连接器，并允许读取环境代理设置（与浏览器/系统行为更一致）
         connector = aiohttp.TCPConnector(family=socket.AF_INET)
         self.session = aiohttp.ClientSession(
-            headers={'User-Agent': 'astrBot-TMP-Plugin/1.9.2'}, 
+            headers={'User-Agent': 'astrBot-TMP-Plugin/1.9.3'}, 
             timeout=aiohttp.ClientTimeout(total=timeout_sec),
             connector=connector,
             trust_env=True

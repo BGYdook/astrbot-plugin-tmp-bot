@@ -1,5 +1,13 @@
 ## 更新内容
 
+## 版本v1.9.3-修复版
+- 修复 删除`import logging`和`logging.basicConfig(...)`，现在只使用 astrbot.api.logger
+- 修复 默认数据目录改为 StarTools.get_data_dir('astrbot_plugin_tmp_bot')
+- 修复 绑定文件保存为插件数据目录下的 tmp_bindings.json。
+- 修复 更新状态保存为同目录下的 tmp_plugin_update_state.json
+- 修复 相对路径形式的自定义 bind_file 也会定位到插件数据目录，绝对路径保持兼容
+- 修复 保留了无 AstrBot 环境下的兼容回退目录
+
 ## 版本v1.9.2
 - 修复 有些请求关闭了 TLS 证书校验
 - 修复 带毫秒和时区偏移的时间戳会被错误换算
