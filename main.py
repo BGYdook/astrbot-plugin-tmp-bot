@@ -3,7 +3,7 @@
 
 """
 astrbot-plugin-tmp-bot
-欧卡2TMP查询插件 (版本 1.9.3)
+欧卡2TMP查询插件 (版本 1.9.4)
 """
 
 import re
@@ -704,7 +704,7 @@ def _is_hidden_ban_expiry(value: Any) -> bool:
         'hidden by player', 'hidden by user',
     }
 
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.9.3", "https://github.com/BGYdook/astrbot-plugin-tmp-bot")
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.9.4", "https://github.com/BGYdook/astrbot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context, config=None):  # 接收 context 和 config
         super().__init__(context)              # 将 context 传给父类
@@ -859,7 +859,7 @@ class TmpBotPlugin(Star):
         # 使用 IPv4 优先的连接器，并允许读取环境代理设置（与浏览器/系统行为更一致）
         connector = aiohttp.TCPConnector(family=socket.AF_INET)
         self.session = aiohttp.ClientSession(
-            headers={'User-Agent': 'astrBot-TMP-Plugin/1.9.3'}, 
+            headers={'User-Agent': 'astrBot-TMP-Plugin/1.9.4'}, 
             timeout=aiohttp.ClientTimeout(total=timeout_sec),
             connector=connector,
             trust_env=True
@@ -3598,12 +3598,13 @@ class TmpBotPlugin(Star):
             async for r in self.tmpdlc_list(event):
                 yield r
             return
-        if re.match(r'^绑定\s*\d+\s*$', msg):
-            async for r in self.tmpbind(event):
+        # QQ 官方机器人的指令可能保留 / 前缀；同时让空参数进入用法提示。
+        if re.fullmatch(r'/?绑定\s*\d*', msg):
+            async for r in self.tmpbind(target_event):
                 yield r
             return
-        if re.match(r'^解绑\s*$', msg):
-            async for r in self.tmpunbind(event):
+        if re.fullmatch(r'/?解绑', msg):
+            async for r in self.tmpunbind(target_event):
                 yield r
             return
         if re.match(r'^定位(\s*\d+)?\s*$', msg) or (msg.startswith("定位") and has_at):
@@ -3673,6 +3674,16 @@ class TmpBotPlugin(Star):
 
 
     # 额外 AstrBot 正式指令包装（用于行为统计，保留无前缀用法）
+
+    @filter.command("绑定")
+    async def cmd_tmp_bind(self, event: AstrMessageEvent, tmp_id: str | None = None):
+        """绑定 TMP ID 或 Steam ID，实际处理由消息监听器完成。"""
+        return
+
+    @filter.command("解绑")
+    async def cmd_tmp_unbind(self, event: AstrMessageEvent):
+        """解除 TMP ID 绑定，实际处理由消息监听器完成。"""
+        return
 
     @filter.command("查询")
     async def cmd_tmp_query(self, event: AstrMessageEvent, tmp_id: str | None = None):
@@ -4946,7 +4957,7 @@ class TmpBotPlugin(Star):
         message_str = event.message_str.strip()
         user_id = event.get_sender_id()
         
-        match = re.search(r'绑定\s*(\d+)', message_str)
+        match = re.fullmatch(r'/?绑定\s*(\d+)', message_str)
         input_id = match.group(1) if match else None
 
         if not input_id:

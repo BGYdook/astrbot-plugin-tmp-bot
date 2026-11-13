@@ -1,5 +1,5 @@
  # astrbot-plugin-tmp-bot
-[![npm](https://img.shields.io/badge/npm-v1.9.3-blue)](https://github.com/BGYdook/astrbot-plugin-tmp-bot)
+[![npm](https://img.shields.io/badge/npm-v1.9.4-blue)](https://github.com/BGYdook/astrbot-plugin-tmp-bot)
 
 ![:astrbot_plugin_tmp_bot](https://count.getloli.com/@:astrbot_plugin_tmp-bot?theme=minecraft)
 
@@ -13,6 +13,7 @@
 | 指令 | 功能 | 示例 |
 |------|------|------|
 | 绑定 | 绑定 TMP ID，绑定后其他指令可省略 ID | 绑定 123 |
+| 解绑 | 解除当前账号的 TMP ID 绑定 | 解绑 |
 | 查询 | 查询 TMP 玩家信息 | 查询 123 |
 | 定位 | 查询玩家位置信息 | 定位 123 |
 | 路况  | 查询服务器热门地点路况（支持服务器简称：s1、s2、p、a） | 路况 s1 |
@@ -28,6 +29,9 @@
 | 总里程排行 | 总里程排行榜（自 2025-08-23 20:00 起统计） | 总里程排行 |
 | 今日里程排行 | 今日里程排行榜（每日 0 点重置） | 今日里程排行 |
 | 足迹 | 今日足迹（北京时间 0 点重置，多服务器路线合并为一张图，可指定 s1、s2、a、p） | 足迹 / 足迹 s1 |
+
+QQ 官方机器人支持 `绑定 123` / `/绑定 123` 和 `解绑` / `/解绑`。绑定按机器人收到的用户 ID（OpenID）保存。
+
 ### 接口与数据
 API 文档与数据来源：https://s.apifox.cn/38508a88-5ff4-4b29-b724-41f9d3d3336a
 
