@@ -5439,7 +5439,7 @@ class TmpBotPlugin(Star):
     var latlng = map.unproject(xy, c.maxZoom);
     L.circleMarker(latlng, { color:'#c9f3ff', weight:1, opacity:.5, fillColor:'#69bce8', fillOpacity:.72, radius:4 }).addTo(map);
   }
-  var centerLL = map.unproject(c.calc(centerX, centerY+80), c.maxZoom);
+  var centerLL = map.unproject(c.calc(centerX, centerY), c.maxZoom);
   var meLL = map.unproject(c.calc(centerX, centerY), c.maxZoom);
   L.circleMarker(meLL, { color:'#8de4b0', weight:1, opacity:.25, fillColor:'#59c98d', fillOpacity:.08, radius:25 }).addTo(map);
   L.marker(meLL, {
