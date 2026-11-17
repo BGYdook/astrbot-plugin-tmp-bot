@@ -3,7 +3,7 @@
 
 """
 astrbot-plugin-tmp-bot
-欧卡2TMP查询插件 (版本 1.9.4)
+欧卡2TMP查询插件 (版本 1.9.5)
 """
 
 import re
@@ -704,7 +704,7 @@ def _is_hidden_ban_expiry(value: Any) -> bool:
         'hidden by player', 'hidden by user',
     }
 
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.9.4", "https://github.com/BGYdook/astrbot-plugin-tmp-bot")
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.9.5", "https://github.com/BGYdook/astrbot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context, config=None):  # 接收 context 和 config
         super().__init__(context)              # 将 context 传给父类
@@ -853,13 +853,40 @@ class TmpBotPlugin(Star):
             return default
         return raw
 
+    @staticmethod
+    def _location_map_profile(layer: str, tile_url: str) -> Dict[str, Any]:
+        """Keep tile size and game-coordinate projection paired with the source."""
+        from urllib.parse import urlsplit
+
+        host = (urlsplit(tile_url).hostname or '').lower()
+        if host == 'ets2.online':
+            extent = (
+                [-135110.156, 168923.75, -179273.531, 124760.375]
+                if layer == 'promods'
+                else [-113177.313, 97925.625, -122648.086, 88454.85]
+            )
+            return {
+                'tileUrl': tile_url, 'tileSize': 256,
+                'bounds': {'x': 65536, 'y': 65536},
+                'maxZoom': 8, 'minZoom': 2,
+                'extent': extent,
+            }
+        # Retain the projection expected by existing custom 512px tile sources.
+        return {
+            'tileUrl': tile_url, 'tileSize': 512,
+            'bounds': {'x': 131072, 'y': 131072},
+            'maxZoom': 8, 'minZoom': 2,
+            'scale': 2.598541 if layer == 'promods' else 1.609055,
+            'origin': [51953, 76024] if layer == 'promods' else [70272, 76157],
+        }
+
     async def initialize(self):
         # 统一 User-Agent，并更新版本号
         timeout_sec = self._cfg_int('api_timeout_seconds', 10)
         # 使用 IPv4 优先的连接器，并允许读取环境代理设置（与浏览器/系统行为更一致）
         connector = aiohttp.TCPConnector(family=socket.AF_INET)
         self.session = aiohttp.ClientSession(
-            headers={'User-Agent': 'astrBot-TMP-Plugin/1.9.4'}, 
+            headers={'User-Agent': 'astrBot-TMP-Plugin/1.9.5'}, 
             timeout=aiohttp.ClientTimeout(total=timeout_sec),
             connector=connector,
             trust_env=True
@@ -4662,10 +4689,9 @@ class TmpBotPlugin(Star):
                 previous_ts = int(previous_point.get('ts') or 0)
                 current_ts = int(point.get('ts') or 0)
                 time_jump = bool(previous_ts and current_ts and current_ts - previous_ts > 90)
-                server_jump = point.get('serverId') != previous_point.get('serverId')
             except Exception:
-                coordinate_jump = time_jump = server_jump = False
-            if coordinate_jump or time_jump or server_jump:
+                coordinate_jump = time_jump = False
+            if coordinate_jump or time_jump:
                 route_segments += 1
             previous_point = point
 
@@ -4842,8 +4868,7 @@ class TmpBotPlugin(Star):
         timeDiff = curr.ts - prev.ts;
       }
       var isTimeJump = timeDiff > 90;
-      var isServerJump = prev.serverId !== curr.serverId;
-      if (isDistJump || isTimeJump || isServerJump) {
+      if (isDistJump || isTimeJump) {
         if (currentLine.length > 0) lines.push(currentLine);
         currentLine = [];
       }
@@ -5128,10 +5153,24 @@ class TmpBotPlugin(Star):
                 'realName': None,
                 'city': {'name': ''}
             }
-        if fullmap_player:
+        try:
+            live_coordinates_valid = all(
+                math.isfinite(float(online.get(key))) for key in ('x', 'y')
+            )
+        except (TypeError, ValueError, OverflowError):
+            live_coordinates_valid = False
+        if (
+            fullmap_player and not live_coordinates_valid
+            and str(fullmap_player.get('ServerId')) == str(online.get('serverId'))
+        ):
             online['x'] = fullmap_player.get('X')
             online['y'] = fullmap_player.get('Y')
-            online['serverId'] = fullmap_player.get('ServerId')
+        try:
+            if not all(math.isfinite(float(online.get(key))) for key in ('x', 'y')):
+                raise ValueError("non-finite coordinates")
+        except (TypeError, ValueError, OverflowError):
+            yield event.plain_result("玩家在线，但暂未获取到有效的位置坐标，请稍后重试")
+            return
 
         # 3) 构造 HTML 渲染数据（玩家 + 位置，周边玩家留作后续扩展）
         server_name = online.get('serverName', '未知服务器')
@@ -5259,11 +5298,21 @@ class TmpBotPlugin(Star):
             area_players.append({'tmpId': str(tmp_id), 'axisX': cx, 'axisY': cy})
 
             map_type = 'promods' if int(server_id or 0) in [50, 51] else 'ets'
-            # 瓦片源：用户在配置里填了自定义源就用它，否则用内置默认源
+            default_tile_ets = "https://ets2.online/map/ets2map_161/{z}/{x}/{y}.png"
+            default_tile_promods = "https://ets2.online/map/ets2mappromods_158/{z}/{x}/{y}.png"
             tile_url_ets = self._tile_url(
-                'ets', "https://ets_tiles.cnly.top/20260903/tmp-ets-yellow/Tiles/{z}/{x}/{y}.png")
+                'ets', default_tile_ets)
             tile_url_promods = self._tile_url(
-                'promods', "https://ets_tiles.cnly.top/20260903/tmp-promods-yellow/Tiles/{z}/{x}/{y}.png")
+                'promods', default_tile_promods)
+            map_profiles = {
+                'ets': self._location_map_profile('ets', tile_url_ets),
+                'promods': self._location_map_profile('promods', tile_url_promods),
+            }
+            for layer, default_url in (
+                ('ets', default_tile_ets), ('promods', default_tile_promods),
+            ):
+                if map_profiles[layer]['tileUrl'] != default_url:
+                    map_profiles[layer]['fallback'] = self._location_map_profile(layer, default_url)
             logger.info(f"定位: tile_ets={tile_url_ets}")
             logger.info(f"定位: tile_promods={tile_url_promods}")
 
@@ -5361,7 +5410,7 @@ class TmpBotPlugin(Star):
 <div class=\"shell\">
   <div id=\"map\"></div>
   <div class=\"map-shade\"></div>
-  <div class=\"live-pill\"><span class=\"live-dot\"></span>LIVE POSITION</div>
+  <div class=\"live-pill\"><span class=\"live-dot\"></span>在线位置</div>
   <div class=\"server-pill\">{{ server_name|e }} · 游戏中</div>
   <div class=\"panel\">
     <div class=\"profile\">
@@ -5389,64 +5438,52 @@ class TmpBotPlugin(Star):
   var promodsIds = [50, 51];
   var serverId = {{ server_id }};
   var mapType = promodsIds.indexOf(serverId) !== -1 ? 'promods' : 'ets';
-  var cfg = {
-    ets: {
-      tileUrl: {{ tile_url_ets|tojson }},
-      fallbackUrl: 'https://ets2.online/map/ets2map_158/{z}/{x}/{y}.png',
-      multipliers: { x: 70272, y: 76157 },
-      breakpoints: { uk: { x: -31056.8, y: -5832.867 } },
-      bounds: { x:131072, y:131072 },
-      maxZoom: 8, minZoom: 2,
-      calc: function(xx, yy) {
-        return [ xx / 1.609055 + cfg.ets.multipliers.x, yy / 1.609055 + cfg.ets.multipliers.y ];
-      }
-    },
-    promods: {
-      tileUrl: {{ tile_url_promods|tojson }},
-      fallbackUrl: 'https://ets2.online/map/ets2mappromods_158/{z}/{x}/{y}.png',
-      multipliers: { x: 51953, y: 76024 },
-      breakpoints: { uk: { x: -31056.8, y: -5832.867 } },
-      bounds: { x:131072, y:131072 },
-      maxZoom: 8, minZoom: 2,
-      calc: function(xx, yy) {
-        return [ xx / 2.598541 + cfg.promods.multipliers.x, yy / 2.598541 + cfg.promods.multipliers.y ];
-      }
+  var cfg = {{ map_profiles|tojson }};
+  function project(xx, yy, profile) {
+    if (profile.extent) {
+      var e = profile.extent;
+      return [(xx-e[0])/(e[1]-e[0])*profile.bounds.x,
+              (yy-e[2])/(e[3]-e[2])*profile.bounds.y];
     }
-  };
+    return [xx/profile.scale+profile.origin[0], yy/profile.scale+profile.origin[1]];
+  }
 
   var map = L.map('map', { attributionControl: false, crs: L.CRS.Simple, zoomControl: false, zoomSnap: 0.2, zoomDelta: 0.2 });
-  var c = cfg[mapType];
-  var b = L.latLngBounds(
-    map.unproject([0, c.bounds.y], c.maxZoom),
-    map.unproject([c.bounds.x, 0], c.maxZoom)
-  );
-  var tileLayer = L.tileLayer(c.tileUrl, { minZoom: c.minZoom, maxZoom: 10, maxNativeZoom: c.maxZoom, tileSize: 512, bounds: b, reuseTiles: true }).addTo(map);
-  var switched = false;
-  tileLayer.on('tileerror', function(){
-    if (switched || !c.fallbackUrl) return;
-    switched = true;
-    map.removeLayer(tileLayer);
-    tileLayer = L.tileLayer(c.fallbackUrl, { minZoom: c.minZoom, maxZoom: 10, maxNativeZoom: c.maxZoom, tileSize: 512, bounds: b, reuseTiles: true }).addTo(map);
-  });
-  map.setMaxBounds(b);
   var centerX = {{ center_x }};
   var centerY = {{ center_y }};
-  var players = [{% for p in players %}{ axisX: {{ p.axisX }}, axisY: {{ p.axisY }}, tmpId: {{ p.tmpId|tojson }} }{% if not loop.last %}, {% endif %}{% endfor %}];
-  for (var i=0;i<players.length;i++){
-    var p = players[i];
-    if (p.tmpId === {{ me_id|tojson }}) continue;
-    var xy = c.calc(p.axisX, p.axisY);
-    var latlng = map.unproject(xy, c.maxZoom);
-    L.circleMarker(latlng, { color:'#c9f3ff', weight:1, opacity:.5, fillColor:'#69bce8', fillOpacity:.72, radius:4 }).addTo(map);
+  var players = {{ players|tojson }};
+  var markers = L.layerGroup().addTo(map);
+  var tileLayer = null;
+  function applyProfile(c) {
+    if (tileLayer) map.removeLayer(tileLayer);
+    markers.clearLayers();
+    var b = L.latLngBounds(
+      map.unproject([0, c.bounds.y], c.maxZoom),
+      map.unproject([c.bounds.x, 0], c.maxZoom)
+    );
+    map.setMaxBounds(b);
+    tileLayer = L.tileLayer(c.tileUrl, { minZoom:c.minZoom, maxZoom:10, maxNativeZoom:c.maxZoom, tileSize:c.tileSize, bounds:b, reuseTiles:true }).addTo(map);
+    var switched = false;
+    tileLayer.on('tileerror', function() {
+      if (switched || !c.fallback) return;
+      switched = true;
+      applyProfile(c.fallback);
+    });
+    players.forEach(function(p) {
+      if (p.tmpId === {{ me_id|tojson }}) return;
+      var latlng = map.unproject(project(p.axisX, p.axisY, c), c.maxZoom);
+      L.circleMarker(latlng, { color:'#c9f3ff', weight:1, opacity:.5, fillColor:'#69bce8', fillOpacity:.72, radius:4 }).addTo(markers);
+    });
+    var meLL = map.unproject(project(centerX, centerY, c), c.maxZoom);
+    L.circleMarker(meLL, { color:'#8de4b0', weight:1, opacity:.25, fillColor:'#59c98d', fillOpacity:.08, radius:25 }).addTo(markers);
+    L.marker(meLL, {
+      interactive:false,
+      icon:L.divIcon({className:'',html:'<div class=\"self-ring\"></div>',iconSize:[48,48],iconAnchor:[24,24]})
+    }).addTo(markers);
+    // 256px tiles use one more zoom level to retain the previous visual scale.
+    map.setView(meLL, c.tileSize === 256 ? 9 : 8);
   }
-  var centerLL = map.unproject(c.calc(centerX, centerY), c.maxZoom);
-  var meLL = map.unproject(c.calc(centerX, centerY), c.maxZoom);
-  L.circleMarker(meLL, { color:'#8de4b0', weight:1, opacity:.25, fillColor:'#59c98d', fillOpacity:.08, radius:25 }).addTo(map);
-  L.marker(meLL, {
-    interactive:false,
-    icon:L.divIcon({className:'',html:'<div class=\"self-ring\"></div>',iconSize:[48,48],iconAnchor:[24,24]})
-  }).addTo(map);
-  map.setView(centerLL, 8);
+  applyProfile(cfg[mapType]);
   setTimeout(function(){ map.invalidateSize(); }, 80);
 </script>
 """
@@ -5471,7 +5508,8 @@ class TmpBotPlugin(Star):
                 'center_x': float(cx),
                 'center_y': float(cy),
                 'tile_url_ets': tile_url_ets,
-                'tile_url_promods': tile_url_promods
+                'tile_url_promods': tile_url_promods,
+                'map_profiles': map_profiles,
             }
             logger.info(f"定位: 渲染底图 mapType={'promods' if int(online.get('serverId') or 0) in [50,51] else 'ets'} players={len(area_players)}")
             url2 = await self.html_render(map_tmpl, map_data, options={'type': 'jpeg', 'quality': 92, 'full_page': True, 'timeout': 8000, 'animations': 'disabled'})
@@ -6345,7 +6383,7 @@ class TmpBotPlugin(Star):
     group.routes.forEach(function(route){
       var points = route.points.filter(function(p){return !(p.axisX===0&&p.axisY===0&&p.heading===0);});
       var lines=[], current=[];
-      if(points.length){current.push(points[0]);for(var i=1;i<points.length;i++){var prev=points[i-1],curr=points[i];var dist=Math.hypot(curr.axisX-prev.axisX,curr.axisY-prev.axisY)*19;var timeDiff=(curr.ts&&prev.ts)?curr.ts-prev.ts:0;if(dist>30000||timeDiff>90||prev.serverId!==curr.serverId){if(current.length)lines.push(current);current=[];}current.push(curr);}if(current.length)lines.push(current);}
+      if(points.length){current.push(points[0]);for(var i=1;i<points.length;i++){var prev=points[i-1],curr=points[i];var dist=Math.hypot(curr.axisX-prev.axisX,curr.axisY-prev.axisY)*19;var timeDiff=(curr.ts&&prev.ts)?curr.ts-prev.ts:0;if(dist>30000||timeDiff>90){if(current.length)lines.push(current);current=[];}current.push(curr);}if(current.length)lines.push(current);}
       var focus=[];
       lines.forEach(function(linePts){
         var latlngs=linePts.map(function(p){var xy=c.calc(p.axisX,p.axisY);return map.unproject(xy,c.maxZoom);});
