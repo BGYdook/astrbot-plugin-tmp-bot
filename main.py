@@ -4931,13 +4931,13 @@ class TmpBotPlugin(Star):
     map.unproject([0, c.bounds.y], c.maxZoom),
     map.unproject([c.bounds.x, 0], c.maxZoom)
   );
-  var tileLayer = L.tileLayer(c.tileUrl, { minZoom: c.minZoom, maxZoom: 10, maxNativeZoom: c.maxZoom, tileSize: 512, bounds: b, reuseTiles: true }).addTo(map);
+  var tileLayer = L.tileLayer(c.tileUrl, { minZoom: 0, minNativeZoom: c.minZoom, maxZoom: 10, maxNativeZoom: c.maxZoom, tileSize: 512, bounds: b, reuseTiles: true }).addTo(map);
   var switched = false;
   tileLayer.on('tileerror', function(){
     if (switched || !c.fallbackUrl) return;
     switched = true;
     map.removeLayer(tileLayer);
-    tileLayer = L.tileLayer(c.fallbackUrl, { minZoom: c.minZoom, maxZoom: 10, maxNativeZoom: c.maxZoom, tileSize: 512, bounds: b, reuseTiles: true }).addTo(map);
+    tileLayer = L.tileLayer(c.fallbackUrl, { minZoom: 0, minNativeZoom: c.minZoom, maxZoom: 10, maxNativeZoom: c.maxZoom, tileSize: 512, bounds: b, reuseTiles: true }).addTo(map);
   });
   map.setMaxBounds(b);
   var points = {{ points|tojson }};
@@ -4965,8 +4965,6 @@ class TmpBotPlugin(Star):
     if (currentLine.length > 0) lines.push(currentLine);
   }
   var allLatlngs = [];
-  var routeLines = [];
-  var focusLatlngs = [];
   for (var li=0; li<lines.length; li++){
     var linePts = lines[li];
     if (!linePts || linePts.length === 0) continue;
@@ -4976,10 +4974,6 @@ class TmpBotPlugin(Star):
       var ll = map.unproject(xy, c.maxZoom);
       latlngs.push(ll);
       allLatlngs.push(ll);
-    }
-    routeLines.push(latlngs);
-    if (latlngs.length > focusLatlngs.length) {
-      focusLatlngs = latlngs;
     }
     L.polyline(latlngs, {
       color:'#0c3653', weight:11, opacity:0.96, lineCap:'round', lineJoin:'round'
@@ -5002,15 +4996,15 @@ class TmpBotPlugin(Star):
     }).addTo(map);
   }
 
-  if (focusLatlngs.length > 0) {
-    addEndpoint(focusLatlngs[0], 'start');
-    addEndpoint(focusLatlngs[focusLatlngs.length - 1], 'end');
+  if (allLatlngs.length > 0) {
+    addEndpoint(allLatlngs[0], 'start');
+    addEndpoint(allLatlngs[allLatlngs.length - 1], 'end');
   }
 
-  if (focusLatlngs.length === 1) {
-    map.setView(focusLatlngs[0], 7);
-  } else if (focusLatlngs.length > 1) {
-    map.fitBounds(L.latLngBounds(focusLatlngs), {
+  if (allLatlngs.length === 1) {
+    map.setView(allLatlngs[0], 7);
+  } else if (allLatlngs.length > 1) {
+    map.fitBounds(L.latLngBounds(allLatlngs), {
       paddingTopLeft: [48, 55],
       paddingBottomRight: [48, 165],
       maxZoom: 8
@@ -6490,23 +6484,23 @@ class TmpBotPlugin(Star):
     var map = L.map('map-' + (index + 1), {attributionControl:false,crs:L.CRS.Simple,zoomControl:false,zoomSnap:0.2,zoomDelta:0.2});
     var c = cfg[group.type];
     var world = L.latLngBounds(map.unproject([0,c.bounds.y],c.maxZoom),map.unproject([c.bounds.x,0],c.maxZoom));
-    var tile = L.tileLayer(group.tileUrl || c.fallbackUrl,{minZoom:c.minZoom,maxZoom:10,maxNativeZoom:c.maxZoom,tileSize:512,bounds:world,reuseTiles:true}).addTo(map);
+    var tile = L.tileLayer(group.tileUrl || c.fallbackUrl,{minZoom:0,minNativeZoom:c.minZoom,maxZoom:10,maxNativeZoom:c.maxZoom,tileSize:512,bounds:world,reuseTiles:true}).addTo(map);
     var switched = false;
-    tile.on('tileerror',function(){if(switched||!c.fallbackUrl)return;switched=true;map.removeLayer(tile);tile=L.tileLayer(c.fallbackUrl,{minZoom:c.minZoom,maxZoom:10,maxNativeZoom:c.maxZoom,tileSize:512,bounds:world,reuseTiles:true}).addTo(map);});
+    tile.on('tileerror',function(){if(switched||!c.fallbackUrl)return;switched=true;map.removeLayer(tile);tile=L.tileLayer(c.fallbackUrl,{minZoom:0,minNativeZoom:c.minZoom,maxZoom:10,maxNativeZoom:c.maxZoom,tileSize:512,bounds:world,reuseTiles:true}).addTo(map);});
     map.setMaxBounds(world);
     var panelFocus = [];
     group.routes.forEach(function(route){
       var points = route.points.filter(function(p){return !(p.axisX===0&&p.axisY===0&&p.heading===0);});
       var lines=[], current=[];
       if(points.length){current.push(points[0]);for(var i=1;i<points.length;i++){var prev=points[i-1],curr=points[i];var dist=Math.hypot(curr.axisX-prev.axisX,curr.axisY-prev.axisY)*19;var timeDiff=(curr.ts&&prev.ts)?curr.ts-prev.ts:0;if(dist>30000||timeDiff>90){if(current.length)lines.push(current);current=[];}current.push(curr);}if(current.length)lines.push(current);}
-      var focus=[];
+      var routeLatlngs=[];
       lines.forEach(function(linePts){
         var latlngs=linePts.map(function(p){var xy=c.calc(p.axisX,p.axisY);return map.unproject(xy,c.maxZoom);});
-        if(latlngs.length>focus.length)focus=latlngs;
+        routeLatlngs=routeLatlngs.concat(latlngs);
         L.polyline(latlngs,{color:'#0a2638',weight:10,opacity:.72,lineCap:'round',lineJoin:'round'}).addTo(map);
         L.polyline(latlngs,{color:route.color,weight:5,opacity:1,lineCap:'round',lineJoin:'round'}).addTo(map);
       });
-      if(focus.length){L.circleMarker(focus[0],{radius:6,color:'#fff',weight:2,fillColor:'#59c98d',fillOpacity:1}).addTo(map);L.circleMarker(focus[focus.length-1],{radius:6,color:'#fff',weight:2,fillColor:'#ef655e',fillOpacity:1}).addTo(map);panelFocus=panelFocus.concat(focus);}
+      if(routeLatlngs.length){L.circleMarker(routeLatlngs[0],{radius:6,color:'#fff',weight:2,fillColor:'#59c98d',fillOpacity:1}).addTo(map);L.circleMarker(routeLatlngs[routeLatlngs.length-1],{radius:6,color:'#fff',weight:2,fillColor:'#ef655e',fillOpacity:1}).addTo(map);panelFocus=panelFocus.concat(routeLatlngs);}
     });
     if(panelFocus.length===1){map.setView(panelFocus[0],7);}else if(panelFocus.length>1){map.fitBounds(L.latLngBounds(panelFocus),{paddingTopLeft:[45,60],paddingBottomRight:[45,145],maxZoom:8});}
     setTimeout(function(){map.invalidateSize();},80);
