@@ -880,6 +880,94 @@ class TmpBotPlugin(Star):
             'origin': [51953, 76024] if layer == 'promods' else [70272, 76157],
         }
 
+    @staticmethod
+    def _tracker_map_coordinates(x: float, y: float, layer: str) -> Tuple[float, float]:
+        # ETS2Map scales the original UK region separately; tiles are already scaled.
+        if layer == 'ets' and x < -30100 and -86000 < y < -0.14 * x - 10040:
+            return 0.75 * x - 8337, 0.75 * y - 1000
+        return x, y
+
+    async def _prepare_location_basemap(self, layer: str, x: float, y: float) -> Dict[str, Any]:
+        """Embed visible tracker tiles so the remote renderer need not fetch them."""
+        if not self.session:
+            raise NetworkException("地图 HTTP 会话不可用")
+
+        async def read_limited(response: Any, limit: int) -> bytes:
+            chunks = []
+            size = 0
+            async for chunk in response.content.iter_chunked(65536):
+                size += len(chunk)
+                if size > limit:
+                    raise ValueError('地图响应超过大小限制')
+                chunks.append(chunk)
+            return b''.join(chunks)
+
+        sources = getattr(self, '_location_tracker_sources', None)
+        if not sources or time.monotonic() >= getattr(self, '_location_tracker_sources_until', 0):
+            sources = {
+                'ets': ('https://map-cdn.krashnz.com/ets2map/ets2/v1.62', -22, -22, -100, 88, -124, 91),
+                'promods': ('https://map-cdn.krashnz.com/ets2map/promods/v2.80', -145, -18, -144, 206, -166, 130),
+            }
+            try:
+                async with self.session.get('https://ets2map.com/assets/app.js', timeout=aiohttp.ClientTimeout(total=5)) as response:
+                    response.raise_for_status()
+                    script = await read_limited(response, 2 * 1024 * 1024)
+                text = script.decode('utf-8')
+                for key, game in (('ets', 'ETS2'), ('promods', 'PROMODS')):
+                    match = re.search(
+                        rf'{game}:\{{defaultCamera:\{{[^}}]+\}},tileUrl:"([^"]+)",'
+                        r'tileOffset:\{x:([\d.-]+),y:([\d.-]+)\},'
+                        r'tileRange:\{xMin:([\d-]+),xMax:([\d-]+),yMin:([\d-]+),yMax:([\d-]+)\}',
+                        text,
+                    )
+                    if match and re.fullmatch(r'https://map-cdn\.krashnz\.com/ets2map/(?:ets2|promods)/v[\w.-]+', match[1]):
+                        sources[key] = (match[1], *(float(match[i]) for i in range(2, 8)))
+                cache_seconds = 3600
+            except Exception as exc:
+                logger.warning(f"定位: 获取追踪地图配置失败，使用内置地图配置 ({type(exc).__name__})")
+                cache_seconds = 60
+            self._location_tracker_sources = sources
+            self._location_tracker_sources_until = time.monotonic() + cache_seconds
+
+        base, offset_x, offset_y, xmin, xmax, ymin, ymax = sources[layer]
+        center_x, center_y = self._tracker_map_coordinates(x, y, layer)
+        pixel_scale = 0.2499
+        half_width, half_height = 640 / (pixel_scale * 2), 360 / (pixel_scale * 2)
+        left = max(int(xmin), math.floor((center_x - half_width - offset_x + 500) / 1000))
+        right = min(int(xmax), math.floor((center_x + half_width - offset_x + 500) / 1000))
+        top = max(int(ymin), math.floor((center_y - half_height - offset_y + 500) / 1000))
+        bottom = min(int(ymax), math.floor((center_y + half_height - offset_y + 500) / 1000))
+        semaphore = asyncio.Semaphore(6)
+
+        async def fetch_tile(tx: int, ty: int) -> Dict[str, Any]:
+            async with semaphore:
+                url = f'{base}/{tx}_{ty}.png'
+                async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=6)) as response:
+                    response.raise_for_status()
+                    content = await read_limited(response, 1024 * 1024)
+                if not content.startswith(b'\x89PNG\r\n\x1a\n') or not content.endswith(b'IEND\xaeB`\x82'):
+                    raise ValueError('地图瓦片不是有效的 PNG 图片')
+                return {
+                    'url': 'data:image/png;base64,' + base64.b64encode(content).decode('ascii'),
+                    'left': tx * 1000 + offset_x - 500,
+                    'top': ty * 1000 + offset_y - 500,
+                }
+
+        results = await asyncio.gather(
+            *(fetch_tile(tx, ty) for tx in range(left, right + 1) for ty in range(top, bottom + 1)),
+            return_exceptions=True,
+        )
+        images = [result for result in results if isinstance(result, dict)]
+        if not images or len(images) != len(results):
+            raise NetworkException(f"定位地图瓦片加载不完整 ({len(images)}/{len(results)})，请稍后重试")
+        logger.info(f"定位: 底图瓦片已加载 source={base} tiles={len(images)} center=({x},{y})")
+        return {
+            'images': images, 'trackerTiles': True, 'ukCorrection': layer == 'ets',
+            'pixelScale': pixel_scale, 'maxZoom': 0, 'minZoom': 0, 'viewZoom': 1,
+            'world': [xmin * 1000 + offset_x - 500, ymin * 1000 + offset_y - 500,
+                      xmax * 1000 + offset_x + 500, ymax * 1000 + offset_y + 500],
+        }
+
     async def initialize(self):
         # 统一 User-Agent，并更新版本号
         timeout_sec = self._cfg_int('api_timeout_seconds', 10)
@@ -5315,6 +5403,11 @@ class TmpBotPlugin(Star):
                     map_profiles[layer]['fallback'] = self._location_map_profile(layer, default_url)
             logger.info(f"定位: tile_ets={tile_url_ets}")
             logger.info(f"定位: tile_promods={tile_url_promods}")
+            tracker_profile = await self._prepare_location_basemap(map_type, float(cx), float(cy))
+            if self._cfg_str(f'extra_tile_{map_type}_url', '').strip():
+                map_profiles[map_type]['fallback'] = tracker_profile
+            else:
+                map_profiles[map_type] = tracker_profile
 
             map_tmpl = """
 <link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css\">
@@ -5326,6 +5419,7 @@ class TmpBotPlugin(Star):
   .shell { position:relative; width:1280px; height:720px; overflow:hidden; color:#f5fbfa; background:#244b63; }
   #map { position:absolute; inset:0; background:radial-gradient(circle at 52% 42%,#365f76 0,#294f66 52%,#1b3b51 100%); }
   #map .leaflet-tile-pane { opacity:.82; filter:grayscale(1) brightness(1.75) contrast(1.12); mix-blend-mode:screen; }
+  #map .leaflet-image-layer { opacity:.82; filter:grayscale(1) brightness(1.75) contrast(1.12); mix-blend-mode:screen; }
   .leaflet-control-container { display:none; }
   .map-shade {
     position:absolute; inset:0; z-index:450; pointer-events:none;
@@ -5440,6 +5534,13 @@ class TmpBotPlugin(Star):
   var mapType = promodsIds.indexOf(serverId) !== -1 ? 'promods' : 'ets';
   var cfg = {{ map_profiles|tojson }};
   function project(xx, yy, profile) {
+    if (profile.trackerTiles) {
+      if (profile.ukCorrection && xx < -30100 && yy < -0.14*xx-10040 && yy > -86000) {
+        xx = 0.75*xx-8337;
+        yy = 0.75*yy-1000;
+      }
+      return [xx*profile.pixelScale, yy*profile.pixelScale];
+    }
     if (profile.extent) {
       var e = profile.extent;
       return [(xx-e[0])/(e[1]-e[0])*profile.bounds.x,
@@ -5457,12 +5558,26 @@ class TmpBotPlugin(Star):
   function applyProfile(c) {
     if (tileLayer) map.removeLayer(tileLayer);
     markers.clearLayers();
-    var b = L.latLngBounds(
+    var b = c.trackerTiles ? L.latLngBounds(
+      map.unproject([c.world[0]*c.pixelScale, c.world[3]*c.pixelScale], c.maxZoom),
+      map.unproject([c.world[2]*c.pixelScale, c.world[1]*c.pixelScale], c.maxZoom)
+    ) : L.latLngBounds(
       map.unproject([0, c.bounds.y], c.maxZoom),
       map.unproject([c.bounds.x, 0], c.maxZoom)
     );
     map.setMaxBounds(b);
-    tileLayer = L.tileLayer(c.tileUrl, { minZoom:c.minZoom, maxZoom:10, maxNativeZoom:c.maxZoom, tileSize:c.tileSize, bounds:b, reuseTiles:true }).addTo(map);
+    if (c.trackerTiles) {
+      tileLayer = L.layerGroup().addTo(map);
+      c.images.forEach(function(tile) {
+        var bounds = L.latLngBounds(
+          map.unproject([tile.left*c.pixelScale, (tile.top+1000)*c.pixelScale], c.maxZoom),
+          map.unproject([(tile.left+1000)*c.pixelScale, tile.top*c.pixelScale], c.maxZoom)
+        );
+        L.imageOverlay(tile.url, bounds, {interactive:false}).addTo(tileLayer);
+      });
+    } else {
+      tileLayer = L.tileLayer(c.tileUrl, { minZoom:c.minZoom, maxZoom:10, maxNativeZoom:c.maxZoom, tileSize:c.tileSize, bounds:b, reuseTiles:true }).addTo(map);
+    }
     var switched = false;
     tileLayer.on('tileerror', function() {
       if (switched || !c.fallback) return;
@@ -5481,7 +5596,7 @@ class TmpBotPlugin(Star):
       icon:L.divIcon({className:'',html:'<div class=\"self-ring\"></div>',iconSize:[48,48],iconAnchor:[24,24]})
     }).addTo(markers);
     // 256px tiles use one more zoom level to retain the previous visual scale.
-    map.setView(meLL, c.tileSize === 256 ? 9 : 8);
+    map.setView(meLL, c.viewZoom !== undefined ? c.viewZoom : (c.tileSize === 256 ? 9 : 8));
   }
   applyProfile(cfg[mapType]);
   setTimeout(function(){ map.invalidateSize(); }, 80);
@@ -5516,8 +5631,8 @@ class TmpBotPlugin(Star):
             if isinstance(url2, str) and url2:
                 yield event.chain_result([Image.fromURL(url2)])
                 return
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning(f"定位图片生成失败，回退文字: {exc}", exc_info=True)
 
         # 最终回退文本
         msg = f"玩家实时定位\n玩家名称: {player_name}\nTMP编号: {tmp_id}\n服务器: {server_name}"
