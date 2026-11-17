@@ -1,5 +1,5 @@
  # astrbot-plugin-tmp-bot
-[![npm](https://img.shields.io/badge/npm-v1.9.4-blue)](https://github.com/BGYdook/astrbot-plugin-tmp-bot)
+[![npm](https://img.shields.io/badge/npm-v1.9.5-blue)](https://github.com/BGYdook/astrbot-plugin-tmp-bot)
 
 ![:astrbot_plugin_tmp_bot](https://count.getloli.com/@:astrbot_plugin_tmp-bot?theme=minecraft)
 
@@ -54,6 +54,14 @@ https://docs.truckersmp.com/web-api/
 ### 非常感谢[晚安](https://github.com/nulijiazaizhong)和[鲸鱼](https://github.com/jingyu8127)提供的帮助
 
 ## 历史更新
+
+## 版本v1.9.5
+- 修复 地图偏移问题
+- 修复 恢复按“间隔超过 90 秒”或“距离超过 30 公里”断线。
+- 修改 底图api
+
+## 版本v1.9.4
+- 修复 官方机器人无法绑定TMPID的问题
 
 ## 版本v1.9.3-修复版
 - 修复 删除`import logging`和`logging.basicConfig(...)`，现在只使用 astrbot.api.logger
