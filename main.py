@@ -872,13 +872,16 @@ class TmpBotPlugin(Star):
                 'extent': extent,
             }
         # Retain the projection expected by existing custom 512px tile sources.
-        return {
+        profile = {
             'tileUrl': tile_url, 'tileSize': 512,
             'bounds': {'x': 131072, 'y': 131072},
             'maxZoom': 8, 'minZoom': 2,
-            'scale': 2.598541 if layer == 'promods' else 1.609055,
-            'origin': [51953, 76024] if layer == 'promods' else [70272, 76157],
         }
+        if layer == 'ets':
+            profile['extent'] = [-113177.305, 97925.63, -122648.086, 88454.85]
+        else:
+            profile.update({'scale': 2.598541, 'origin': [51953, 76024]})
+        return profile
 
     @staticmethod
     def _tracker_map_coordinates(x: float, y: float, layer: str) -> Tuple[float, float]:
@@ -4904,12 +4907,12 @@ class TmpBotPlugin(Star):
     ets: {
       tileUrl: {{ tile_url_ets|tojson }},
       fallbackUrl: 'https://ets_tiles.cnly.top/20260903/tmp-ets-yellow/Tiles/{z}/{x}/{y}.png',
-      multipliers: { x: 70272, y: 76157 },
       breakpoints: { uk: { x: -31056.8, y: -5832.867 } },
       bounds: { x:131072, y:131072 },
       maxZoom: 8, minZoom: 2,
       calc: function(xx, yy) {
-        return [ xx / 1.609055 + cfg.ets.multipliers.x, yy / 1.609055 + cfg.ets.multipliers.y ];
+        var x1 = -113177.305, x2 = 97925.63, y1 = -122648.086, y2 = 88454.85;
+        return [ (xx - x1) / (x2 - x1) * 131072, (yy - y1) / (y2 - y1) * 131072 ];
       }
     },
     promods: {
@@ -6460,8 +6463,8 @@ class TmpBotPlugin(Star):
   var cfg = {
     ets: {
       fallbackUrl:'https://ets_tiles.cnly.top/20260903/tmp-ets-yellow/Tiles/{z}/{x}/{y}.png',
-      multipliers:{x:70272,y:76157}, bounds:{x:131072,y:131072}, maxZoom:8, minZoom:2,
-      calc:function(xx,yy){return [xx/1.609055+cfg.ets.multipliers.x,yy/1.609055+cfg.ets.multipliers.y];}
+      bounds:{x:131072,y:131072}, maxZoom:8, minZoom:2,
+      calc:function(xx,yy){var x1=-113177.305,x2=97925.63,y1=-122648.086,y2=88454.85;return [(xx-x1)/(x2-x1)*131072,(yy-y1)/(y2-y1)*131072];}
     },
     promods: {
       fallbackUrl:'https://ets2.online/map/ets2mappromods_156/{z}/{x}/{y}.png',
