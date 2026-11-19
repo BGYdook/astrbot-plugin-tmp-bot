@@ -1,10 +1,13 @@
  # astrbot-plugin-tmp-bot
-[![npm](https://img.shields.io/badge/npm-v1.9.5-blue)](https://github.com/BGYdook/astrbot-plugin-tmp-bot)
+[![npm](https://img.shields.io/badge/npm-v1.9.6-blue)](https://github.com/BGYdook/astrbot-plugin-tmp-bot)
 
 ![:astrbot_plugin_tmp_bot](https://count.getloli.com/@:astrbot_plugin_tmp-bot?theme=minecraft)
 
 
 欧洲卡车模拟2 TMP 查询机器人，用于查询玩家信息、位置、服务器路况及排行榜等。
+
+> [!WARNING]
+> 本插件将于2027年1月份检查无误后将归档仓库 新仓库维护者为[晚安](https://github.com/nulijiazaizhong)
 
 > [!WARNING]
 > 插件中所有输出为图片的命令均使用文转图服务来实现，如您的请求量很大，请自建[文转图服务](https://docs.astrbot.app/others/self-host-t2i.html)
@@ -54,6 +57,10 @@ https://docs.truckersmp.com/web-api/
 ### 非常感谢[晚安](https://github.com/nulijiazaizhong)和[鲸鱼](https://github.com/jingyu8127)提供的帮助
 
 ## 历史更新
+
+## 版本v1.9.6
+- 修复 安全问题
+- 修复 定位偏移的问题
 
 ## 版本v1.9.5
 - 修复 地图偏移问题

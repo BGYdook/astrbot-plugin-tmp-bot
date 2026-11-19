@@ -1,6 +1,6 @@
 name: astrbot_plugin_tmp_bot
 description: 欧洲卡车模拟2 TMP查询机器人 - 支持玩家信息查询、位置查询、服务器状态查询、里程排行榜、地图DLC、足迹等功能
-version: 1.9.5
+version: 1.9.6
 main: main.py
 author: BGYdook,晚安（Goodnight_An）
 homepage: https://github.com/BGYdook/astrbot-plugin-tmp-bot
@@ -89,7 +89,7 @@ usage: |
   4. 路况信息 - 查询热门地点的实时路况信息
   5. 排行榜 - 查看总里程和今日里程排行榜
   6. 绑定功能 - 绑定TMPID后可省略在命令中输入ID
-  7. 更新通知 - 定时检测 TMP 联机插件版本，更新后自动推送到所有群（可在配置中排除指定群）
+  7. 更新通知 - 定时检测 TMP 联机插件版本，更新后自动推送到受支持的群聊（Discord 频道除外，可在配置中排除指定群）
   8. 美卡服务器 - 查询 TruckersMP 美卡服务器实时状态
   9. 违规查询 - 查询玩家公开的违规和封禁记录
   10. 游戏时间 - 查询 TruckersMP 当前游戏内时间
