@@ -3,7 +3,7 @@
 
 """
 astrbot-plugin-tmp-bot
-欧卡2TMP查询插件 (版本 1.9.5)
+欧卡2TMP查询插件 (版本 1.9.6)
 """
 
 import re
@@ -17,7 +17,9 @@ import base64
 import socket
 import hashlib
 import random
+import tempfile
 import time
+from urllib.parse import urlsplit
 from typing import Optional, List, Dict, Tuple, Any
 from datetime import datetime, timedelta, timezone
 
@@ -704,7 +706,7 @@ def _is_hidden_ban_expiry(value: Any) -> bool:
         'hidden by player', 'hidden by user',
     }
 
-@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.9.5", "https://github.com/BGYdook/astrbot-plugin-tmp-bot")
+@register("tmp-bot", "BGYdook", "欧卡2TMP查询插件", "1.9.6", "https://github.com/BGYdook/astrbot-plugin-tmp-bot")
 class TmpBotPlugin(Star):
     def __init__(self, context, config=None):  # 接收 context 和 config
         super().__init__(context)              # 将 context 传给父类
@@ -851,13 +853,18 @@ class TmpBotPlugin(Star):
         if missing:
             logger.warning(f"忽略无效的 {layer} 瓦片地址（缺少 {'/'.join(missing)} 占位符）: {raw}")
             return default
+        try:
+            parsed = urlsplit(raw)
+            if not parsed.hostname or parsed.username is not None or parsed.port == 0:
+                raise ValueError('无效的瓦片地址')
+        except ValueError:
+            logger.warning(f"忽略格式无效的 {layer} 瓦片地址")
+            return default
         return raw
 
     @staticmethod
     def _location_map_profile(layer: str, tile_url: str) -> Dict[str, Any]:
         """Keep tile size and game-coordinate projection paired with the source."""
-        from urllib.parse import urlsplit
-
         host = (urlsplit(tile_url).hostname or '').lower()
         if host == 'ets2.online':
             extent = (
@@ -872,13 +879,16 @@ class TmpBotPlugin(Star):
                 'extent': extent,
             }
         # Retain the projection expected by existing custom 512px tile sources.
-        return {
+        profile = {
             'tileUrl': tile_url, 'tileSize': 512,
             'bounds': {'x': 131072, 'y': 131072},
             'maxZoom': 8, 'minZoom': 2,
-            'scale': 2.598541 if layer == 'promods' else 1.609055,
-            'origin': [51953, 76024] if layer == 'promods' else [70272, 76157],
         }
+        if layer == 'ets':
+            profile['extent'] = [-113177.305, 97925.63, -122648.086, 88454.85]
+        else:
+            profile.update({'scale': 2.598541, 'origin': [51953, 76024]})
+        return profile
 
     @staticmethod
     def _tracker_map_coordinates(x: float, y: float, layer: str) -> Tuple[float, float]:
@@ -974,7 +984,7 @@ class TmpBotPlugin(Star):
         # 使用 IPv4 优先的连接器，并允许读取环境代理设置（与浏览器/系统行为更一致）
         connector = aiohttp.TCPConnector(family=socket.AF_INET)
         self.session = aiohttp.ClientSession(
-            headers={'User-Agent': 'astrBot-TMP-Plugin/1.9.5'}, 
+            headers={'User-Agent': 'astrBot-TMP-Plugin/1.9.6'},
             timeout=aiohttp.ClientTimeout(total=timeout_sec),
             connector=connector,
             trust_env=True
@@ -1026,7 +1036,7 @@ class TmpBotPlugin(Star):
             async with self.session.get(url, timeout=self._cfg_int('api_timeout_seconds', 10)) as resp:
                 if resp.status == 200:
                     data = await resp.json()
-                    if isinstance(data, dict):
+                    if self._fullmap_players(data) is not None:
                         async with self._fullmap_lock:
                             self._fullmap_cache = data
                             self._fullmap_cache_ts = time.time()
@@ -1205,6 +1215,9 @@ class TmpBotPlugin(Star):
     def _remember_tmp_update_group(self, event: Any) -> None:
         """从收到的群消息中记录群会话，作为 OneBot 群列表接口不可用时的兜底。"""
         try:
+            get_platform_name = getattr(event, 'get_platform_name', None)
+            if callable(get_platform_name) and get_platform_name() == 'discord':
+                return
             get_group_id = getattr(event, 'get_group_id', None)
             group_id = get_group_id() if callable(get_group_id) else ''
             if not group_id:
@@ -1243,23 +1256,27 @@ class TmpBotPlugin(Star):
 
         live: Dict[str, Dict[str, str]] = {}
         confirmed_platforms = set()
+        allowed_platforms = set()
         insts = []
         try:
             manager = getattr(self.context, 'platform_manager', None)
             if manager is not None:
                 insts = manager.get_insts() or []
         except Exception as e:
-            logger.warning(f"获取平台列表失败，将只使用已记录的群: {e}")
+            logger.warning(f"获取平台列表失败，暂不发送联机插件更新通知: {e}")
+            return {}
 
         for platform in insts:
             try:
                 meta = platform.meta()
             except Exception:
                 continue
-            if getattr(meta, 'name', '') != 'aiocqhttp':
-                continue
+            platform_name = getattr(meta, 'name', '')
             platform_id = str(getattr(meta, 'id', '') or '')
-            if not platform_id:
+            if not platform_id or not platform_name or platform_name == 'discord':
+                continue
+            allowed_platforms.add(platform_id)
+            if platform_name != 'aiocqhttp':
                 continue
             bot = getattr(platform, 'bot', None)
             if bot is None or not hasattr(bot, 'call_action'):
@@ -1291,11 +1308,12 @@ class TmpBotPlugin(Star):
                     'name': str(item.get('group_name') or item.get('groupName') or ''),
                 }
 
-        groups = {
-            origin: info
-            for origin, info in known.items()
-            if info.get('platform_id') not in confirmed_platforms
-        }
+        # 按发送时实际使用的会话前缀过滤，兼容修复前保存的 Discord 频道。
+        groups = {}
+        for origin, info in known.items():
+            platform_id = origin.split(':', 1)[0]
+            if platform_id in allowed_platforms and platform_id not in confirmed_platforms:
+                groups[origin] = info
         groups.update(live)
         self._tmp_update_groups = dict(groups)
         return groups
@@ -1773,24 +1791,46 @@ class TmpBotPlugin(Star):
         return None
 
     # --- 内部工具方法 (保持不变) ---
-    def _load_bindings(self) -> Dict[str, Any]:
+    def _load_bindings(self, *, strict: bool = False) -> Dict[str, Any]:
         try:
-            if os.path.exists(self.bind_file):
-                with open(self.bind_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)
+            with open(self.bind_file, 'r', encoding='utf-8') as f:
+                bindings = json.load(f)
+            if not isinstance(bindings, dict):
+                raise ValueError('绑定数据必须是 JSON 对象')
+            return bindings
+        except FileNotFoundError:
             return {}
-        except Exception as e:
+        except (OSError, ValueError) as e:
             logger.error(f"加载绑定数据失败: {e}")
+            if strict:
+                raise
             return {}
 
     def _save_bindings(self, bindings: dict) -> bool:
+        temp_path = None
         try:
-            with open(self.bind_file, 'w', encoding='utf-8') as f:
+            directory = os.path.dirname(os.path.abspath(self.bind_file))
+            with tempfile.NamedTemporaryFile(
+                mode='w', encoding='utf-8', dir=directory, prefix='.bindings-', delete=False,
+            ) as f:
+                temp_path = f.name
                 json.dump(bindings, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temp_path, self.bind_file)
+            temp_path = None
             return True
-        except Exception as e:
+        except (OSError, TypeError, ValueError) as e:
             logger.error(f"保存绑定数据失败: {e}")
             return False
+        finally:
+            if temp_path is not None:
+                try:
+                    os.unlink(temp_path)
+                except FileNotFoundError:
+                    pass
+                except OSError as e:
+                    logger.warning(f"清理绑定临时文件失败: {e}")
 
     def _get_bound_tmp_id(self, user_id: str) -> Optional[str]:
         bindings = self._load_bindings()
@@ -1800,7 +1840,10 @@ class TmpBotPlugin(Star):
         return user_binding
 
     def _bind_tmp_id(self, user_id: str, tmp_id: str, player_name: str) -> bool:
-        bindings = self._load_bindings()
+        try:
+            bindings = self._load_bindings(strict=True)
+        except (OSError, ValueError):
+            return False
         bindings[user_id] = {
             'tmp_id': tmp_id,
             'player_name': player_name,
@@ -1809,7 +1852,10 @@ class TmpBotPlugin(Star):
         return self._save_bindings(bindings)
 
     def _unbind_tmp_id(self, user_id: str) -> bool:
-        bindings = self._load_bindings()
+        try:
+            bindings = self._load_bindings(strict=True)
+        except (OSError, ValueError):
+            return False
         if user_id in bindings:
             del bindings[user_id]
             return self._save_bindings(bindings)
@@ -2391,6 +2437,37 @@ class TmpBotPlugin(Star):
             logger.error(f"获取玩家封禁失败: {e}", exc_info=False)
             raise NetworkException(f"封禁记录查询失败: {e}") from e
 
+    @staticmethod
+    def _mentioned_user_id(event: AstrMessageEvent) -> Optional[str]:
+        """Skip mentions of the bot, including QQ's synthetic adapter mention."""
+        ignored = {'qq_official', 'all'}
+        get_self_id = getattr(event, 'get_self_id', None)
+        if callable(get_self_id):
+            self_id = get_self_id()
+            if self_id is not None:
+                ignored.add(str(self_id).strip())
+
+        message_obj = getattr(event, 'message_obj', None)
+        for seg in getattr(message_obj, 'message', None) or []:
+            if isinstance(seg, dict):
+                fields = seg
+            else:
+                fields = {key: getattr(seg, key, None) for key in ('type', 'data', 'qq', 'user_id', 'id')}
+            nested = fields.get('data')
+            if not isinstance(nested, dict):
+                nested = {}
+            if str(fields.get('type') or '').lower() != 'at':
+                # Older adapters may expose a bare qq attribute without a segment type.
+                if fields.get('type') or not fields.get('qq'):
+                    continue
+            for source in (fields, nested):
+                uid = source.get('qq') or source.get('user_id') or source.get('id')
+                if uid is not None and (uid := str(uid).strip()):
+                    if uid not in ignored:
+                        return uid
+                    break
+        return None
+
     async def _resolve_tmp_id_for_user_command(
         self,
         event: AstrMessageEvent,
@@ -2398,28 +2475,7 @@ class TmpBotPlugin(Star):
     ) -> Tuple[Optional[str], Optional[str]]:
         """解析用户命令中的 TMP ID、Steam ID、绑定账号或被 @ 用户。"""
         message_str = event.message_str.strip()
-        target_user_id = None
-        message_obj = getattr(event, "message_obj", None)
-        if message_obj is not None:
-            try:
-                chain = getattr(message_obj, "message", None) or []
-                for seg in chain:
-                    seg_type = getattr(seg, "type", None)
-                    if isinstance(seg, dict):
-                        seg_type = seg.get("type") or seg_type
-                    if isinstance(seg_type, str) and seg_type.lower() == "at":
-                        uid = (
-                            getattr(seg, "qq", None)
-                            or getattr(seg, "user_id", None)
-                            or getattr(seg, "id", None)
-                        )
-                        if isinstance(seg, dict):
-                            uid = seg.get("qq") or seg.get("user_id") or seg.get("id") or uid
-                        if uid:
-                            target_user_id = str(uid)
-                            break
-            except Exception:
-                target_user_id = None
+        target_user_id = self._mentioned_user_id(event)
 
         match = re.search(rf"{re.escape(command_name)}\s*(\d+)?", message_str)
         input_id = match.group(1) if match else None
@@ -2724,13 +2780,25 @@ class TmpBotPlugin(Star):
             logger.error(f"Trucky V3 API 解析失败: {e.__class__.__name__}", exc_info=True)
             return {'online': False, 'debug_error': f'Trucky V3 API 发生意外错误: {e.__class__.__name__}。'}
 
-    def _get_fullmap_player(self, tmp_id: str) -> Optional[Dict[str, Any]]:
-        data = self._fullmap_cache or {}
-        payload = None
+    @staticmethod
+    def _fullmap_players(data: Any) -> Optional[List[Any]]:
         if isinstance(data, dict):
-            payload = data.get('Data') or data.get('data') or data.get('players')
-        if not isinstance(payload, list):
-            return None
+            for key in ('Data', 'data', 'players'):
+                players = data.get(key)
+                if isinstance(players, list):
+                    return players
+        return None
+
+    def _fresh_fullmap_players(self) -> List[Any]:
+        # A failed refresh can reuse a recent snapshot, but cannot imply online status indefinitely.
+        age = time.time() - self._fullmap_cache_ts
+        ttl = min(2 * self._get_fullmap_interval(), 300)
+        if not (0 <= age < ttl):
+            return []
+        return self._fullmap_players(self._fullmap_cache) or []
+
+    def _get_fullmap_player(self, tmp_id: str) -> Optional[Dict[str, Any]]:
+        payload = self._fresh_fullmap_players()
         tid = str(tmp_id)
         for p in payload:
             if not isinstance(p, dict):
@@ -2808,6 +2876,80 @@ class TmpBotPlugin(Star):
         if isinstance(last_error, ApiResponseException):
             raise last_error
         raise NetworkException("排行榜 API 网络请求失败")
+
+    DLC_IMAGE_HOSTS = frozenset({
+        'cdn.steamstatic.com', 'cdn.cloudflare.steamstatic.com', 'cdn.akamai.steamstatic.com',
+        'cdn.fastly.steamstatic.com', 'shared.cloudflare.steamstatic.com',
+        'shared.akamai.steamstatic.com', 'shared.fastly.steamstatic.com',
+        'store.cloudflare.steamstatic.com', 'store.akamai.steamstatic.com',
+        'store.fastly.steamstatic.com', 'steamcdn-a.akamaihd.net',
+        'shared.steamstatic.com',
+    })
+
+    @classmethod
+    def _is_dlc_header_url(cls, url: str) -> bool:
+        try:
+            parsed = urlsplit(url)
+            if (
+                parsed.scheme != 'https' or parsed.hostname not in cls.DLC_IMAGE_HOSTS
+                or parsed.username is not None or parsed.port not in (None, 443)
+                or parsed.fragment
+            ):
+                return False
+        except ValueError:
+            return False
+        return bool(re.fullmatch(
+            r'/(?:store_item_assets/)?steam/apps/[0-9]+/(?:[a-z0-9_-]+/)*[a-z0-9_.-]+\.(?:jpe?g|png|webp)',
+            parsed.path,
+            re.IGNORECASE,
+        ))
+
+    async def _embed_dlc_headers(self, urls: List[str]) -> Dict[str, str]:
+        """Fetch bounded Steam bitmaps locally instead of letting the renderer request URLs."""
+        if not self.session:
+            return {}
+        candidates = dict.fromkeys(url for url in urls if self._is_dlc_header_url(url))
+        images: Dict[str, str] = {}
+        semaphore = asyncio.Semaphore(8)
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + 6
+        image_limit = 256 * 1024
+        remaining_bytes = 4 * 1024 * 1024
+
+        async def fetch(url: str) -> None:
+            nonlocal remaining_bytes
+            async with semaphore:
+                time_left = deadline - loop.time()
+                if time_left <= 0 or remaining_bytes <= 0:
+                    return
+                try:
+                    async with self.session.get(
+                        url, allow_redirects=False, timeout=aiohttp.ClientTimeout(total=time_left),
+                    ) as response:
+                        mime = response.content_type
+                        if response.status != 200 or mime not in ('image/jpeg', 'image/png', 'image/webp'):
+                            return
+                        if response.content_length is not None and response.content_length > image_limit:
+                            return
+                        content = bytearray()
+                        async for chunk in response.content.iter_chunked(65536):
+                            if len(content) + len(chunk) > image_limit:
+                                return
+                            content.extend(chunk)
+                except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+                    return
+                if mime == 'image/jpeg':
+                    valid = content.startswith(b'\xff\xd8\xff') and content.endswith(b'\xff\xd9')
+                elif mime == 'image/png':
+                    valid = content.startswith(b'\x89PNG\r\n\x1a\n') and content.endswith(b'IEND\xaeB`\x82')
+                else:
+                    valid = content.startswith(b'RIFF') and content[8:12] == b'WEBP'
+                if valid and len(content) <= remaining_bytes:
+                    remaining_bytes -= len(content)
+                    images[url] = f'data:{mime};base64,' + base64.b64encode(content).decode('ascii')
+
+        await asyncio.gather(*(fetch(url) for url in candidates))
+        return images
 
     async def _get_dlc_market_list(self, dlc_type: int = 1) -> List[Dict]:
         if not self.session:
@@ -3004,22 +3146,45 @@ class TmpBotPlugin(Star):
                 return payload
         return []
 
+    @staticmethod
+    def _finite_number(value: Any) -> Optional[float]:
+        if isinstance(value, bool):
+            return None
+        try:
+            number = float(value)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        return number if math.isfinite(number) else None
+
+    @classmethod
+    def _read_map_coordinates(cls, item: Any) -> Optional[Tuple[float, float]]:
+        if isinstance(item, (list, tuple)) and len(item) >= 2:
+            x, y = cls._finite_number(item[0]), cls._finite_number(item[1])
+        elif isinstance(item, dict):
+            def read_axis(*keys: str) -> Optional[float]:
+                for key in keys:
+                    number = cls._finite_number(item.get(key))
+                    if number is not None:
+                        return number
+                return None
+
+            x = read_axis('axisX', 'x', 'X', 'posX', 'pos_x')
+            y = read_axis('axisY', 'y', 'Y', 'posY', 'pos_y')
+        else:
+            return None
+        return (x, y) if x is not None and y is not None else None
+
     def _normalize_history_points(self, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         points: List[Dict[str, Any]] = []
         for it in items:
             if not isinstance(it, dict):
                 continue
-            x = it.get('axisX') or it.get('x') or it.get('posX') or it.get('pos_x')
-            y = it.get('axisY') or it.get('y') or it.get('posY') or it.get('pos_y')
-            if x is None or y is None:
+            coords = self._read_map_coordinates(it)
+            if coords is None:
                 continue
-            try:
-                axis_x = float(x)
-                axis_y = float(y)
-            except Exception:
-                continue
+            axis_x, axis_y = coords
             server_id = it.get('serverId') or it.get('server_id') or it.get('server') or 0
-            heading = it.get('heading') or 0
+            heading = self._finite_number(it.get('heading')) or 0
             ts_val = None
             update_time = it.get('updateTime') or it.get('time') or it.get('updatedAt') or it.get('update_time')
             if update_time:
@@ -3122,19 +3287,10 @@ class TmpBotPlugin(Star):
         key = str(server_key or "").strip().lower()
 
         def _point_from_item(item: Any) -> Optional[Dict[str, float]]:
-            if isinstance(item, (list, tuple)) and len(item) >= 2:
-                x, y = item[0], item[1]
-            elif isinstance(item, dict):
-                x = item.get('axisX') or item.get('x') or item.get('posX') or item.get('pos_x')
-                y = item.get('axisY') or item.get('y') or item.get('posY') or item.get('pos_y')
-            else:
+            coords = self._read_map_coordinates(item)
+            if coords is None:
                 return None
-            if x is None or y is None:
-                return None
-            try:
-                return { 'x': float(x), 'y': float(y) }
-            except Exception:
-                return None
+            return {'x': coords[0], 'y': coords[1]}
 
         def _server_value(item: Any) -> Optional[str]:
             if not isinstance(item, dict):
@@ -3585,6 +3741,7 @@ class TmpBotPlugin(Star):
             "2.7": "特色区域和事件服务器规则",
             "2.8": "历史原因",
             "2.9": "保存修改",
+            "3": "保存编辑",
             "3.1": "违规保存编辑",
             "3.2": "不兼容或缺失组件",        }
         keyword_map = {
@@ -3713,12 +3870,12 @@ class TmpBotPlugin(Star):
             async for r in self.tmpdlc_list(event):
                 yield r
             return
-        # QQ 官方机器人的指令可能保留 / 前缀；同时让空参数进入用法提示。
-        if re.fullmatch(r'/?绑定\s*\d*', msg):
+        binding_text = self._binding_command_text(target_event)
+        if re.fullmatch(r'绑定\s*[0-9]*', binding_text):
             async for r in self.tmpbind(target_event):
                 yield r
             return
-        if re.fullmatch(r'/?解绑', msg):
+        if binding_text == '解绑':
             async for r in self.tmpunbind(target_event):
                 yield r
             return
@@ -3792,13 +3949,15 @@ class TmpBotPlugin(Star):
 
     @filter.command("绑定")
     async def cmd_tmp_bind(self, event: AstrMessageEvent, tmp_id: str | None = None):
-        """绑定 TMP ID 或 Steam ID，实际处理由消息监听器完成。"""
-        return
+        """绑定 TMP ID 或 Steam ID。"""
+        async for result in self.tmpbind(event):
+            yield result
 
     @filter.command("解绑")
     async def cmd_tmp_unbind(self, event: AstrMessageEvent):
-        """解除 TMP ID 绑定，实际处理由消息监听器完成。"""
-        return
+        """解除 TMP ID 绑定。"""
+        async for result in self.tmpunbind(event):
+            yield result
 
     @filter.command("查询")
     async def cmd_tmp_query(self, event: AstrMessageEvent, tmp_id: str | None = None):
@@ -3933,34 +4092,7 @@ class TmpBotPlugin(Star):
         message_str = event.message_str.strip()
         user_id = event.get_sender_id()
 
-        target_user_id = None
-        message_obj = getattr(event, "message_obj", None)
-        if message_obj is not None:
-            try:
-                chain = getattr(message_obj, "message", None) or []
-                for seg in chain:
-                    seg_type = getattr(seg, "type", None)
-                    if isinstance(seg, dict):
-                        seg_type = seg.get("type") or seg_type
-                    if isinstance(seg_type, str) and seg_type.lower() == "at":
-                        uid = (
-                            getattr(seg, "qq", None)
-                            or getattr(seg, "user_id", None)
-                            or getattr(seg, "id", None)
-                        )
-                        if isinstance(seg, dict):
-                            uid = seg.get("qq") or seg.get("user_id") or seg.get("id") or uid
-                        if uid:
-                            target_user_id = str(uid)
-                            break
-                    uid2 = getattr(seg, "qq", None)
-                    if isinstance(seg, dict):
-                        uid2 = seg.get("qq") or uid2
-                    if uid2:
-                        target_user_id = str(uid2)
-                        break
-            except Exception:
-                target_user_id = None
+        target_user_id = self._mentioned_user_id(event)
 
         match = re.search(r'(查询|查)\s*(\d+)', message_str) 
         input_id = match.group(2) if match else None
@@ -4325,7 +4457,7 @@ class TmpBotPlugin(Star):
   <div style=\"font-size:20px;font-weight:600;margin:0;padding:12px 0 8px 0;\">DLC 列表</div>
   {% for it in items %}
   <div style=\"display:flex;flex-direction:row;background:#24313a;margin:0 0 12px 0;padding:12px;\">
-    <img src=\"{{ it.headerImageUrl|e }}\" style=\"width:210px;height:auto;object-fit:cover;\"/>
+    {% if it.header_image %}<img src=\"{{ it.header_image|e }}\" style=\"width:210px;height:auto;object-fit:cover;\"/>{% endif %}
     <div style=\"flex:1;padding:0 12px;\">
       <div style=\"font-size:18px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;\">{{ it.name|e }}</div>
       <div style=\"font-size:14px;color:#e5e5e5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-overflow:ellipsis;\">{{ it.desc|e }}</div>
@@ -4341,11 +4473,12 @@ class TmpBotPlugin(Star):
   {% endfor %}
 </div>
 """
+            headers = [str(it.get('headerImageUrl') or '').strip() for it in items]
+            embedded_headers = await self._embed_dlc_headers(headers)
             mapped: List[Dict[str, Any]] = []
-            for it in items:
+            for it, header in zip(items, headers):
                 name = str(it.get('name') or '').strip()
                 desc = str(it.get('desc') or '').strip()
-                header = str(it.get('headerImageUrl') or '').strip()
                 original = it.get('originalPrice')
                 finalp = it.get('finalPrice')
                 discount = it.get('discount') or 0
@@ -4357,7 +4490,7 @@ class TmpBotPlugin(Star):
                 mapped.append({
                     'name': name,
                     'desc': desc,
-                    'headerImageUrl': header,
+                    'header_image': embedded_headers.get(header, ''),
                     'price_str': _p(finalp),
                     'original_price_str': _p(original),
                     'discount': int(discount) if isinstance(discount, (int, float)) else 0
@@ -4401,45 +4534,25 @@ class TmpBotPlugin(Star):
         message_str = event.message_str.strip()
         user_id = event.get_sender_id()
 
-        target_user_id = None
+        target_user_id = self._mentioned_user_id(event)
         message_text_parts = []
         message_obj = getattr(event, "message_obj", None)
-        if message_obj is not None:
-            try:
-                chain = getattr(message_obj, "message", None) or []
-                for seg in chain:
-                    seg_type = getattr(seg, "type", None)
-                    if isinstance(seg, dict):
-                        seg_type = seg.get("type") or seg_type
-                    seg_data = getattr(seg, "data", None)
-                    if isinstance(seg, dict):
-                        seg_data = seg.get("data") or seg_data
-                    if not isinstance(seg_data, dict):
-                        seg_data = {}
-                    normalized_type = str(seg_type or "").lower()
-                    if normalized_type == "at":
-                        uid = (
-                            getattr(seg, "qq", None)
-                            or getattr(seg, "user_id", None)
-                            or getattr(seg, "id", None)
-                            or seg_data.get("qq")
-                            or seg_data.get("user_id")
-                            or seg_data.get("id")
-                        )
-                        if isinstance(seg, dict):
-                            uid = seg.get("qq") or seg.get("user_id") or seg.get("id") or uid
-                        if uid:
-                            target_user_id = str(uid)
-                        continue
-                    if normalized_type in {"text", "plain"} or isinstance(seg_data.get("text"), str):
-                        text_value = getattr(seg, "text", None) or seg_data.get("text")
-                        if isinstance(seg, dict):
-                            text_value = seg_data.get("text") or seg.get("text") or text_value
-                        if text_value is not None:
-                            message_text_parts.append(str(text_value))
-            except Exception:
-                target_user_id = None
-                message_text_parts = []
+        for seg in getattr(message_obj, "message", None) or []:
+            if isinstance(seg, dict):
+                seg_type = seg.get("type")
+                seg_data = seg.get("data")
+                text_value = seg.get("text")
+            else:
+                seg_type = getattr(seg, "type", None)
+                seg_data = getattr(seg, "data", None)
+                text_value = getattr(seg, "text", None)
+            normalized_type = str(seg_type or "").lower()
+            if normalized_type == "at":
+                continue
+            if isinstance(seg_data, dict):
+                text_value = text_value or seg_data.get("text")
+            if isinstance(text_value, str) and text_value:
+                message_text_parts.append(text_value)
         if message_text_parts:
             message_str = "".join(message_text_parts).strip()
 
@@ -4692,25 +4805,20 @@ class TmpBotPlugin(Star):
                 yield event.plain_result(f"{server_label} 暂无今日足迹数据")
             return
 
-        def _to_km(val):
-            try:
-                v = float(val)
-                if v > 10000:
-                    v = v / 1000.0
-                return round(v, 2)
-            except Exception:
-                return None
-
-        distance_km = _to_km(meta.get('distance') or meta.get('mileage') or meta.get('totalDistance') or meta.get('totalMileage'))
+        distance_km = None
+        distance_scope = 'server'
+        for field in ('distance', 'mileage', 'totalDistance', 'totalMileage'):
+            value = self._finite_number(meta.get(field))
+            if value is not None and value >= 0:
+                distance_km = value / 1000.0 if value > 10000 else value
+                break
         start_time = meta.get('startTime') or meta.get('start_time') or meta.get('beginTime') or meta.get('begin_time')
         end_time = meta.get('endTime') or meta.get('end_time') or meta.get('finishTime') or meta.get('finish_time')
         if distance_km is None:
-            try:
-                daily_km = float(stats_info.get('daily_km') or 0)
-                if daily_km > 0:
-                    distance_km = round(daily_km, 2)
-            except Exception:
-                distance_km = None
+            daily_km = self._finite_number(stats_info.get('daily_km'))
+            if daily_km is not None and daily_km > 0:
+                distance_km = daily_km
+                distance_scope = 'daily_total'
 
         point_timestamps = []
         for point in points:
@@ -4904,12 +5012,12 @@ class TmpBotPlugin(Star):
     ets: {
       tileUrl: {{ tile_url_ets|tojson }},
       fallbackUrl: 'https://ets_tiles.cnly.top/20260903/tmp-ets-yellow/Tiles/{z}/{x}/{y}.png',
-      multipliers: { x: 70272, y: 76157 },
       breakpoints: { uk: { x: -31056.8, y: -5832.867 } },
       bounds: { x:131072, y:131072 },
       maxZoom: 8, minZoom: 2,
       calc: function(xx, yy) {
-        return [ xx / 1.609055 + cfg.ets.multipliers.x, yy / 1.609055 + cfg.ets.multipliers.y ];
+        var x1 = -113177.305, x2 = 97925.63, y1 = -122648.086, y2 = 88454.85;
+        return [ (xx - x1) / (x2 - x1) * 131072, (yy - y1) / (y2 - y1) * 131072 ];
       }
     },
     promods: {
@@ -5020,6 +5128,7 @@ class TmpBotPlugin(Star):
             'points': points,
             'points_count': len(points),
             'distance_km': distance_km,
+            'distance_scope': distance_scope,
             'start_time': start_time,
             'end_time': end_time,
             'route_start_label': route_start_label,
@@ -5059,12 +5168,33 @@ class TmpBotPlugin(Star):
             message += f"\n上次在线: {last_online_formatted}"
         yield event.plain_result(message)
 
+    @staticmethod
+    def _binding_command_text(event: AstrMessageEvent) -> str:
+        text = (getattr(event, 'message_str', '') or '').strip()
+        get_platform_name = getattr(event, 'get_platform_name', None)
+        if callable(get_platform_name) and get_platform_name() == 'qq_official':
+            text = re.sub(
+                r'^(?:<@!?[^<>\s]+>|<qqbot-at-user\s+id="[^"]+"\s*/>)\s*', '', text
+            )
+        return re.sub(r'^[/／]\s*', '', text)
+
+    @staticmethod
+    def _claim_binding_event(event: AstrMessageEvent) -> bool:
+        if getattr(event, '_tmp_bot_binding_handled', False):
+            return False
+        event._tmp_bot_binding_handled = True
+        return True
+
     async def tmpbind(self, event: AstrMessageEvent):
         """[命令: 绑定] 绑定您的聊天账号与TMP ID。支持输入 TMP ID 或 Steam ID。"""
-        message_str = event.message_str.strip()
-        user_id = event.get_sender_id()
-        
-        match = re.fullmatch(r'/?绑定\s*(\d+)', message_str)
+        if not self._claim_binding_event(event):
+            return
+        user_id = str(event.get_sender_id() or '').strip()
+        if not user_id:
+            yield event.plain_result("未获取到你的账号 ID，无法绑定")
+            return
+
+        match = re.fullmatch(r'绑定\s*([0-9]+)', self._binding_command_text(event))
         input_id = match.group(1) if match else None
 
         if not input_id:
@@ -5100,9 +5230,7 @@ class TmpBotPlugin(Star):
             return
 
         player_name = player_info.get('name', '未知')
-        
-        steam_id_display = self._get_steam_id_from_player_info(player_info)
-        
+
         if self._bind_tmp_id(user_id, tmp_id, player_name):
             
             message = f"绑定成功！\n"
@@ -5113,15 +5241,26 @@ class TmpBotPlugin(Star):
 
     async def tmpunbind(self, event: AstrMessageEvent):
         """[命令: 解绑] 解除当前用户的TruckersMP ID绑定。"""
-        user_id = event.get_sender_id()
-        user_binding = self._load_bindings().get(user_id, {})
-        tmp_id = user_binding.get('tmp_id')
+        if not self._claim_binding_event(event):
+            return
+        user_id = str(event.get_sender_id() or '').strip()
+        if not user_id:
+            yield event.plain_result("未获取到你的账号 ID，无法解绑")
+            return
+        try:
+            user_binding = self._load_bindings(strict=True).get(user_id)
+        except (OSError, ValueError):
+            yield event.plain_result("暂时无法读取绑定数据，解绑未执行")
+            return
+        tmp_id = user_binding.get('tmp_id') if isinstance(user_binding, dict) else user_binding
         
         if not tmp_id:
             yield event.plain_result("您还没有绑定任何TMP账号")
             return
         
-        player_name = user_binding.get('player_name', '未知玩家')
+        player_name = '未知玩家'
+        if isinstance(user_binding, dict):
+            player_name = user_binding.get('player_name') or player_name
         
         if self._unbind_tmp_id(user_id):
             yield event.plain_result(f"解绑成功！\n已解除与TMP玩家 {player_name}的绑定")
@@ -5136,34 +5275,7 @@ class TmpBotPlugin(Star):
         message_str = event.message_str.strip()
         user_id = event.get_sender_id()
         
-        target_user_id = None
-        message_obj = getattr(event, "message_obj", None)
-        if message_obj is not None:
-            try:
-                chain = getattr(message_obj, "message", None) or []
-                for seg in chain:
-                    seg_type = getattr(seg, "type", None)
-                    if isinstance(seg, dict):
-                        seg_type = seg.get("type") or seg_type
-                    if isinstance(seg_type, str) and seg_type.lower() == "at":
-                        uid = (
-                            getattr(seg, "qq", None)
-                            or getattr(seg, "user_id", None)
-                            or getattr(seg, "id", None)
-                        )
-                        if isinstance(seg, dict):
-                            uid = seg.get("qq") or seg.get("user_id") or seg.get("id") or uid
-                        if uid:
-                            target_user_id = str(uid)
-                            break
-                    uid2 = getattr(seg, "qq", None)
-                    if isinstance(seg, dict):
-                        uid2 = seg.get("qq") or uid2
-                    if uid2:
-                        target_user_id = str(uid2)
-                        break
-            except Exception:
-                target_user_id = None
+        target_user_id = self._mentioned_user_id(event)
 
         match = re.search(r'(定位)\s*(\d+)', message_str) 
         input_id = match.group(2) if match else None
@@ -5338,37 +5450,29 @@ class TmpBotPlugin(Star):
                             logger.info(f"定位: 底图查询返回状态 {resp.status}，尝试备用源")
                     except Exception as e:
                         logger.info(f"定位: 底图查询异常: {e}")
-            if not area_players and self._fullmap_cache:
-                data = self._fullmap_cache or {}
-                payload = data.get('Data') or data.get('data') or data.get('players')
-                if isinstance(payload, list):
-                    for p in payload:
-                        if not isinstance(p, dict):
-                            continue
-                        sid = p.get('ServerId') or p.get('serverId') or p.get('server_id')
-                        if sid is None or int(sid) != int(server_id or 0):
-                            continue
-                        px = p.get('X') or p.get('x') or p.get('axisX') or p.get('posX') or p.get('pos_x')
-                        py = p.get('Y') or p.get('y') or p.get('axisY') or p.get('posY') or p.get('pos_y')
-                        if px is None or py is None:
-                            continue
-                        try:
-                            fx = float(px)
-                            fy = float(py)
-                        except Exception:
-                            continue
-                        if fx < min(ax, bx) or fx > max(ax, bx) or fy < min(by, ay) or fy > max(by, ay):
-                            continue
-                        pid = p.get('MpId') or p.get('mp_id') or p.get('tmpId') or p.get('tmp_id') or p.get('id')
-                        area_players.append({'tmpId': str(pid) if pid is not None else '', 'axisX': fx, 'axisY': fy})
+            if not area_players:
+                for p in self._fresh_fullmap_players():
+                    if not isinstance(p, dict):
+                        continue
+                    sid = p.get('ServerId') or p.get('serverId') or p.get('server_id')
+                    if str(sid) != str(server_id or 0):
+                        continue
+                    coords = self._read_map_coordinates(p)
+                    if coords is None:
+                        continue
+                    fx, fy = coords
+                    if not (min(ax, bx) <= fx <= max(ax, bx) and min(by, ay) <= fy <= max(by, ay)):
+                        continue
+                    pid = p.get('MpId') or p.get('mp_id') or p.get('tmpId') or p.get('tmp_id') or p.get('id')
+                    area_players.append({'tmpId': str(pid) if pid is not None else '', 'axisX': fx, 'axisY': fy})
             normalized_players = []
             for p in area_players:
                 if not isinstance(p, dict):
                     continue
-                axis_x = p.get('axisX') or p.get('x') or p.get('posX') or p.get('pos_x')
-                axis_y = p.get('axisY') or p.get('y') or p.get('posY') or p.get('pos_y')
-                if axis_x is None or axis_y is None:
+                coords = self._read_map_coordinates(p)
+                if coords is None:
                     continue
+                axis_x, axis_y = coords
                 pid = p.get('tmpId') or p.get('mpId') or p.get('playerId') or p.get('id')
                 normalized_players.append({
                     'tmpId': str(pid) if pid is not None else '',
@@ -5382,10 +5486,9 @@ class TmpBotPlugin(Star):
             map_type = 'promods' if int(server_id or 0) in [50, 51] else 'ets'
             default_tile_ets = "https://ets2.online/map/ets2map_161/{z}/{x}/{y}.png"
             default_tile_promods = "https://ets2.online/map/ets2mappromods_158/{z}/{x}/{y}.png"
-            tile_url_ets = self._tile_url(
-                'ets', default_tile_ets)
-            tile_url_promods = self._tile_url(
-                'promods', default_tile_promods)
+            custom_tile_urls = {layer: self._tile_url(layer, '') for layer in ('ets', 'promods')}
+            tile_url_ets = custom_tile_urls['ets'] or default_tile_ets
+            tile_url_promods = custom_tile_urls['promods'] or default_tile_promods
             map_profiles = {
                 'ets': self._location_map_profile('ets', tile_url_ets),
                 'promods': self._location_map_profile('promods', tile_url_promods),
@@ -5397,11 +5500,14 @@ class TmpBotPlugin(Star):
                     map_profiles[layer]['fallback'] = self._location_map_profile(layer, default_url)
             logger.info(f"定位: tile_ets={tile_url_ets}")
             logger.info(f"定位: tile_promods={tile_url_promods}")
-            tracker_profile = await self._prepare_location_basemap(map_type, float(cx), float(cy))
-            if self._cfg_str(f'extra_tile_{map_type}_url', '').strip():
-                map_profiles[map_type]['fallback'] = tracker_profile
-            else:
-                map_profiles[map_type] = tracker_profile
+            if not custom_tile_urls[map_type]:
+                try:
+                    tracker_profile = await self._prepare_location_basemap(map_type, float(cx), float(cy))
+                except (aiohttp.ClientError, asyncio.TimeoutError, NetworkException, ValueError) as exc:
+                    logger.warning(f"定位: 追踪地图不可用，使用默认底图 ({type(exc).__name__})")
+                else:
+                    tracker_profile['fallback'] = map_profiles[map_type]
+                    map_profiles[map_type] = tracker_profile
 
             map_tmpl = """
 <link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css\">
@@ -5560,6 +5666,12 @@ class TmpBotPlugin(Star):
       map.unproject([c.bounds.x, 0], c.maxZoom)
     );
     map.setMaxBounds(b);
+    var switched = false;
+    function useFallback() {
+      if (switched || !c.fallback) return;
+      switched = true;
+      applyProfile(c.fallback);
+    }
     if (c.trackerTiles) {
       tileLayer = L.layerGroup().addTo(map);
       c.images.forEach(function(tile) {
@@ -5567,17 +5679,11 @@ class TmpBotPlugin(Star):
           map.unproject([tile.left*c.pixelScale, (tile.top+1000)*c.pixelScale], c.maxZoom),
           map.unproject([(tile.left+1000)*c.pixelScale, tile.top*c.pixelScale], c.maxZoom)
         );
-        L.imageOverlay(tile.url, bounds, {interactive:false}).addTo(tileLayer);
+        L.imageOverlay(tile.url, bounds, {interactive:false}).on('error', useFallback).addTo(tileLayer);
       });
     } else {
-      tileLayer = L.tileLayer(c.tileUrl, { minZoom:c.minZoom, maxZoom:10, maxNativeZoom:c.maxZoom, tileSize:c.tileSize, bounds:b, reuseTiles:true }).addTo(map);
+      tileLayer = L.tileLayer(c.tileUrl, { minZoom:c.minZoom, maxZoom:10, maxNativeZoom:c.maxZoom, tileSize:c.tileSize, bounds:b, reuseTiles:true }).on('tileerror', useFallback).addTo(map);
     }
-    var switched = false;
-    tileLayer.on('tileerror', function() {
-      if (switched || !c.fallback) return;
-      switched = true;
-      applyProfile(c.fallback);
-    });
     players.forEach(function(p) {
       if (p.tmpId === {{ me_id|tojson }}) return;
       var latlng = map.unproject(project(p.axisX, p.axisY, c), c.maxZoom);
@@ -6341,15 +6447,22 @@ class TmpBotPlugin(Star):
             })
 
         first = server_data[0]
-        positive_distances = {
-            round(float(item['distance_km']), 1)
-            for item in server_data
-            if item.get('distance_km') is not None
-        }
-        if len(positive_distances) == 1:
-            total_distance = positive_distances.pop()
-        else:
-            total_distance = round(sum(positive_distances), 1) if positive_distances else None
+        server_distances = []
+        daily_total = None
+        for item in server_data:
+            distance = self._finite_number(item.get('distance_km'))
+            if distance is None or distance < 0:
+                continue
+            if item.get('distance_scope') == 'daily_total':
+                if daily_total is None:
+                    daily_total = distance
+            else:
+                server_distances.append(distance)
+        total_distance = daily_total
+        if total_distance is None and server_distances:
+            total_distance = sum(server_distances)
+        if total_distance is not None:
+            total_distance = round(total_distance, 1)
 
         combined_tmpl = """
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
@@ -6460,8 +6573,8 @@ class TmpBotPlugin(Star):
   var cfg = {
     ets: {
       fallbackUrl:'https://ets_tiles.cnly.top/20260903/tmp-ets-yellow/Tiles/{z}/{x}/{y}.png',
-      multipliers:{x:70272,y:76157}, bounds:{x:131072,y:131072}, maxZoom:8, minZoom:2,
-      calc:function(xx,yy){return [xx/1.609055+cfg.ets.multipliers.x,yy/1.609055+cfg.ets.multipliers.y];}
+      bounds:{x:131072,y:131072}, maxZoom:8, minZoom:2,
+      calc:function(xx,yy){var x1=-113177.305,x2=97925.63,y1=-122648.086,y2=88454.85;return [(xx-x1)/(x2-x1)*131072,(yy-y1)/(y2-y1)*131072];}
     },
     promods: {
       fallbackUrl:'https://ets2.online/map/ets2mappromods_156/{z}/{x}/{y}.png',
@@ -6469,22 +6582,12 @@ class TmpBotPlugin(Star):
       calc:function(xx,yy){return [xx/2.598541+cfg.promods.multipliers.x,yy/2.598541+cfg.promods.multipliers.y];}
     }
   };
-  var groups = [
-  {% for group in map_groups %}
-    { type:{{ group.map_type|tojson }}, tileUrl:{{ group.tile_url|tojson }}, routes:[
-      {% for route in group.routes %}
-      { color:{{ route.color|tojson }}, points:[
-        {% for p in route.points %}{axisX:{{ p.axisX }},axisY:{{ p.axisY }},serverId:{{ p.serverId }},heading:{{ p.heading }},ts:{{ p.ts }}}{% if not loop.last %},{% endif %}{% endfor %}
-      ] }{% if not loop.last %},{% endif %}
-      {% endfor %}
-    ] }{% if not loop.last %},{% endif %}
-  {% endfor %}
-  ];
+  var groups = {{ map_groups|tojson }};
   groups.forEach(function(group, index) {
     var map = L.map('map-' + (index + 1), {attributionControl:false,crs:L.CRS.Simple,zoomControl:false,zoomSnap:0.2,zoomDelta:0.2});
-    var c = cfg[group.type];
+    var c = cfg[group.map_type];
     var world = L.latLngBounds(map.unproject([0,c.bounds.y],c.maxZoom),map.unproject([c.bounds.x,0],c.maxZoom));
-    var tile = L.tileLayer(group.tileUrl || c.fallbackUrl,{minZoom:0,minNativeZoom:c.minZoom,maxZoom:10,maxNativeZoom:c.maxZoom,tileSize:512,bounds:world,reuseTiles:true}).addTo(map);
+    var tile = L.tileLayer(group.tile_url || c.fallbackUrl,{minZoom:0,minNativeZoom:c.minZoom,maxZoom:10,maxNativeZoom:c.maxZoom,tileSize:512,bounds:world,reuseTiles:true}).addTo(map);
     var switched = false;
     tile.on('tileerror',function(){if(switched||!c.fallbackUrl)return;switched=true;map.removeLayer(tile);tile=L.tileLayer(c.fallbackUrl,{minZoom:0,minNativeZoom:c.minZoom,maxZoom:10,maxNativeZoom:c.maxZoom,tileSize:512,bounds:world,reuseTiles:true}).addTo(map);});
     map.setMaxBounds(world);
@@ -6759,34 +6862,7 @@ class TmpBotPlugin(Star):
         message_str = event.message_str.strip()
         user_id = event.get_sender_id()
 
-        target_user_id = None
-        message_obj = getattr(event, "message_obj", None)
-        if message_obj is not None:
-            try:
-                chain = getattr(message_obj, "message", None) or []
-                for seg in chain:
-                    seg_type = getattr(seg, "type", None)
-                    if isinstance(seg, dict):
-                        seg_type = seg.get("type") or seg_type
-                    if isinstance(seg_type, str) and seg_type.lower() == "at":
-                        uid = (
-                            getattr(seg, "qq", None)
-                            or getattr(seg, "user_id", None)
-                            or getattr(seg, "id", None)
-                        )
-                        if isinstance(seg, dict):
-                            uid = seg.get("qq") or seg.get("user_id") or seg.get("id") or uid
-                        if uid:
-                            target_user_id = str(uid)
-                            break
-                    uid2 = getattr(seg, "qq", None)
-                    if isinstance(seg, dict):
-                        uid2 = seg.get("qq") or uid2
-                    if uid2:
-                        target_user_id = str(uid2)
-                        break
-            except Exception:
-                target_user_id = None
+        target_user_id = self._mentioned_user_id(event)
 
         match = re.search(r'历史车队\s*(\d+)?', message_str)
         input_id = match.group(1) if match else None
