@@ -72,6 +72,7 @@ class LifecycleMixin:
         self._tmp_update_state: Dict[str, Any] = {}
         self._tmp_update_groups: Dict[str, Dict[str, str]] = {}
         self._tmp_update_task: Optional[asyncio.Task] = None
+        self._tmp_update_check_lock = asyncio.Lock()
 
     def _cfg_bool(self, key: str, default: bool) -> bool:
         v = self.config.get(key, default)

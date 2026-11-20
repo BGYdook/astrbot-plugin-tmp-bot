@@ -113,6 +113,123 @@ class PluginTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(session.closed)
         self.assertIsNone(self.plugin.session)
 
+    def prepare_update_notifications(self, groups, send_message=None):
+        self.plugin.config['tmp_update_send_delay_seconds'] = 0
+        self.plugin.context.send_message = send_message or AsyncMock(return_value=True)
+        self.plugin.context.platform_manager = SimpleNamespace(get_insts=lambda: [
+            SimpleNamespace(meta=lambda: SimpleNamespace(id='qq', name='qq_official')),
+            SimpleNamespace(meta=lambda: SimpleNamespace(id='other', name='qq_official')),
+        ])
+        self.plugin._tmp_update_groups = groups
+        self.plugin._tmp_update_state['last_snapshot'] = {
+            'name': 'old', 'ets2': '1.61', 'ats': '1.61',
+        }
+        version_patch = patch.object(self.plugin, '_fetch_tmp_plugin_version', AsyncMock(return_value={
+            'name': '0.7.13.1', 'ets2': '1.62.3.3s', 'ats': '1.62.2.2s',
+            'official': {'ets2': '1.62.3.3s'},
+        }))
+        version_patch.start()
+        self.addCleanup(version_patch.stop)
+        # Standalone compatibility stubs do not construct AstrBot message chains.
+        message_patch = patch(f'{PACKAGE_NAME}.features.updates.MessageEventResult')
+        message_patch.start()
+        self.addCleanup(message_patch.stop)
+
+    async def test_update_notifies_each_group_once_despite_member_sessions(self):
+        self.prepare_update_notifications({
+            'qq:GroupMessage:user1_group': {'group_id': 'group'},
+            'qq:GroupMessage:user2_group': {'group_id': 'group'},
+            'qq:GroupMessage:group': {'group_id': 'group'},
+            'qq:GroupMessage:another': {'group_id': 'another'},
+            'other:GroupMessage:group': {'group_id': 'group'},
+        })
+        await self.plugin._check_tmp_plugin_update()
+        await self.plugin._check_tmp_plugin_update()
+        self.assertEqual(self.plugin.context.send_message.await_count, 3)
+        self.assertIsNone(self.plugin._tmp_update_state['pending'])
+
+    async def test_update_retry_and_reload_skip_successful_group_with_new_session(self):
+        self.prepare_update_notifications({
+            'qq:GroupMessage:user1_open_group': {'group_id': 'open_group'},
+            'qq:GroupMessage:failed': {'group_id': 'failed'},
+        }, AsyncMock(side_effect=[True, False]))
+        await self.plugin._check_tmp_plugin_update()
+        self.assertIsNotNone(self.plugin._tmp_update_state['pending'])
+
+        self.plugin._load_tmp_update_state()
+        self.plugin._tmp_update_groups = {
+            'qq:GroupMessage:user2_open_group': {'group_id': 'open_group'},
+            'qq:GroupMessage:failed': {'group_id': 'failed'},
+        }
+        self.plugin.context.send_message = AsyncMock(return_value=True)
+        await self.plugin._check_tmp_plugin_update()
+        self.plugin.context.send_message.assert_awaited_once()
+        self.assertEqual(self.plugin.context.send_message.await_args.args[0], 'qq:GroupMessage:failed')
+        self.assertIsNone(self.plugin._tmp_update_state['pending'])
+
+    async def test_update_retry_migrates_legacy_notified_sessions(self):
+        self.prepare_update_notifications({
+            'qq:GroupMessage:user1_group': {'group_id': 'group'},
+            'qq:GroupMessage:user2_group': {'group_id': 'group'},
+            'qq:GroupMessage:failed': {'group_id': 'failed'},
+        })
+        snapshot = await self.plugin._fetch_tmp_plugin_version()
+        self.plugin._tmp_update_state.update({
+            'last_snapshot': snapshot,
+            'pending': {'snapshot': snapshot, 'notified': ['qq:GroupMessage:user1_group'], 'attempts': 1},
+        })
+        self.plugin._save_tmp_update_state()
+        self.plugin._load_tmp_update_state()
+        await self.plugin._check_tmp_plugin_update()
+        self.plugin.context.send_message.assert_awaited_once()
+        self.assertEqual(self.plugin.context.send_message.await_args.args[0], 'qq:GroupMessage:failed')
+
+    async def test_concurrent_update_checks_send_once(self):
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def send_message(*args):
+            entered.set()
+            await release.wait()
+            return True
+
+        self.prepare_update_notifications({
+            'qq:GroupMessage:group': {'group_id': 'group'},
+        }, AsyncMock(side_effect=send_message))
+        first = asyncio.create_task(self.plugin._check_tmp_plugin_update())
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        second = asyncio.create_task(self.plugin._check_tmp_plugin_update())
+        try:
+            await asyncio.sleep(0)
+            self.assertEqual(self.plugin.context.send_message.await_count, 1)
+        finally:
+            release.set()
+            await asyncio.wait_for(asyncio.gather(first, second), timeout=1)
+        self.plugin.context.send_message.assert_awaited_once()
+
+    async def test_update_excluded_session_excludes_all_aliases_of_group(self):
+        self.prepare_update_notifications({
+            'qq:GroupMessage:user1_group': {'group_id': 'group'},
+            'qq:GroupMessage:user2_group': {'group_id': 'group'},
+        })
+        self.plugin.config['tmp_update_exclude_groups'] = 'qq:GroupMessage:user2_group'
+        await self.plugin._check_tmp_plugin_update()
+        self.plugin.context.send_message.assert_not_awaited()
+
+    async def test_update_baseline_is_silent_and_later_update_notifies_again(self):
+        self.prepare_update_notifications({
+            'qq:GroupMessage:group': {'group_id': 'group'},
+        })
+        self.plugin._tmp_update_state = {}
+        await self.plugin._check_tmp_plugin_update()
+        self.plugin.context.send_message.assert_not_awaited()
+        self.plugin._fetch_tmp_plugin_version.return_value = {
+            'name': '0.7.13.2', 'ets2': '1.62.3.3s', 'ats': '1.62.2.2s',
+            'official': {'ets2': '1.62.3.3s'},
+        }
+        await self.plugin._check_tmp_plugin_update()
+        self.plugin.context.send_message.assert_awaited_once()
+
     async def test_city_tables_load_and_existing_binding_format_remains_readable(self):
         self.assertEqual(self.plugin.CITY_MAP_EN_TO_CN.get("cologne"), "科隆")
         Path(self.plugin.bind_file).write_text('{"sender":"42"}', encoding="utf-8")

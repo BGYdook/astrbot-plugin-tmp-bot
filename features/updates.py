@@ -75,6 +75,14 @@ class UpdateMixin:
         return ''
 
     @staticmethod
+    def _tmp_update_group_key(origin: str, info: Dict[str, str]) -> str:
+        """同一平台的同一个群共用发送记录，不受成员隔离会话等前缀影响。"""
+        platform_id = origin.split(':', 1)[0]
+        parts = origin.split(':', 2)
+        group_id = str(info.get('group_id') or (parts[2] if len(parts) == 3 else ''))
+        return f"{platform_id}:GroupMessage:{group_id}"
+
+    @staticmethod
     def _tmp_version_key(snapshot: Optional[Dict[str, Any]]) -> Tuple[str, str, str]:
         if not isinstance(snapshot, dict):
             return ("", "", "")
@@ -404,6 +412,10 @@ class UpdateMixin:
             raise
 
     async def _check_tmp_plugin_update(self) -> None:
+        async with self._tmp_update_check_lock:
+            await self._check_tmp_plugin_update_locked()
+
+    async def _check_tmp_plugin_update_locked(self) -> None:
         snapshot = await self._fetch_tmp_plugin_version()
         if not snapshot:
             return
@@ -462,7 +474,10 @@ class UpdateMixin:
         notified = pending.get('notified')
         if not isinstance(notified, list):
             notified = []
-        notified_set = {str(x) for x in notified if x}
+        notified_set = {
+            self._tmp_update_group_key(str(origin), self._tmp_update_groups.get(str(origin), {}))
+            for origin in notified if origin
+        }
         pending['notified'] = sorted(notified_set)
 
         if not hasattr(self.context, 'send_message'):
@@ -472,14 +487,21 @@ class UpdateMixin:
         all_groups = await self._discover_tmp_update_groups()
         excludes = self._parse_tmp_update_excludes()
 
-        targets: List[Tuple[str, Dict[str, str]]] = []
-        excluded_count = 0
-        skipped_count = 0
+        groups_by_key: Dict[str, Tuple[str, Dict[str, str]]] = {}
+        excluded_keys = set()
         for origin, info in all_groups.items():
+            group_key = self._tmp_update_group_key(origin, info)
+            groups_by_key.setdefault(group_key, (origin, info))
             if self._is_tmp_update_group_excluded(origin, info, excludes):
-                excluded_count += 1
+                excluded_keys.add(group_key)
+
+        targets: List[Tuple[str, Dict[str, str]]] = []
+        excluded_count = len(excluded_keys)
+        skipped_count = 0
+        for group_key, (origin, info) in groups_by_key.items():
+            if group_key in excluded_keys:
                 continue
-            if origin in notified_set:
+            if group_key in notified_set:
                 skipped_count += 1
                 continue
             targets.append((origin, info))
@@ -528,7 +550,7 @@ class UpdateMixin:
                 )
                 if ok is False:
                     raise RuntimeError("未找到匹配的平台适配器")
-                notified_set.add(origin)
+                notified_set.add(self._tmp_update_group_key(origin, info))
                 pending['notified'] = sorted(notified_set)
                 self._save_tmp_update_state()
                 sent += 1
