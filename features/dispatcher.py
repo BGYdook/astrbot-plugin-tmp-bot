@@ -81,7 +81,7 @@ class DispatcherMixin:
 
     async def tmphelp(self, event: AstrMessageEvent):
         """[命令: 菜单] 显示本插件的命令使用说明。"""
-        main_help = """TMP查询姬指令菜单
+        main_help = """TMP查询姬指令菜单 v2
 
 可用命令:
 1. 绑定 [TMP ID]

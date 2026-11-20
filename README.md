@@ -1,8 +1,8 @@
- # astrbot-plugin-tmp-bot
+ # astrbot-plugin-tmp-bot v2
 ![:astrbot_plugin_tmp_bot](https://count.getloli.com/@:astrbot_plugin_tmp-bot?theme=minecraft)
 
 
-欧洲卡车模拟2 TMP 查询机器人，用于查询玩家信息、位置、服务器路况及排行榜等。
+欧洲卡车模拟2 TMP 查询机器人，用于查询玩家信息、位置、服务器路况及排行榜等 v2版本。
 
 > [!WARNING]
 > 本插件将于2027年1月份检查无误后将归档仓库 新仓库维护者为[晚安](https://github.com/nulijiazaizhong)
