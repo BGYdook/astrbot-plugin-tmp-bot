@@ -1,6 +1,4 @@
  # astrbot-plugin-tmp-bot
-[![npm](https://img.shields.io/badge/npm-v1.9.6-blue)](https://github.com/BGYdook/astrbot-plugin-tmp-bot)
-
 ![:astrbot_plugin_tmp_bot](https://count.getloli.com/@:astrbot_plugin_tmp-bot?theme=minecraft)
 
 
@@ -57,6 +55,10 @@ https://docs.truckersmp.com/web-api/
 ### 非常感谢[晚安](https://github.com/nulijiazaizhong)和[鲸鱼](https://github.com/jingyu8127)提供的帮助
 
 ## 历史更新
+
+## 版本v2
+- 重构此项目 v2 (更好的优化/修复bug/修复漏洞)
+- 完善词库
 
 ## 版本v1.9.6
 - 修复 安全问题
