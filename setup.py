@@ -6,7 +6,9 @@ AstrBot-plugin-tmp-bot
 欧卡2TMP查询插件 - Python辅助脚本
 """
 
-from setuptools import setup, find_packages
+from setuptools import setup
+
+PACKAGE = "astrbot_plugin_tmp_bot"
 
 setup(
     name="astrbot-plugin-tmp-bot",
@@ -15,7 +17,9 @@ setup(
     author="BGYdook",
     author_email="",
     url="https://github.com/BGYdook/astrbot-plugin-tmp-bot",
-    packages=find_packages(),
+    packages=[PACKAGE, f"{PACKAGE}.features", f"{PACKAGE}.render"],
+    package_dir={PACKAGE: "."},
+    package_data={PACKAGE: ["_conf_schema.json", "metadata.yaml", "TruckersMP-citties-name/*.md"]},
     install_requires=[
         "aiohttp>=3.8.0",
     ],

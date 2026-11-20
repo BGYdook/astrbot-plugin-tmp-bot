@@ -24,11 +24,19 @@
 | Stuttgart (City) | 斯图加特（城市） |
 | Werlte (City) | 韦尔特（城市） |
 | Winsen (City) | 温森（城市） |
+| Hannover (City) | 汉诺威（城市） |
+| Köln (City) | 科隆（城市） |
+| München (City) | 慕尼黑（城市） |
+| Nürnberg (City) | 纽伦堡（城市） |
+| Travemünde (City) | 特拉沃明德（城市） |
+| Wertle (City) | 韦尔特（城市） |
+| Frankfurt - Prague (Location) | 法兰克福 - 布拉格（地点） |
+| Pumpkin Farm (City) | 南瓜农场（城市） |
 | United Kingdom | 联合王国 |
 | Aberdeen (City) | 阿伯丁（城市） |
 | Birmingham (City) | 伯明翰（城市） |
 | Cambridge (City) | 剑桥（城市） |
-| Cardiff (City) | 加地夫（城市） |
+| Cardiff (City) | 卡迪夫（城市） |
 | Carlisle (City) | 卡莱尔（城市） |
 | Dover (City) | 多佛（城市） |
 | Edinburgh (City) | 爱丁堡（城市） |
@@ -43,19 +51,32 @@
 | Sheffield (City) | 设菲尔德（城市） |
 | Southampton (City) | 南安普敦（城市） |
 | Swansea (City) | 斯旺西（城市） |
+| Newcastle-upon-Tyne (City) | 泰恩河畔纽卡斯尔（城市） |
+| Dover Ferry (Location) | 多佛渡轮码头（地点） |
+| Dover Train (Location) | 多佛铁路站（地点） |
+| Harwich (Location) | 哈里奇（地点） |
+| Hull (Location) | 赫尔（地点） |
+| Newcastle upon Tyne (Location) | 泰恩河畔纽卡斯尔（地点） |
 | Netherlands | 荷兰 |
 | Amsterdam (City) | 阿姆斯特丹（城市） |
 | Groningen (City) | 格罗宁根（城市） |
 | Rotterdam (City) | 鹿特丹（城市） |
+| Eindhoven (City) | 埃因霍温（城市） |
+| Europoort (Location) | 欧洲港（地点） |
+| IJmuiden (Location) | 艾默伊登（地点） |
 | Belgium | 比利时 |
 | Brussels (City) | 布鲁塞尔（城市） |
 | Liège (City) | 列日（城市） |
+| Antwerpen (City) | 安特卫普（城市） |
+| Brussel (City) | 布鲁塞尔（城市） |
+| Antwerp (City) | 安特卫普（城市） |
 | Luxembourg | 卢森堡 |
 | Luxembourg (City) | 卢森堡（城市） |
 | Switzerland | 瑞士 |
 | Bern (City) | 伯尔尼（城市） |
 | Geneva (City) | 日内瓦（城市） |
 | Zürich (City) | 苏黎世（城市） |
+| Genève (City) | 日内瓦（城市） |
 | Spain | 西班牙 |
 | A Coruña (City) | 拉科鲁尼亚（城市） |
 | Albacete (City) | 阿尔瓦塞特（城市） |
@@ -96,6 +117,8 @@
 | Vigo (City) | 比戈（城市） |
 | Villarreal (City) | 维拉里尔（城市） |
 | Zaragoza (City) | 萨拉戈萨（城市） |
+| Sevilla (City) | 塞维利亚（城市） |
+| Villareal (City) | 比利亚雷亚尔（城市） |
 | Portugal | 葡萄牙 |
 | Beja (City) | 貝雅（城市） |
 | Coimbra (City) | 科英布拉（城市） |
@@ -109,6 +132,7 @@
 | Porto (City) | 波尔图（城市） |
 | Setúbal (City) | 塞图巴尔（城市） |
 | Sines (City) | 锡尼什（城市） |
+| Lisboa (City) | 里斯本（城市） |
 | France | 法国 |
 | Ajaccio (City) | 阿雅克修（城市） |
 | Bastia (City) | 巴斯帝亚（城市） |
@@ -119,10 +143,10 @@
 | Brest (City) | 布雷斯特（城市） |
 | Calais (City) | 加来（城市） |
 | Calvi (City) | 加尔文（城市） |
-| Civaux (City) | 西沃（城市） |
+| Civaux (City) | 锡沃（城市） |
 | Clermont-Ferrand (City) | 克莱蒙费朗（城市） |
 | Dijon (City) | 第戎（城市） |
-| Golfech (City) | 戈尔费什（城市） |
+| Golfech (City) | 戈尔费克（城市） |
 | L'Île-Rousse (City) | 鲁斯岛（城市） |
 | La Rochelle (City) | 拉罗谢尔（城市） |
 | Lacq (City) | 拉克（城市） |
@@ -146,6 +170,10 @@
 | Saint-Laurent (City) | 圣人（城市） |
 | Strasbourg (City) | 斯特拉斯堡（城市） |
 | Toulouse (City) | 图卢兹（城市） |
+| Porto Vecchio (City) | 韦基奥港（城市） |
+| Calais Ferry (Location) | 加来渡轮码头（地点） |
+| Calais Train (Location) | 加来铁路站（地点） |
+| Roscoff (Location) | 罗斯科夫（地点） |
 | Italy | 意大利 |
 | Ancona (City) | 安科纳（城市） |
 | Bari (City) | 巴里（城市） |
@@ -174,11 +202,36 @@
 | Venice (City) | 威尼斯（城市） |
 | Verona (City) | 维罗纳（城市） |
 | Villa San Giovanni (City) | 维拉圣乔瓦尼（城市） |
+| Firenze (City) | 佛罗伦萨（城市） |
+| Milano (City) | 米兰（城市） |
+| Napoli (City) | 那不勒斯（城市） |
+| Roma (City) | 罗马（城市） |
+| Torino (City) | 都灵（城市） |
+| Venezia (City) | 威尼斯（城市） |
 | Norway | 挪威 |
 | Bergen (City) | 卑尔根（城市） |
 | Kristiansand (City) | 克里斯蒂安桑（城市） |
 | Oslo (City) | 奥斯陆（城市） |
 | Stavanger (City) | 斯塔万格（城市） |
+| Svolvær (City) | 斯沃尔韦尔（城市） |
+| Alta (City) | 阿尔塔（城市） |
+| Andenes (City) | 安德内斯（城市） |
+| Bodø (City) | 博德（城市） |
+| Dombås (City) | 多姆巴斯（城市） |
+| Hamar (City) | 哈马尔（城市） |
+| Honningsvåg (City) | 霍宁斯瓦格（城市） |
+| Kristiansund (City) | 克里斯蒂安松（城市） |
+| Lillehammer (City) | 利勒哈默尔（城市） |
+| Mo i Rana (City) | 穆城（城市） |
+| Narvik (City) | 纳尔维克（城市） |
+| Steinkjer (City) | 斯泰恩谢尔（城市） |
+| Tromsø (City) | 特罗姆瑟（城市） |
+| Trondheim (City) | 特隆赫姆（城市） |
+| Ålesund (City) | 奥勒松（城市） |
+| Bergen (Location) | 卑尔根（地点） |
+| Bergen - Oslo (Location) | 卑尔根 - 奥斯陆（地点） |
+| Oslo (Location) | 奥斯陆（地点） |
+| Stavanger (Location) | 斯塔万格（地点） |
 | Denmark | 丹麦 |
 | Aalborg (City) | 奥尔堡（城市） |
 | Copenhagen (City) | 哥本哈根（城市） |
@@ -186,6 +239,10 @@
 | Gedser (City) | 盖瑟（城市） |
 | Hirtshals (City) | 希茨海尔斯（城市） |
 | Odense (City) | 欧登塞（城市） |
+| Aarhus (City) | 奥胡斯（城市） |
+| Frederikshavn (City) | 腓特烈港（城市） |
+| København (City) | 哥本哈根（城市） |
+| Hirtshals (Location) | 希茨海尔斯（地点） |
 | Sweden | 瑞典 |
 | Gothenburg (City) | 哥特堡（城市） |
 | Helsingborg (City) | 赫尔辛堡（城市） |
@@ -202,6 +259,23 @@
 | Uppsala (City) | 乌普萨拉（城市） |
 | Västerås (City) | 瓦斯特罗斯（城市） |
 | Växjö (City) | 韦克舍（城市） |
+| Arvidsjaur (City) | 阿尔维斯尧尔（城市） |
+| Borlänge (City) | 博伦厄（城市） |
+| Falun (City) | 法伦（城市） |
+| Gävle (City) | 耶夫勒（城市） |
+| Göteborg (City) | 哥德堡（城市） |
+| Haparanda (City) | 哈帕兰达（城市） |
+| Kapellskär (City) | 卡佩尔斯卡尔（城市） |
+| Karesuando (City) | 卡雷苏安多（城市） |
+| Karlstad (City) | 卡尔斯塔德（城市） |
+| Kiruna (City) | 基律纳（城市） |
+| Luleå (City) | 吕勒奥（城市） |
+| Skellefteå (City) | 谢莱夫蒂亚（城市） |
+| Sundsvall (City) | 松兹瓦尔（城市） |
+| Umeå (City) | 于默奥（城市） |
+| Örnsköldsvik (City) | 奥恩舍尔兹维克（城市） |
+| Östersund (City) | 厄斯特松德（城市） |
+| Gothenburg (Location) | 哥德堡（地点） |
 | Finland | 芬兰 |
 | Helsinki (City) | 芬兰首都赫尔辛基（城市） |
 | Kotka (City) | 鷹（城市） |
@@ -212,6 +286,20 @@
 | Pori (City) | 波里（城市） |
 | Tampere (City) | 坦佩雷（城市） |
 | Turku (City) | 土尔库（城市） |
+| Ivalo (City) | 伊瓦洛（城市） |
+| Joensuu (City) | 约恩苏（城市） |
+| Jyväskylä (City) | 于韦斯屈莱（城市） |
+| Kajaani (City) | 卡亚尼（城市） |
+| Kokkola (City) | 科科拉（城市） |
+| Kuopio (City) | 库奥皮奥（城市） |
+| Kuusamo (City) | 库萨莫（城市） |
+| Lappeenranta (City) | 拉彭兰塔（城市） |
+| Mikkeli (City) | 米凯利（城市） |
+| Naantali (City) | 楠塔利（城市） |
+| Oulu (City) | 奥卢（城市） |
+| Rovaniemi (City) | 罗瓦涅米（城市） |
+| Tornio (City) | 托尔尼奥（城市） |
+| Vaasa (City) | 瓦萨（城市） |
 | Estonia | 爱沙尼亚 |
 | Kunda (City) | 昆达（城市） |
 | Narva (City) | 纳尔瓦（城市） |
@@ -226,6 +314,7 @@
 | Saint Petersburg (City) | 圣彼得堡（城市） |
 | Sosnovy Bor (City) | 索斯诺维博尔（城市） |
 | Vyborg (City) | 维堡（城市） |
+| Sosnovy-Bor (City) | 索斯诺维博尔（城市） |
 | Latvia | 拉脱维亚 |
 | Daugavpils (City) | 陶格夫皮尔斯（城市） |
 | Liepāja (City) | 利耶帕亚（城市） |
@@ -254,6 +343,8 @@
 | TruckersMP HQ (City) | TruckersMP 总部（城市） |
 | Warsaw (City) | 华沙（城市） |
 | Wrocław (City) | 弗罗茨瓦夫（城市） |
+| Białystok (City) | 比亚韦斯托克（城市） |
+| Warszawa (City) | 华沙（城市） |
 | Czech Republic | 捷克共和国 |
 | Brno (City) | 布尔诺（城市） |
 | Ostrava (City) | 俄斯特拉发（城市） |
@@ -269,6 +360,8 @@
 | Linz (City) | 林茨（城市） |
 | Salzburg (City) | 萨尔茨堡（城市） |
 | Vienna (City) | 维也纳（城市） |
+| Wien (City) | 维也纳（城市） |
+| Alpine Route (Location) | 阿尔卑斯公路（地点） |
 | Hungary | 匈牙利 |
 | Budapest (City) | 布达佩斯（城市） |
 | Debrecen (City) | 德布勒森（城市） |
@@ -302,6 +395,7 @@
 | Reșița (City) | 雷希察（城市） |
 | Târgu Mureș (City) | 特尔古穆列什（城市） |
 | Timișoara (City) | 蒂米什瓦拉（城市） |
+| București (City) | 布加勒斯特（城市） |
 | Bosnia and Herzegovina | 波斯尼亚和黑塞哥维那 |
 | Banja Luka (City) | 巴尼亚卢卡（城市） |
 | Bihać (City) | 比哈奇（城市） |
@@ -322,6 +416,7 @@
 | Podgorica (City) | 波德戈里察（城市） |
 | Kosovo | 科索沃 |
 | Pristina (City) | 普里什蒂纳（城市） |
+| Prishtinë (City) | 普里什蒂纳（城市） |
 | Bulgaria | 保加利亚 |
 | Burgas (City) | 布尔加斯（城市） |
 | Karlovo (City) | 卡尔洛沃（城市） |
@@ -346,6 +441,7 @@
 | Fier (City) | 菲尔（城市） |
 | Tirana (City) | 蒂拉纳（城市） |
 | Vlorë (City) | 发罗拉（城市） |
+| Tiranë (City) | 地拉那（城市） |
 | Greece | 希腊 |
 | Argostoli (City) | 阿尔戈斯托利（城市） |
 | Athens (City) | 雅典（城市） |
@@ -369,3 +465,22 @@
 | Post Office (City) | 邮局（城市） |
 | Town Square (City) | 城镇广场（城市） |
 | Winterland (City) | 冬日仙境（城市） |
+| Czechia | 捷克 |
+| Praha (City) | 布拉格（城市） |
+| Brackenreach | 蕨谷 |
+| Brackenreach (City) | 蕨谷（城市） |
+| Iceland | 冰岛 |
+| Akureyri (City) | 阿克雷里（城市） |
+| Blönduós (City) | 布伦迪欧斯（城市） |
+| Borgarnes (City) | 博尔加内斯（城市） |
+| Egilsstaðir (City) | 埃伊尔斯塔济（城市） |
+| Höfn í Hornafirði (City) | 霍纳峡湾的港口（城市） |
+| Hólmavík (City) | 霍尔马维克（城市） |
+| Húsavík (City) | 胡萨维克（城市） |
+| Ísafjörður (City) | 伊萨菲厄泽（城市） |
+| Keflavík (City) | 凯夫拉维克（城市） |
+| Ólafsvík (City) | 欧拉夫斯维克（城市） |
+| Patreksfjörður (City) | 帕特雷克斯菲厄泽（城市） |
+| Reykjavík (City) | 雷克雅未克（城市） |
+| Selfoss (City) | 塞尔福斯（城市） |
+| Þórshöfn (City) | 索尔斯赫本（城市） |

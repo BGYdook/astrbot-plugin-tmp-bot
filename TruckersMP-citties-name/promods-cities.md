@@ -2,9 +2,11 @@
 |---|---|
 | Åland Islands | 奥兰群岛 |
 | Mariehamn (City) | 玛丽港（城市） |
+| Geta (City) | 盖塔（城市） |
+| Godby (City) | 戈德比（城市） |
 | Austria | 奥地利 |
 | Graz (City) | 格拉茨（城市） |
-| Grödig (City) | 瓦尔加迪纳（城市） |
+| Grödig (City) | 格勒迪希（城市） |
 | Hainburg an der Donau (City) | 多瑙河畔海恩堡（城市） |
 | Innsbruck (City) | 因斯布鲁克（城市） |
 | Klagenfurt am Wörthersee (City) | 克拉根福（城市） |
@@ -12,14 +14,20 @@
 | Obsteig (City) | 奥布斯蒂格（城市） |
 | Reutte (City) | 罗伊特（城市） |
 | Salzburg (City) | 萨尔茨堡（城市） |
-| Wien (City) - Low (1) | 维也纳（城市） - 低 (1) |
+| Wien (City) | 维也纳（城市） |
+| Amstetten (City) | 阿姆施泰滕（城市） |
+| Bischofshofen (City) | 比绍夫斯霍芬（城市） |
+| Leoben (City) | 莱奥本（城市） |
+| Saalfelden (City) | 萨尔费尔登（城市） |
+| Stockerau (City) | 施托克劳（城市） |
 | Belgium | 比利时 |
-| Antwerpen (City) - Low (1) | 安特卫普（城市） - 低 (1) |
-| Bruxelles/Brussel (City) - Low (1) | 布鲁塞尔/布鲁塞尔（城市） - 低 (1) |
-| Liège (City) - Empty (0) | 列日（城市） - 空 (0) |
+| Antwerpen (City) | 安特卫普（城市） |
+| Bruxelles/Brussel (City) | 布鲁塞尔（城市） |
+| Liège (City) | 列日（城市） |
+| Bruxelles (City) | 布鲁塞尔（城市） |
 | Bosnia | 波斯尼亚 |
-| Banja Luka (City) - Empty (0) | 巴尼亚卢卡（城市） - 空 (0) |
-| Doboj (City) - Empty (0) | 多博伊（城市） - 空 (0) |
+| Banja Luka (City) | 巴尼亚卢卡（城市） |
+| Doboj (City) | 多博伊（城市） |
 | Bulgaria | 保加利亚 |
 | Blagoevgrad (City) | 布拉戈耶夫格勒（城市） |
 | Burgas (City) | 布尔加斯（城市） |
@@ -35,6 +43,9 @@
 | Varna (City) | 瓦尔纳（城市） |
 | Veliko Tarnovo (City) | 大特尔诺沃（城市） |
 | Vidin (City) | 维丁（城市） |
+| Dobrich (City) | 多布里奇（城市） |
+| Shumen (City) | 舒门（城市） |
+| Silistra (City) | 锡利斯特拉（城市） |
 | Croatia | 克罗地亚 |
 | Osijek (City) | 奥西耶克（城市） |
 | Ploče (City) | 普洛切（城市） |
@@ -46,6 +57,7 @@
 | Virovitica (City) | 维罗维蒂卡（城市） |
 | Zadar (City) | 扎达尔（城市） |
 | Zagreb (City) | 萨格勒布（城市） |
+| Dubrovnik (City) | 杜布罗夫尼克（城市） |
 | Cyprus | 塞浦路斯 |
 | Larnaca (City) | 拉纳卡（城市） |
 | Limassol (City) | 利马索尔（城市） |
@@ -74,11 +86,13 @@
 | Rødbyhavn (City) | 罗德比港（城市） |
 | Rønne (City) | 勒讷（城市） |
 | Viborg (City) | 维堡（城市） |
+| Vesterø Havn (City) | 韦斯特勒港（城市） |
 | Egypt | 埃及 |
 | Damietta (City) | 达米埃塔（城市） |
 | El Arish (City) | 阿里什（城市） |
 | Port Said (City) | 塞得港（城市） |
 | Taba (City) | 塔巴（城市） |
+| Arish (City) | 阿里什（城市） |
 | Estonia | 爱沙尼亚 |
 | Kunda (City) | 昆达（城市） |
 | Narva (City) | 纳尔瓦（城市） |
@@ -86,9 +100,15 @@
 | Pärnu (City) | 派尔努（城市） |
 | Tallinn (City) | 塔林（城市） |
 | Tartu (City) | 塔尔图（城市） |
+| Haapsalu (City) | 哈普萨卢（城市） |
+| Kuressaare (City) | 库雷萨雷（城市） |
+| Kärdla (City) | 凯尔德拉（城市） |
+| Rakvere (City) | 拉克韦雷（城市） |
+| Valga (City) | 瓦尔加（城市） |
 | Faroe Islands | 法羅群島 |
 | Klaksvík (City) | 克拉克斯维克（城市） |
 | Tórshavn (City) | 托尔斯港（城市） |
+| Klasvík (City) | 克拉克斯维克（城市） |
 | Finland | 芬兰 |
 | Alajärvi (City) | 阿拉耶尔维（城市） |
 | Helsinki (City) | 芬兰首都赫尔辛基（城市） |
@@ -116,11 +136,14 @@
 | Tampere (City) | 坦佩雷（城市） |
 | Tornio (City) | 托尔尼奥（城市） |
 | Turku (City) | 土尔库（城市） |
-| Utsjoki (City) | Utsjoki（城市） |
+| Utsjoki (City) | 乌茨约基（城市） |
 | Vaasa (City) | 瓦萨（城市） |
 | Vantaa (City) | 万塔（城市） |
 | Varkaus (City) | 盗窃（城市） |
 | Viitasaari (City) | 维塔萨里（城市） |
+| Kajaani (City) | 卡亚尼（城市） |
+| Kuusamo (City) | 库萨莫（城市） |
+| Lappeenranta (City) | 拉彭兰塔（城市） |
 | France | 法国 |
 | Ajaccio (City) | 阿雅克修（城市） |
 | Bastia (City) | 巴斯帝亚（城市） |
@@ -132,10 +155,10 @@
 | Calais (City) | 加来（城市） |
 | Calvi (City) | 加尔文（城市） |
 | Cherbourg-en-Cotentin (City) | 瑟堡昂科唐坦（城市） |
-| Civaux (City) | Civals（城市） |
+| Civaux (City) | 锡沃（城市） |
 | Clermont-Ferrand (City) | 克莱蒙费朗（城市） |
 | Dijon (City) | 第戎（城市） |
-| Golfech (City) | Golfech（城市） |
+| Golfech (City) | 戈尔费克（城市） |
 | L'Île-Rousse (City) | 鲁斯岛（城市） |
 | La Rochelle (City) | 拉罗谢尔（城市） |
 | Le Havre (City) | 勒阿弗尔（城市） |
@@ -149,7 +172,7 @@
 | Nantes (City) | 南特（城市） |
 | Nice (City) | 尼斯（城市） |
 | Orléans (City) | 奥尔良（城市） |
-| Paluel (City) | Paluel（城市） |
+| Paluel (City) | 帕吕埃勒（城市） |
 | Paris (City) | 巴黎（城市） |
 | Pau (City) | 法国 波城（城市） |
 | Porto-Vecchio (City) | 韦基奥港（城市） |
@@ -160,6 +183,19 @@
 | Saint-Laurent (City) | 圣人（城市） |
 | Strasbourg (City) | 斯特拉斯堡（城市） |
 | Toulouse (City) | 图卢兹（城市） |
+| Coquelles (City) | 科凯勒（城市） |
+| Dax (City) | 达克斯（城市） |
+| Foix (City) | 富瓦（城市） |
+| Granville (City) | 格朗维尔（城市） |
+| Lacq (City) | 拉克（城市） |
+| Mulhouse (City) | 米卢斯（城市） |
+| Mâcon (City) | 马孔（城市） |
+| Narbonne (City) | 纳博讷（城市） |
+| Perpignan (City) | 佩皮尼昂（城市） |
+| Port-Vendres (City) | 旺德尔港（城市） |
+| Saint-Avertin (City) | 圣阿韦尔坦（城市） |
+| Tours (City) | 图尔（城市） |
+| Valenciennes (City) | 瓦朗谢讷（城市） |
 | Germany | 德国 |
 | Aurach (City) | 奥拉（城市） |
 | Bad Oeynhausen (City) | 巴特奥因豪森（城市） |
@@ -177,14 +213,14 @@
 | Forst (Lausitz) (City) | 福斯特（城市） |
 | Frankfurt am Main (City) | 美因河畔法兰克福（城市） |
 | Fürth (City) | 菲尔特（城市） |
-| Halle (Saale) (City) | Halle（城市） |
+| Halle (Saale) (City) | 哈雷（城市） |
 | Hamburg (City) | 汉堡（城市） |
 | Hannover (City) | 汉诺威（城市） |
 | Heilbronn (City) | 海尔布隆（城市） |
 | Kassel (City) | 卡塞尔（城市） |
 | Kiel (City) | 基尔（城市） |
 | Koblenz (City) | 科布伦茨（城市） |
-| Köln (City) | 科伦（城市） |
+| Köln (City) | 科隆（城市） |
 | Leipzig (City) | 莱比锡（城市） |
 | Magdeburg (City) | 马格德堡（城市） |
 | Mainz (City) | 美因茨（城市） |
@@ -201,6 +237,10 @@
 | Uelzen (City) | 于尔岑（城市） |
 | Ulm (City) | 乌尔姆（城市） |
 | Wiesbaden (City) | 威斯巴登（城市） |
+| Anklam (City) | 安克拉姆（城市） |
+| Chemnitz (City) | 开姆尼茨（城市） |
+| Soltau (City) | 索尔陶（城市） |
+| Wertle (City) | 韦尔特（城市） |
 | Greece | 希腊 |
 | Alexandroupoli (City) | 亚历山德鲁波利（城市） |
 | Igoumenitsa (City) | 伊古迈尼察（城市） |
@@ -209,6 +249,19 @@
 | Ptolemaida (City) | 托勒迈达（城市） |
 | Serres (City) | 塞雷（城市） |
 | Thessaloniki (City) | 塞萨洛尼基（城市） |
+| Argostoli (City) | 阿尔戈斯托利（城市） |
+| Athens (City) | 雅典（城市） |
+| Chania (City) | 哈尼亚（城市） |
+| Chios (City) | 希俄斯岛（城市） |
+| Corinth (City) | 科林斯（城市） |
+| Heraklion (City) | 伊拉克利翁（城市） |
+| Kalamata (City) | 卡拉马塔（城市） |
+| Lamia (City) | 拉米亚（城市） |
+| Larissa (City) | 拉丽莎（城市） |
+| Mitilini (City) | 米蒂利尼（城市） |
+| Patras (City) | 帕特雷（城市） |
+| Rhodes (City) | 罗得岛（城市） |
+| Trikala (City) | 特里卡拉（城市） |
 | Hungary | 匈牙利 |
 | Budapest (City) | 布达佩斯（城市） |
 | Debrecen (City) | 德布勒森（城市） |
@@ -216,6 +269,9 @@
 | Pécs (City) | 佩奇（城市） |
 | Szeged (City) | 塞格德（城市） |
 | Vásárosnamény (City) | 瓦萨罗斯纳梅尼（城市） |
+| Kecskemét (City) | 凯奇凯梅特（城市） |
+| Szombathely (City) | 松博特海伊（城市） |
+| Sümeg (City) | 许迈格（城市） |
 | Iceland | 冰岛 |
 | Akranes (City) | 阿克拉内斯（城市） |
 | Akureyri (City) | 阿克雷里（城市） |
@@ -233,14 +289,29 @@
 | Seyðisfjörður (City) | 塞迪斯峡湾（城市） |
 | Vestmannaeyjar (City) | 韦斯特曼群岛（城市） |
 | Vík í Mýrdal (City) | 维克在默达尔（城市） |
+| Garpsdalur (City) | 加尔普斯达吕尔（城市） |
+| Norðurfjörður (City) | 诺聚尔菲厄泽（城市） |
+| Stykkishólmur (City) | 斯蒂基斯霍尔米（城市） |
+| Suðureyri (City) | 叙聚雷里（城市） |
+| Varmahlíð (City) | 瓦尔马赫利兹（城市） |
+| Vestmannaeyjabær (City) | 韦斯特曼纳群岛镇（城市） |
+| Ólafsvík (City) | 欧拉夫斯维克（城市） |
+| Þorlákshöfn (City) | 索尔拉克斯赫本（城市） |
 | Iraq | 伊拉克 |
 | Ar-Rutbah (City) | 阿尔-鲁特巴（城市） |
+| Al Nukhib (City) | 努海卜（城市） |
+| Al-Qa'im (City) | 卡伊姆（城市） |
+| Baiji (City) | 拜伊吉（城市） |
+| Haditha (City) | 哈迪塞（城市） |
+| Hit (City) | 希特（城市） |
 | Ireland | 爱尔兰 |
 | Dublin (City) | 都柏林（城市） |
 | Galway (City) | 高威（城市） |
 | Limerick (City) | 利默里克（城市） |
 | Sligo (City) | 斯利戈（城市） |
 | Wexford (City) | 韦克斯福德（城市） |
+| Kilkenny (City) | 基尔肯尼（城市） |
+| Waterford (City) | 沃特福德（城市） |
 | Isle of Man | 马恩岛 |
 | Douglas (City) | 道格拉斯（城市） |
 | Ramsey (City) | 拉姆齐（城市） |
@@ -285,7 +356,7 @@
 | Pescara (City) | 佩斯卡拉（城市） |
 | Roma (City) | 罗马（城市） |
 | Sassari (City) | 萨萨里（城市） |
-| Suzzara (City) | Suzzara（城市） |
+| Suzzara (City) | 苏扎拉（城市） |
 | Taranto (City) | 塔兰托（城市） |
 | Terni (City) | 特尔尼（城市） |
 | Torino (City) | 都灵（城市） |
@@ -293,6 +364,8 @@
 | Venezia (City) | 威尼斯（城市） |
 | Verona (City) | 维罗纳（城市） |
 | Villa San Giovanni (City) | 维拉圣乔瓦尼（城市） |
+| Siracusa (City) | 锡拉库萨（城市） |
+| Veneza (City) | 威尼斯（城市） |
 | Jersey | 赞泽 |
 | Saint Helier (City) | 圣赫利尔（城市） |
 | Trinity (City) | 三位一体（城市） |
@@ -305,6 +378,10 @@
 | Ruwaished (City) | 鲁瓦希德（城市） |
 | Safawi (City) | 萨法维王朝（城市） |
 | Zarka (City) | 扎尔卡（城市） |
+| Al-Karak (City) | 卡拉克（城市） |
+| Jerash (City) | 杰拉什（城市） |
+| Ma'an (City) | 马安（城市） |
+| Zarqa (City) | 扎尔卡（城市） |
 | Latvia | 拉脱维亚 |
 | Balvi (City) | 巴尔维（城市） |
 | Daugavpils (City) | 陶格夫皮尔斯（城市） |
@@ -315,6 +392,8 @@
 | Rīga (City) | 里加（城市） |
 | Valmiera (City) | 瓦尔米耶拉（城市） |
 | Ventspils (City) | 文茨皮尔斯（城市） |
+| Gulbene (City) | 古尔贝内（城市） |
+| Valka (City) | 瓦尔卡（城市） |
 | Lebanon | 黎巴嫩 |
 | Beirut (City) | 贝鲁特（城市） |
 | Byblos (City) | 比布鲁斯（城市） |
@@ -323,6 +402,9 @@
 | Tripoli (City) | 阿克苏地区（城市） |
 | Tyr (City) | 提爾（城市） |
 | Zahle (City) | 扎勒（城市） |
+| Baalbek (City) | 巴勒贝克（城市） |
+| Sidon (City) | 赛达（城市） |
+| Tyre (City) | 提尔（城市） |
 | Liechtenstein | 列支敦士登 |
 | Vaduz (City) | 瓦都茲（城市） |
 | Lithuania | 立陶宛 |
@@ -334,6 +416,7 @@
 | Ukmergė (City) | 乌克梅尔格（城市） |
 | Utena (City) | 尤蒂娜（城市） |
 | Vilnius (City) | 维尔纽斯（城市） |
+| Tauragė (City) | 陶拉盖（城市） |
 | Luxembourg | 卢森堡 |
 | Luxembourg (City) | 卢森堡（城市） |
 | Netherlands | 荷兰 |
@@ -351,12 +434,15 @@
 | Ohrid (City) | 奥赫里德（城市） |
 | Prilep (City) | 普里莱普（城市） |
 | Skopje (City) | 斯科普里（城市） |
-| Štip (City) | Štip（城市） |
+| Štip (City) | 什蒂普（城市） |
 | Northern Ireland | 北爱尔兰 |
 | Belfast (City) | 贝尔法斯特（城市） |
 | Larne (City) | 拉恩（城市） |
 | Lisburn (City) | 利斯本（城市） |
 | Londonderry/Derry (City) | 伦敦德里/德里（城市） |
+| Antrim (City) | 安特里姆（城市） |
+| Londonderry (City) | 伦敦德里/德里（城市） |
+| Newry (City) | 纽里（城市） |
 | Norway | 挪威 |
 | Bergen (City) | 卑尔根（城市） |
 | Dombås (City) | 多姆巴斯（城市） |
@@ -374,6 +460,24 @@
 | Stavanger (City) | 斯塔万格（城市） |
 | Tana bru (City) | 塔纳桥（城市） |
 | Trondheim (City) | 特隆赫姆（城市） |
+| Alta (City) | 阿尔塔（城市） |
+| Andenes (City) | 安德内斯（城市） |
+| Berlevåg (City) | 贝勒沃格（城市） |
+| Bodø (City) | 博德（城市） |
+| Båtsfjord (City) | 博茨菲尤尔（城市） |
+| Kjøllefjord (City) | 舍勒菲尤尔（城市） |
+| Kristiansund (City) | 克里斯蒂安松（城市） |
+| Lebesby (City) | 莱贝斯比（城市） |
+| Mehamn (City) | 梅哈姆恩（城市） |
+| Mo i Rana (City) | 穆城（城市） |
+| Narvik (City) | 纳尔维克（城市） |
+| Steinkjer (City) | 斯泰恩谢尔（城市） |
+| Svolvær (City) | 斯沃尔韦尔（城市） |
+| Tromsø (City) | 特罗姆瑟（城市） |
+| Vadsø (City) | 瓦德瑟（城市） |
+| Vardø (City) | 瓦尔德（城市） |
+| Ålesund (City) | 奥勒松（城市） |
+| Kirkenes Quarry (Location) | 希尔克内斯采石场（地点） |
 | Poland | 波兰 |
 | Augustów (City) | 奥古斯托夫（城市） |
 | Białystok (City) | 比亚韦斯托克（城市） |
@@ -412,6 +516,16 @@
 | Wrocław (City) | 弗罗茨瓦夫（城市） |
 | Zamość (City) | 扎莫什奇（城市） |
 | Zgorzelec (City) | 兹戈热莱茨（城市） |
+| Bielsko-Biała (City) | 别尔斯科-比亚瓦（城市） |
+| Chełm (City) | 海乌姆（城市） |
+| Komorniki (City) | 科莫尔尼基（城市） |
+| Krasnystaw (City) | 克拉斯内斯塔夫（城市） |
+| Luboń (City) | 卢邦（城市） |
+| Mrągowo (City) | 姆龙戈沃（城市） |
+| Piotrków Trybunalski (City) | 彼得库夫特雷布纳尔斯基（城市） |
+| Stargard (City) | 斯塔加德（城市） |
+| Wadowice (City) | 瓦多维采（城市） |
+| Września (City) | 弗热希尼亚（城市） |
 | Romania | 罗马尼亚 |
 | Bacău (City) | 巴考（城市） |
 | Brașov (City) | 布拉索夫（城市） |
@@ -430,6 +544,13 @@
 | Satu Mare (City) | 萨图马雷（城市） |
 | Târgu Mureș (City) | 特尔古穆列什（城市） |
 | Timișoara (City) | 蒂米什瓦拉（城市） |
+| București (City) | 布加勒斯特（城市） |
+| Buzău (City) | 布泽乌（城市） |
+| Focșani (City) | 福克沙尼（城市） |
+| Oradea (City) | 奥拉迪亚（城市） |
+| Sebeș (City) | 塞贝什（城市） |
+| Sibiu (City) | 锡比乌（城市） |
+| Tulcea (City) | 图尔恰（城市） |
 | Russia | 俄罗斯 |
 | Gusev (City) | 古谢夫（城市） |
 | Kaliningrad (City) | 加里宁格勒（城市） |
@@ -442,8 +563,10 @@
 | Sosnovy Bor (City) | 索斯诺维博尔（城市） |
 | Verkhnetulomsky (City) | 韦尔赫内图洛姆斯基（城市） |
 | Vyborg (City) | 维堡（城市） |
-| Saudi Arbia | 沙特阿尔比亚 |
-| Haql (City) | Haql（城市） |
+| Ershov (City) | 叶尔绍夫（城市） |
+| Zelenogradsk (City) | 泽列诺格拉茨克（城市） |
+| Saudi Arabia | 沙特阿拉伯 |
+| Haql (City) | 哈格勒（城市） |
 | Serbia | 塞尔维亚 |
 | Belgrade (City) | 贝尔格莱德（城市） |
 | Kragujevac (City) | 克拉古耶瓦茨（城市） |
@@ -459,9 +582,13 @@
 | Bratislava (City) | 布拉迪斯拉发（城市） |
 | Košice (City) | 科希策（城市） |
 | Trnava (City) | 特爾納瓦（城市） |
+| Michalovce (City) | 米哈洛夫采（城市） |
+| Zvolen (City) | 兹沃伦（城市） |
 | Slovenia | 斯洛文尼亚 |
 | Ljubljana (City) | 卢布尔雅那（城市） |
 | Maribor (City) | 马里博尔（城市） |
+| Koper (City) | 科佩尔（城市） |
+| Novo Mesto (City) | 新梅斯托（城市） |
 | Spain | 西班牙 |
 | Barcelona (City) | 巴塞罗那（城市） |
 | Bilbao (City) | 毕尔巴鄂（城市） |
@@ -469,18 +596,57 @@
 | Teruel (City) | 特鲁埃尔（城市） |
 | Valencia (City) | 巴伦西亚（城市） |
 | Zaragoza (City) | 萨拉戈萨（城市） |
+| A Coruña (City) | 拉科鲁尼亚（城市） |
+| Albacete (City) | 阿尔瓦塞特（城市） |
+| Algeciras (City) | 阿尔赫西拉斯（城市） |
+| Almaraz (City) | 阿尔马拉斯（城市） |
+| Almería (City) | 阿尔梅里亚（城市） |
+| Badajoz (City) | 巴达霍斯（城市） |
+| Bailén (City) | 拜伦（城市） |
+| Burgos (City) | 布尔戈斯（城市） |
+| Canfranc-Estación (City) | 坎夫兰克车站（城市） |
+| Ciudad Real (City) | 雷亚尔城（城市） |
+| Contreras (City) | 孔特雷拉斯（城市） |
+| Córdoba (City) | 科尔多瓦（城市） |
+| El Ejido (City) | 埃尔埃希多（城市） |
+| Gijón (City) | 希洪（城市） |
+| Granada (City) | 格拉纳达（城市） |
+| Huelva (City) | 韦尔瓦（城市） |
+| Huesca (City) | 韦斯卡（城市） |
+| Jaca (City) | 哈卡（城市） |
+| La Jonquera (City) | 拉洪克拉（城市） |
+| León (City) | 莱昂（城市） |
+| Llívia (City) | 利维亚（城市） |
+| Madrid (City) | 马德里（城市） |
+| Mengíbar (City) | 门希巴尔（城市） |
+| Murcia (City) | 穆尔西亚（城市） |
+| Málaga (City) | 马拉加（城市） |
+| Navia (City) | 船（城市） |
+| O Barco (City) | 奥巴尔科（城市） |
+| Pamplona (City) | 潘普洛纳（城市） |
+| Puertollano (City) | 普埃托利亚诺（城市） |
+| Salamanca (City) | 萨拉曼卡（城市） |
+| Santander (City) | 桑坦德（城市） |
+| Sevilla (City) | 塞维利亚（城市） |
+| Soria (City) | 索里亚（城市） |
+| Tarragona (City) | 塔拉戈纳（城市） |
+| Valladolid (City) | 巴亚多利德（城市） |
+| Vandellòs (City) | 范德洛斯（城市） |
+| Vigo (City) | 比戈（城市） |
+| Villarreal (City) | 维拉里尔（城市） |
 | Svalbard | 斯瓦尔巴群岛 |
 | Grumantbyen (City) | 格鲁曼特比恩（城市） |
 | Hiorthhamn (City) | 希尔特汉姆（城市） |
 | Longyearbyen (City) | 朗伊尔城（城市） |
+| Longyearbyen Tunnels (Location) | 朗伊尔城隧道（地点） |
 | Sweden | 瑞典 |
-| Åre (City) | Åre（城市） |
+| Åre (City) | 奥勒（城市） |
 | Gävle (City) | 耶夫勒（城市） |
 | Göteborg (City) | 哥德堡（城市） |
 | Haparanda (City) | 哈帕兰达（城市） |
 | Helsingborg (City) | 赫尔辛堡（城市） |
 | Jönköping (City) | 延雪平（城市） |
-| Kalix (City) | Kalix（城市） |
+| Kalix (City) | 卡利克斯（城市） |
 | Kalmar (City) | 卡爾馬（城市） |
 | Kapellskär (City) | 卡佩尔斯卡尔（城市） |
 | Karlskrona (City) | 卡尔斯克鲁纳（城市） |
@@ -505,15 +671,27 @@
 | Växjö (City) | 韦克舍（城市） |
 | Visby (City) | 维斯比（城市） |
 | Ystad (City) | 于斯塔德（城市） |
+| Arvidsjaur (City) | 阿尔维斯尧尔（城市） |
+| Borlänge (City) | 博伦厄（城市） |
+| Falun (City) | 法伦（城市） |
+| Karesuando (City) | 卡雷苏安多（城市） |
+| Kiruna (City) | 基律纳（城市） |
+| Luleå (City) | 吕勒奥（城市） |
+| Scania Demo Centre (Location) | 斯堪尼亚展示中心（地点） |
 | Switzerland | 瑞士 |
 | Basel (City) | 巴塞尔（城市） |
 | Bern (City) | 伯尔尼（城市） |
 | Genève (City) | 日内瓦（城市） |
 | Zürich (City) | 苏黎世（城市） |
+| Domat/Ems (City) | 多马特-埃姆斯（城市） |
+| Susten (City) | 苏斯滕（城市） |
 | Syria | 叙利亚 |
 | Damascus (City) | 大马士革（城市） |
 | Deraa (City) | 达拉（城市） |
 | Izra (City) | 伊兹拉（城市） |
+| Al-Sanamayn (City) | 萨奈迈因（城市） |
+| Latakia (City) | 拉塔基亚（城市） |
+| Tartus (City) | 塔尔图斯（城市） |
 | Turkey | 土耳其 |
 | Edirne (City) | 埃迪尔内（城市） |
 | İstanbul (City) | 伊斯坦布尔（城市） |
@@ -521,6 +699,18 @@
 | Ukraine | 乌克兰 |
 | Mukachevo (City) | 穆卡切沃（城市） |
 | Uzhhorod (City) | 乌日霍罗德（城市） |
+| Chernivtsi (City) | 切尔诺夫策（城市） |
+| Ivano-Frankivsk (City) | 伊万诺-弗兰科夫斯克（城市） |
+| Izmail (City) | 伊兹梅尔（城市） |
+| Kovel (City) | 科韦利（城市） |
+| Lutsk (City) | 卢茨克（城市） |
+| Lviv (City) | 利沃夫（城市） |
+| Novovolynsk (City) | 新沃伦斯克（城市） |
+| Odesa (City) | 敖德萨（城市） |
+| Polyanytsya (City) | 波利亚尼齐亚（城市） |
+| Sarny (City) | 萨尔内（城市） |
+| Stryi (City) | 斯特雷（城市） |
+| Varash (City) | 瓦拉什（城市） |
 | United Kingdom | 联合王国 |
 | Aberdeen (City) | 阿伯丁（城市） |
 | Aberystwyth (City) | 阿伯里斯特威斯（城市） |
@@ -530,14 +720,14 @@
 | Cairnryan (City) | 凯恩瑞安（城市） |
 | Cambridge (City) | 剑桥（城市） |
 | Canterbury (City) | 坎特伯雷（城市） |
-| Cardiff (City) | 加地夫（城市） |
+| Cardiff (City) | 卡迪夫（城市） |
 | Carlisle (City) | 卡莱尔（城市） |
 | Chelmsford (City) | 切姆斯福德（城市） |
 | Croydon (City) | 克罗伊登（城市） |
 | Dover (City) | 多佛（城市） |
 | Dumfries (City) | 邓弗里斯（城市） |
 | Edinburgh (City) | 爱丁堡（城市） |
-| Evie (City) | Evie（城市） |
+| Evie (City) | 埃维（城市） |
 | Felixstowe (City) | 费利克斯托（城市） |
 | Fishguard (City) | 菲什加德（城市） |
 | Folkestone (City) | 福克斯通（城市） |
@@ -554,7 +744,7 @@
 | London (City) | 伦敦（城市） |
 | Manchester (City) | 曼彻斯特（城市） |
 | Newcastle-upon-Tyne (City) | 泰恩河畔纽卡斯尔（城市） |
-| Oban (City) | Oban（城市） |
+| Oban (City) | 奥本（城市） |
 | Perth (City) | 珀斯（城市） |
 | Plymouth (City) | 普利茅斯（城市） |
 | Porthmadog (City) | 波特马多格（城市） |
@@ -568,6 +758,149 @@
 | Thurso (City) | 瑟索（城市） |
 | Ullapool (City) | 乌拉普尔（城市） |
 | Wick (City) | 炷（城市） |
-| Westbank | 韦斯特班克 |
+| Balivanich (City) | 巴利瓦尼赫（城市） |
+| Bodmin (City) | 博德明（城市） |
+| Exeter (City) | 埃克塞特（城市） |
+| Heysham (City) | 希舍姆（城市） |
+| Lochboisdale (City) | 洛赫博伊斯代尔（城市） |
+| Newcastle upon Tyne (City) | 泰恩河畔纽卡斯尔（城市） |
+| Newport (City) | 纽波特（城市） |
+| Norwich (City) | 诺里奇（城市） |
+| Westbank | 约旦河西岸 |
 | Jericho (City) | 耶利哥（城市） |
 | Ramallah (City) | 拉马拉（城市） |
+| Georgia | 格鲁吉亚 |
+| Akhaltsikhe (City) | 阿哈尔齐赫（城市） |
+| Batumi (City) | 巴统（城市） |
+| Borjomi (City) | 博尔若米（城市） |
+| Gori (City) | 哥里（城市） |
+| Khashuri (City) | 哈舒里（城市） |
+| Kutaisi (City) | 库塔伊西（城市） |
+| Marneuli (City) | 马尔内乌利（城市） |
+| Poti (City) | 波季（城市） |
+| Rustavi (City) | 鲁斯塔维（城市） |
+| Tbilisi (City) | 第比利斯（城市） |
+| Telavi (City) | 泰拉维（城市） |
+| Zeni (City) | 泽尼（城市） |
+| Kazakhstan | 哈萨克斯坦 |
+| Akshat (City) | 阿克沙特（城市） |
+| Aktau (City) | 阿克套（城市） |
+| Aktobe (City) | 阿克托别（城市） |
+| Alga (City) | 阿尔加（城市） |
+| Atyrau (City) | 阿特劳（城市） |
+| Beyneu (City) | 别伊涅乌（城市） |
+| Dossor (City) | 多索尔（城市） |
+| Inderborsky (City) | 因杰尔博尔斯基（城市） |
+| Kandyagash (City) | 坎德亚加什（城市） |
+| Karabalyk (City) | 卡拉巴雷克（城市） |
+| Karabutak (City) | 卡拉布塔克（城市） |
+| Kendirli (City) | 肯德尔利（城市） |
+| Khromtau (City) | 赫罗姆套（城市） |
+| Kobda (City) | 科布达（城市） |
+| Kostanay (City) | 科斯塔奈（城市） |
+| Kulsary (City) | 库尔萨雷（城市） |
+| Kuryk (City) | 库雷克（城市） |
+| Lisakovsk (City) | 利萨科夫斯克（城市） |
+| Makat (City) | 马卡特（城市） |
+| Mangystau (City) | 曼格斯套（城市） |
+| Martuk (City) | 马尔图克（城市） |
+| Mukur (City) | 穆库尔（城市） |
+| Oral (City) | 乌拉尔斯克（城市） |
+| Rudny (City) | 鲁德内（城市） |
+| Say-Otes (City) | 赛奥捷斯（城市） |
+| Shetpe (City) | 舍特佩（城市） |
+| Shubarkuduk (City) | 舒巴尔库杜克（城市） |
+| Temir (City) | 铁米尔（城市） |
+| Temirbek Zhurgenov (City) | 铁米尔别克·茹尔格诺夫（城市） |
+| Tobol (City) | 托博尔（城市） |
+| Turysh (City) | 图雷什（城市） |
+| Zatobolsk (City) | 扎托博尔斯克（城市） |
+| Zhanaozen (City) | 扎瑙津（城市） |
+| Zhympity (City) | 日姆佩特（城市） |
+| Azerbaijan | 阿塞拜疆 |
+| Alat (City) | 阿拉特（城市） |
+| Hajigabul (City) | 哈吉加布尔（城市） |
+| Kurdamir (City) | 库尔达米尔（城市） |
+| Mingachevir (City) | 明盖恰乌尔（城市） |
+| Yevlakh (City) | 叶夫拉赫（城市） |
+| Zaqatala (City) | 扎卡塔拉（城市） |
+| Andorra | 安道尔 |
+| Andorra la Vella (City) | 安道尔城（城市） |
+| Türkiye | 土耳其 |
+| Antakya (City) | 安塔基亚（城市） |
+| Iskenderun (City) | 伊斯肯德伦（城市） |
+| Keşan (City) | 凯尚（城市） |
+| Mersin (City) | 梅尔辛（城市） |
+| Osmaniye (City) | 奥斯曼尼耶（城市） |
+| Silifke (City) | 锡利夫凯（城市） |
+| Türkgözü (City) | 蒂尔克格聚（城市） |
+| Çorlu (City) | 乔尔卢（城市） |
+| Montenegro | 黑山共和国 |
+| Bar (City) | 巴尔（城市） |
+| Bijelo Polje (City) | 比耶洛波列（城市） |
+| Nikšić (City) | 尼克希奇（城市） |
+| Podgorica (City) | 波德戈里察（城市） |
+| Portugal | 葡萄牙 |
+| Beja (City) | 貝雅（城市） |
+| Coimbra (City) | 科英布拉（城市） |
+| Cortiçadas de Lavre (City) | 拉夫尔插枝（城市） |
+| Faro (City) | 法鲁（城市） |
+| Guarda (City) | 瓜达（城市） |
+| Lisboa (City) | 里斯本（城市） |
+| Olhão (City) | 奧良（城市） |
+| Ponte de Sor (City) | 庞特迪索尔（城市） |
+| Porto (City) | 波尔图（城市） |
+| Setúbal (City) | 塞图巴尔（城市） |
+| Sines (City) | 锡尼什（城市） |
+| Évora (City) | 埃武拉（城市） |
+| West Bank | 约旦河西岸 |
+| Bethlehem (City) | 伯利恒（城市） |
+| Bosnia and Herzegovina | 波斯尼亚和黑塞哥维那 |
+| Bihać (City) | 比哈奇（城市） |
+| Karakaj (City) | 卡拉卡伊（城市） |
+| Mostar (City) | 莫斯塔尔（城市） |
+| Sarajevo (City) | 萨拉热窝（城市） |
+| Tuzla (City) | 图兹拉（城市） |
+| Zenica (City) | 泽尼察（城市） |
+| Moldova | 摩尔多瓦 |
+| Bălți (City) | 伯尔兹（城市） |
+| Chișinău (City) | 基希讷乌（城市） |
+| Giurgiulești (City) | 久尔久列什蒂（城市） |
+| Albania | 阿尔巴尼亚 |
+| Durrës (City) | 都拉斯（城市） |
+| Fier (City) | 菲尔（城市） |
+| Tiranë (City) | 地拉那（城市） |
+| Vlorë (City) | 发罗拉（城市） |
+| Tunisia | 突尼斯 |
+| Enfidha (City) | 恩菲达（城市） |
+| Tunis (City) | 突尼斯市（城市） |
+| Utique (City) | 乌提卡（城市） |
+| Turkmenistan | 土库曼斯坦 |
+| Garabogaz (City) | 加拉博加兹（城市） |
+| Gibraltar | 直布罗陀 |
+| Gibraltar (City) | 直布罗陀（城市） |
+| Malta | 马耳他 |
+| Il-Belt Valletta (City) | 瓦莱塔（城市） |
+| Uzbekistan | 乌兹别克斯坦 |
+| Jasliq (City) | 贾斯雷克（城市） |
+| Karakalpakstan (City) | 卡拉卡尔帕克斯坦（城市） |
+| Qirqqiz (City) | 基尔克兹（城市） |
+| Morocco | 摩洛哥 |
+| Ksar El Kbir (City) | 盖斯尔凯比尔（城市） |
+| Kénitra (City) | 盖尼特拉（城市） |
+| Larache (City) | 拉腊什（城市） |
+| Port Med Tangier (City) | 丹吉尔地中海港（城市） |
+| Rabat (City) | 拉巴特（城市） |
+| Salé (City) | 萨累（城市） |
+| Tangier (City) | 丹吉尔（城市） |
+| Tétouan (City) | 得土安（城市） |
+| Monaco | 摩纳哥 |
+| Monaco (City) | 摩纳哥（城市） |
+| Greenland | 格陵兰 |
+| Nuuk (City) | 努克（城市） |
+| Kosovo | 科索沃 |
+| Prishtinë (City) | 普里什蒂纳（城市） |
+| Guernsey | 根西岛 |
+| Saint Peter Port (City) | 圣彼得港（城市） |
+| Armenia | 亚美尼亚 |
+| Vanadzor (City) | 瓦纳佐尔（城市） |
